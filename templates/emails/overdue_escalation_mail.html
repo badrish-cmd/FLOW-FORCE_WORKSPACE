@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1f2937; background-color: #f3f4f6; margin: 0; padding: 0; }
+        .wrapper { width: 100%; background-color: #f3f4f6; padding: 40px 0; }
+        .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); }
+        .header { background: linear-gradient(135deg, #be123c, #9f1239); color: #ffffff; padding: 32px 24px; text-align: center; }
+        .header h1 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.025em; }
+        .content { padding: 32px 24px; }
+        .greeting { font-size: 18px; font-weight: 600; color: #111827; margin-top: 0; margin-bottom: 16px; }
+        .intro { font-size: 16px; color: #4b5563; margin-bottom: 24px; }
+        .section-title { font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280; margin-bottom: 12px; border-bottom: 2px solid #e5e7eb; padding-bottom: 6px; }
+        .details-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; background-color: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb; }
+        .details-table td { padding: 12px 16px; font-size: 15px; border-bottom: 1px solid #e5e7eb; }
+        .details-table tr:last-child td { border-bottom: none; }
+        .details-label { font-weight: 600; color: #4b5563; width: 35%; }
+        .details-value { color: #111827; }
+        .escalation-history { background-color: #fff1f2; border: 1px solid #fecdd3; border-radius: 8px; padding: 16px; margin-bottom: 28px; }
+        .history-title { font-weight: 700; font-size: 14px; color: #9f1239; margin-top: 0; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+        .history-item { font-size: 14px; color: #4c0519; margin-bottom: 6px; }
+        .history-item:last-child { margin-bottom: 0; }
+        .history-checked { color: #be123c; font-weight: bold; margin-right: 4px; }
+        .cta-container { text-align: center; margin: 32px 0; }
+        .button { background-color: #be123c; color: #ffffff !important; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; display: inline-block; transition: background-color 0.2s ease; box-shadow: 0 4px 6px -1px rgba(190, 18, 60, 0.2); }
+        .button:hover { background-color: #9f1239; }
+        .outro { font-size: 15px; color: #4b5563; margin-bottom: 24px; }
+        .footer { text-align: center; padding: 24px; border-top: 1px solid #e5e7eb; background-color: #fafafa; }
+        .footer-logo { font-size: 16px; font-weight: 700; color: #374151; margin-bottom: 6px; }
+        .footer-text { font-size: 12px; color: #9ca3af; margin: 0; }
+    </style>
+</head>
+<body>
+    <div class="wrapper">
+        <div class="container">
+            <div class="header">
+                <h1>Task Escalation</h1>
+            </div>
+            
+            <div class="content">
+                <p class="greeting">Dear {{ recipient_name }},</p>
+                <p class="intro">A task is <strong>{{ days }}</strong> days overdue and requires immediate attention.</p>
+                
+                <div class="section-title">━━━━ TASK DETAILS ━━━━</div>
+                <table class="details-table">
+                    <tr>
+                        <td class="details-label">Task Name</td>
+                        <td class="details-value">{{ task_name }}</td>
+                    </tr>
+                    <tr>
+                        <td class="details-label">Due Date</td>
+                        <td class="details-value">{{ due_date }}</td>
+                    </tr>
+                    <tr>
+                        <td class="details-label">Days Overdue</td>
+                        <td class="details-value"><strong>{{ days }}</strong></td>
+                    </tr>
+                    <tr>
+                        <td class="details-label">Employee</td>
+                        <td class="details-value">{{ employee_name }}</td>
+                    </tr>
+                    <tr>
+                        <td class="details-label">Department</td>
+                        <td class="details-value">{{ department_name }}</td>
+                    </tr>
+                    <tr>
+                        <td class="details-label">Status</td>
+                        <td class="details-value">{{ status }}</td>
+                    </tr>
+                    <tr>
+                        <td class="details-label">Priority</td>
+                        <td class="details-value">{{ priority }}</td>
+                    </tr>
+                </table>
+                
+                <div class="escalation-history">
+                    <div class="history-title">Escalation History</div>
+                    <div class="history-item"><span class="history-checked">✓</span> 1 day: Notified Employee</div>
+                    <div class="history-item"><span class="history-checked">{% if days >= 3 %}✓{% else %}•{% endif %}</span> 3 days: Notified Department Admin</div>
+                    <div class="history-item"><span class="history-checked">{% if days >= 7 %}✓{% else %}•{% endif %}</span> 7 days: Notified Admin</div>
+                    <div class="history-item"><span class="history-checked">{% if days >= 14 %}✓{% else %}•{% endif %}</span> 14 days: Notified Super Admin</div>
+                </div>
+                
+                <div class="cta-container">
+                    <a href="{{ task_link }}" class="button">View Task</a>
+                </div>
+                
+                <p class="outro">Please take immediate action.</p>
+            </div>
+            
+            <div class="footer">
+                <div class="footer-logo">Flow-Force Workspace</div>
+                <p class="footer-text">This is an automated notification. Please do not reply directly to this email.</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

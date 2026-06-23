@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} - Flow-Force Workspace{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="breadcrumb-nav">
+    <ol class="breadcrumb mb-0">
+        <li class="breadcrumb-item">
+            <a href="/" class="text-decoration-none"><i class="fas fa-home"></i> Dashboard</a>
+        </li>
+        <li class="breadcrumb-item">
+            <a href="/employees/" class="text-decoration-none"><i class="fas fa-users"></i> Employees</a>
+        </li>
+        {% if employee %}
+            <li class="breadcrumb-item">
+                <a href="{% url 'employee_detail' employee.id %}" class="text-decoration-none">{{ employee.full_name }}</a>
+            </li>
+            <li class="breadcrumb-item active" aria-current="page">
+                Edit
+            </li>
+        {% else %}
+            <li class="breadcrumb-item active" aria-current="page">
+                Add Employee
+            </li>
+        {% endif %}
+    </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-light border-bottom">
+                    <h5 class="mb-0 fw-bold text-dark">{{ page_title }}</h5>
+                </div>
+                <div class="card-body">
+                    <form method="post" class="employee-form">
+                        {% csrf_token %}
+
+                        {% if form.non_field_errors %}
+                            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                                <strong>Error:</strong>
+                                {% for error in form.non_field_errors %}
+                                    <div>{{ error }}</div>
+                                {% endfor %}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        {% endif %}
+
+                        <!-- Basic Information Section -->
+                        <div class="border-bottom pb-4 mb-4">
+                            <h6 class="fw-bold mb-3 text-secondary">Basic Information</h6>
+
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">{{ form.full_name.label }}</label>
+                                {{ form.full_name }}
+                                {% if form.full_name.errors %}
+                                    <div class="alert alert-danger alert-sm mt-1 p-2 small">
+                                        {% for error in form.full_name.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                                {% if form.full_name.help_text %}
+                                    <small class="form-text text-muted">{{ form.full_name.help_text|safe }}</small>
+                                {% endif %}
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">{{ form.email.label }}</label>
+                                {{ form.email }}
+                                {% if form.email.errors %}
+                                    <div class="alert alert-danger alert-sm mt-1 p-2 small">
+                                        {% for error in form.email.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                                {% if form.email.help_text %}
+                                    <small class="form-text text-muted">{{ form.email.help_text|safe }}</small>
+                                {% endif %}
+                            </div>
+
+                        </div>
+
+                        <!-- Role & Status Section -->
+                        <div class="border-bottom pb-4 mb-4">
+                            <h6 class="fw-bold mb-3 text-secondary">Role & Status</h6>
+
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">{{ form.role.label }}</label>
+                                {{ form.role }}
+                                {% if form.role.errors %}
+                                    <div class="alert alert-danger alert-sm mt-1 p-2 small">
+                                        {% for error in form.role.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                                {% if form.role.help_text %}
+                                    <small class="form-text text-muted">{{ form.role.help_text|safe }}</small>
+                                {% endif %}
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">{{ form.status.label }}</label>
+                                {{ form.status }}
+                                {% if form.status.errors %}
+                                    <div class="alert alert-danger alert-sm mt-1 p-2 small">
+                                        {% for error in form.status.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                                {% if form.status.help_text %}
+                                    <small class="form-text text-muted">{{ form.status.help_text|safe }}</small>
+                                {% endif %}
+                            </div>
+
+                            <div class="mb-3">
+                                <div class="form-check form-switch">
+                                    {{ form.is_active }}
+                                    <label class="form-check-label fw-bold" for="id_is_active">{{ form.is_active.label }}</label>
+                                </div>
+                                {% if form.is_active.errors %}
+                                    <div class="alert alert-danger alert-sm mt-1 p-2 small">
+                                        {% for error in form.is_active.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                                {% if form.is_active.help_text %}
+                                    <small class="form-text text-muted">{{ form.is_active.help_text|safe }}</small>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <!-- Password Section -->
+                        {% if form.password %}
+                        <div class="border-bottom pb-4 mb-4">
+                            <h6 class="fw-bold mb-3 text-secondary">Password</h6>
+
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">{{ form.password.label }}</label>
+                                {{ form.password }}
+                                {% if form.password.errors %}
+                                    <div class="alert alert-danger alert-sm mt-1 p-2 small">
+                                        {% for error in form.password.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                                {% if form.password.help_text %}
+                                    <small class="form-text text-muted">{{ form.password.help_text|safe }}</small>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Form Actions -->
+                        <div class="pt-3 d-flex gap-2">
+                            <button type="submit" class="btn btn-primary btn-sm">
+                                <i class="fas fa-check-circle me-1"></i> {{ submit_label }}
+                            </button>
+                            <a href="{% url 'employee_list' %}" class="btn btn-secondary btn-sm">
+                                <i class="fas fa-times-circle me-1"></i> Cancel
+                            </a>
+                            {% if employee %}
+                                <a href="{% url 'employee_detail' employee.id %}" class="btn btn-ghost btn-sm">
+                                    <i class="fas fa-eye me-1"></i> View Profile
+                                </a>
+                            {% endif %}
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

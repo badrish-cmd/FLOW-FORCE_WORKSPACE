@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+
+{% block title %}Login History - {{ employee.full_name }} - Flow-Force Workspace{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="breadcrumb-nav">
+    <ol class="breadcrumb mb-0">
+        <li class="breadcrumb-item">
+            <a href="/" class="text-decoration-none"><i class="fas fa-home"></i> Dashboard</a>
+        </li>
+        <li class="breadcrumb-item">
+            <a href="/employees/" class="text-decoration-none"><i class="fas fa-users"></i> Employees</a>
+        </li>
+        <li class="breadcrumb-item">
+            <a href="{% url 'employee_detail' employee.id %}" class="text-decoration-none">{{ employee.full_name }}</a>
+        </li>
+        <li class="breadcrumb-item active" aria-current="page">
+            Login History
+        </li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="card shadow-sm mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center bg-light border-bottom">
+            <div>
+                <h5 class="mb-0 fw-bold text-dark">Login Session History</h5>
+                <small class="text-muted">Employee: <strong>{{ employee.full_name }}</strong></small>
+            </div>
+            <a href="{% url 'employee_detail' employee.id %}" class="btn btn-sm btn-ghost">
+                <i class="fas fa-arrow-left me-1"></i> Back to Employee
+            </a>
+        </div>
+        <div class="card-body">
+            <!-- Filter -->
+            <div class="mb-4">
+                <form method="get" class="row g-2 align-items-end">
+                    <div class="col-12 col-md-6 col-lg-4">
+                        <label class="form-label small fw-bold">Session Status</label>
+                        <select name="status" class="form-select">
+                            <option value="">All Sessions</option>
+                            <option value="active" {% if session_status == "active" %}selected{% endif %}>Active Sessions</option>
+                            <option value="inactive" {% if session_status == "inactive" %}selected{% endif %}>Closed Sessions</option>
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-2">
+                        <button type="submit" class="btn btn-primary btn-sm w-100" style="height: 38px;">Filter</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Login History Table -->
+            {% if login_logs %}
+                <div class="table-responsive mb-4">
+                    <table class="table table-hover align-middle">
+                        <thead>
+                            <tr>
+                                <th>Login Time</th>
+                                <th>Logout Time</th>
+                                <th>Duration</th>
+                                <th>IP Address</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for session in login_logs %}
+                                <tr>
+                                    <td>
+                                        <strong>{{ session.login_at|date:"M j, Y H:i:s" }}</strong>
+                                    </td>
+                                    <td>
+                                        {% if session.logout_at %}
+                                            {{ session.logout_at|date:"M j, Y H:i:s" }}
+                                        {% else %}
+                                            <span class="badge bg-primary text-white">In Progress</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if session.session_duration %}
+                                            <span class="badge bg-info text-dark">{{ session.session_duration }} min</span>
+                                        {% else %}
+                                            <span class="text-muted">—</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <code>{{ session.ip_address|default:"Unknown" }}</code>
+                                    </td>
+                                    <td>
+                                        {% if session.is_active %}
+                                            <span class="badge bg-success">Active</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">Closed</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Summary Statistics -->
+                <div class="row g-3 mb-4">
+                    <div class="col-md-3">
+                        <div class="card bg-light border-0 shadow-sm text-center">
+                            <div class="card-body">
+                                <h6 class="card-title text-muted small fw-bold">Total Sessions</h6>
+                                <h4 class="card-text fw-bold text-dark">{{ paginator.count }}</h4>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-light border-0 shadow-sm text-center">
+                            <div class="card-body">
+                                <h6 class="card-title text-muted small fw-bold">Active Sessions</h6>
+                                <h4 class="card-text fw-bold text-success">{{ active_session_count|default:"0" }}</h4>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pagination -->
+                {% if paginator.num_pages > 1 %}
+                <nav class="d-flex justify-content-between align-items-center mt-4">
+                    <small class="text-muted">
+                        Showing {{ login_logs.start_index }}-{{ login_logs.end_index }} of {{ paginator.count }}
+                    </small>
+                    <ul class="pagination mb-0">
+                        {% if login_logs.has_previous %}
+                            <li class="page-item">
+                                <a class="page-link" href="?page=1&status={{ session_status }}">First</a>
+                            </li>
+                            <li class="page-item">
+                                <a class="page-link" href="?page={{ login_logs.previous_page_number }}&status={{ session_status }}">Previous</a>
+                            </li>
+                        {% else %}
+                            <li class="page-item disabled"><span class="page-link">First</span></li>
+                            <li class="page-item disabled"><span class="page-link">Previous</span></li>
+                        {% endif %}
+
+                        {% for num in paginator.page_range %}
+                            {% if login_logs.number == num %}
+                                <li class="page-item active"><span class="page-link">{{ num }}</span></li>
+                            {% elif num > login_logs.number|add:'-3' and num < login_logs.number|add:'3' %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ num }}&status={{ session_status }}">{{ num }}</a>
+                                </li>
+                            {% endif %}
+                        {% endfor %}
+
+                        {% if login_logs.has_next %}
+                            <li class="page-item">
+                                <a class="page-link" href="?page={{ login_logs.next_page_number }}&status={{ session_status }}">Next</a>
+                            </li>
+                            <li class="page-item">
+                                <a class="page-link" href="?page={{ paginator.num_pages }}&status={{ session_status }}">Last</a>
+                            </li>
+                        {% else %}
+                            <li class="page-item disabled"><span class="page-link">Next</span></li>
+                            <li class="page-item disabled"><span class="page-link">Last</span></li>
+                        {% endif %}
+                    </ul>
+                </nav>
+                {% endif %}
+            {% else %}
+                <div class="alert alert-info text-center py-4">
+                    <i class="fas fa-info-circle fa-2x mb-2 text-primary"></i>
+                    <p class="mb-0">No login history available for this employee.</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

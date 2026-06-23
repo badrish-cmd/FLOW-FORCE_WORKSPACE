@@ -1,0 +1,383 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{% if limited_view %}Co-workers{% else %}Employees{% endif %} - Flow-Force Workspace{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="breadcrumb-nav">
+    <ol class="breadcrumb mb-0">
+        <li class="breadcrumb-item">
+            <a href="/" class="text-decoration-none"><i class="fas fa-home"></i> Dashboard</a>
+        </li>
+        <li class="breadcrumb-item active" aria-current="page">
+            <i class="fas fa-users"></i> {% if limited_view %}Co-workers{% else %}Employees{% endif %}
+        </li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block header_actions %}
+{% if user.role in 'SUPER_ADMIN,ADMIN,DEPARTMENT_ADMIN' %}
+<a href="{% url 'employee_create' %}" class="btn btn-primary btn-sm">
+    <i class="fas fa-plus"></i> Add Employee
+</a>
+{% endif %}
+{{ block.super }}
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Page Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="h3 mb-2">{% if limited_view %}Co-workers{% else %}Employee Directory{% endif %}</h1>
+            <p class="text-muted">{% if limited_view %}View your team members and colleagues{% else %}Manage and organize your team members{% endif %}</p>
+        </div>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="row mb-4">
+        <div class="col-md-4 col-sm-6 mb-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h6 class="text-muted mb-1">Total Employees</h6>
+                    <h2 class="mb-0">{{ stats.total_employees }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 col-sm-6 mb-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h6 class="text-muted mb-1">Active</h6>
+                    <h2 class="mb-0 text-success">{{ stats.active_employees }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 col-sm-6 mb-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h6 class="text-muted mb-1">Pending Approval</h6>
+                    <h2 class="mb-0 text-warning">{{ stats.pending_approvals }}</h2>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search & Filters -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <form method="GET" class="row g-3">
+                <div class="{% if limited_view %}col-md-12{% else %}col-md-6{% endif %}">
+                    <div class="input-group">
+                        <span class="input-group-text">
+                            <i class="fas fa-search"></i>
+                        </span>
+                        <input 
+                            type="text" 
+                            class="form-control" 
+                            name="search" 
+                            placeholder="Search by name or email..."
+                            value="{{ filters.search }}"
+                        >
+                    </div>
+                </div>
+
+                {% if not limited_view %}
+                <div class="col-md-2">
+                    <select class="form-select" name="role">
+                        <option value="">All Roles</option>
+                        {% for value, label in roles %}
+                        <option value="{{ value }}" {% if filters.role == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-md-2">
+                    <select class="form-select" name="status">
+                        <option value="">All Approval Status</option>
+                        {% for value, label in statuses %}
+                        <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-md-2">
+                    <select class="form-select" name="active">
+                        <option value="">All Activation Status</option>
+                        <option value="yes" {% if filters.active == 'yes' %}selected{% endif %}>Active</option>
+                        <option value="no" {% if filters.active == 'no' %}selected{% endif %}>Inactive</option>
+                    </select>
+                </div>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+
+    <!-- Employees Table -->
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>
+                            <a href="?sort_by={% if filters.sort_by == 'full_name' %}-full_name{% else %}full_name{% endif %}{% for k, v in filters.items %}{% if k != 'sort_by' and v %}&{{ k }}={{ v }}{% endif %}{% endfor %}" class="text-decoration-none text-dark d-inline-flex align-items-center gap-1">
+                                Name
+                                <i class="fas {% if filters.sort_by == 'full_name' %}fa-sort-up{% elif filters.sort_by == '-full_name' %}fa-sort-down{% else %}fa-sort text-muted{% endif %}"></i>
+                            </a>
+                        </th>
+                        <th>
+                            <a href="?sort_by={% if filters.sort_by == 'email' %}-email{% else %}email{% endif %}{% for k, v in filters.items %}{% if k != 'sort_by' and v %}&{{ k }}={{ v }}{% endif %}{% endfor %}" class="text-decoration-none text-dark d-inline-flex align-items-center gap-1">
+                                Email
+                                <i class="fas {% if filters.sort_by == 'email' %}fa-sort-up{% elif filters.sort_by == '-email' %}fa-sort-down{% else %}fa-sort text-muted{% endif %}"></i>
+                            </a>
+                        </th>
+                        {% if not limited_view %}
+                        <th>
+                            <a href="?sort_by={% if filters.sort_by == 'role' %}-role{% else %}role{% endif %}{% for k, v in filters.items %}{% if k != 'sort_by' and v %}&{{ k }}={{ v }}{% endif %}{% endfor %}" class="text-decoration-none text-dark d-inline-flex align-items-center gap-1">
+                                Role
+                                <i class="fas {% if filters.sort_by == 'role' %}fa-sort-up{% elif filters.sort_by == '-role' %}fa-sort-down{% else %}fa-sort text-muted{% endif %}"></i>
+                            </a>
+                        </th>
+                        <th>
+                            <a href="?sort_by={% if filters.sort_by == 'status' %}-status{% else %}status{% endif %}{% for k, v in filters.items %}{% if k != 'sort_by' and v %}&{{ k }}={{ v }}{% endif %}{% endfor %}" class="text-decoration-none text-dark d-inline-flex align-items-center gap-1">
+                                Status
+                                <i class="fas {% if filters.sort_by == 'status' %}fa-sort-up{% elif filters.sort_by == '-status' %}fa-sort-down{% else %}fa-sort text-muted{% endif %}"></i>
+                            </a>
+                        </th>
+                        <th>
+                            <a href="?sort_by={% if filters.sort_by == 'is_active' %}-is_active{% else %}is_active{% endif %}{% for k, v in filters.items %}{% if k != 'sort_by' and v %}&{{ k }}={{ v }}{% endif %}{% endfor %}" class="text-decoration-none text-dark d-inline-flex align-items-center gap-1">
+                                Active
+                                <i class="fas {% if filters.sort_by == 'is_active' %}fa-sort-up{% elif filters.sort_by == '-is_active' %}fa-sort-down{% else %}fa-sort text-muted{% endif %}"></i>
+                            </a>
+                        </th>
+                        <th>
+                            <a href="?sort_by={% if filters.sort_by == 'created_at' %}-created_at{% else %}created_at{% endif %}{% for k, v in filters.items %}{% if k != 'sort_by' and v %}&{{ k }}={{ v }}{% endif %}{% endfor %}" class="text-decoration-none text-dark d-inline-flex align-items-center gap-1">
+                                Joined
+                                <i class="fas {% if filters.sort_by == 'created_at' %}fa-sort-up{% elif filters.sort_by == '-created_at' %}fa-sort-down{% else %}fa-sort text-muted{% endif %}"></i>
+                            </a>
+                        </th>
+                        <th>Actions</th>
+                        {% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for employee in employees %}
+                    <tr {% if not limited_view %}data-href="{% url 'employee_detail' employee.id %}"{% endif %}>
+                        <td>
+                            <div class="d-flex align-items-center gap-2">
+                                <div class="avatar-sm">
+                                    <img src="https://ui-avatars.com/api/?name={{ employee.full_name }}&background=0D8ABC&color=fff" 
+                                         alt="{{ employee.full_name }}" 
+                                         class="rounded-circle"
+                                         style="width: 32px; height: 32px;">
+                                </div>
+                                <div>
+                                    <strong>{{ employee.full_name }}</strong>
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            <small>{{ employee.email }}</small>
+                        </td>
+                        {% if not limited_view %}
+                        <td>
+                            <span class="badge bg-primary">{{ employee.get_role_display }}</span>
+                        </td>
+                        <td>
+                            {% if employee.status == 'APPROVED' %}
+                                <span class="badge bg-success">Approved</span>
+                            {% elif employee.status == 'PENDING' %}
+                                <span class="badge bg-warning">Pending</span>
+                            {% else %}
+                                <span class="badge bg-danger">Rejected</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if employee.is_active %}
+                                <span class="badge bg-success">
+                                    <i class="fas fa-check"></i> Active
+                                </span>
+                            {% else %}
+                                <span class="badge bg-secondary">
+                                    <i class="fas fa-times"></i> Inactive
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <small class="text-muted">
+                                {{ employee.created_at|date:"M d, Y" }}
+                            </small>
+                        </td>
+                        <td onclick="event.stopPropagation()">
+                            <div class="btn-group btn-group-sm">
+                                <a href="{% url 'employee_detail' employee.id %}" 
+                                   class="btn btn-ghost" 
+                                   title="View">
+                                    <i class="fas fa-eye"></i>
+                                </a>
+                                <a href="{% url 'employee_edit' employee.id %}" 
+                                   class="btn btn-ghost" 
+                                   title="Edit">
+                                    <i class="fas fa-edit"></i>
+                                </a>
+                                <button type="button" 
+                                        class="btn btn-ghost" 
+                                        data-bs-toggle="dropdown">
+                                    <i class="fas fa-ellipsis-v"></i>
+                                </button>
+                                <ul class="dropdown-menu">
+                                    {% if employee.is_active %}
+                                    {% if employee.id != user.id %}
+                                    <li>
+                                        <form method="POST" action="{% url 'employee_deactivate' employee.id %}" onsubmit="return confirm('Deactivate {{ employee.full_name }}?')">
+                                            {% csrf_token %}
+                                            <button type="submit" class="dropdown-item">
+                                                <i class="fas fa-ban me-1 text-danger"></i> Deactivate
+                                            </button>
+                                        </form>
+                                    </li>
+                                    {% endif %}
+                                    {% else %}
+                                    <li>
+                                        <form method="POST" action="{% url 'employee_activate' employee.id %}">
+                                            {% csrf_token %}
+                                            <button type="submit" class="dropdown-item">
+                                                <i class="fas fa-check me-1 text-success"></i> Activate
+                                            </button>
+                                        </form>
+                                    </li>
+                                    {% if employee.id != user.id %}
+                                    <li>
+                                        <form method="POST" action="{% url 'employee_delete' employee.id %}" onsubmit="return confirm('Permanently delete {{ employee.full_name }}? This action cannot be undone.')">
+                                            {% csrf_token %}
+                                            <button type="submit" class="dropdown-item text-danger">
+                                                <i class="fas fa-trash-alt me-1"></i> Delete Employee
+                                            </button>
+                                        </form>
+                                    </li>
+                                    {% endif %}
+                                    {% endif %}
+                                </ul>
+                            </div>
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="8" class="text-center py-5">
+                            <div>
+                                <i class="fas fa-inbox" style="font-size: 48px; color: #ccc; margin-bottom: 16px; display: block;"></i>
+                                <p class="text-muted mb-0">No employees found</p>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Pagination -->
+    {% if paginator.num_pages > 1 %}
+    <nav aria-label="Page navigation" class="mt-4">
+        <ul class="pagination justify-content-center">
+            {% if employees.has_previous %}
+            <li class="page-item">
+                <a class="page-link" href="?page=1{% for key, value in filters.items %}{% if value %}&{{ key }}={{ value }}{% endif %}{% endfor %}">First</a>
+            </li>
+            <li class="page-item">
+                <a class="page-link" href="?page={{ employees.previous_page_number }}{% for key, value in filters.items %}{% if value %}&{{ key }}={{ value }}{% endif %}{% endfor %}">Previous</a>
+            </li>
+            {% endif %}
+
+            {% for num in paginator.page_range %}
+                {% if employees.number == num %}
+                <li class="page-item active">
+                    <span class="page-link">{{ num }}</span>
+                </li>
+                {% elif num > employees.number|add:'-3' and num < employees.number|add:'3' %}
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ num }}{% for key, value in filters.items %}{% if value %}&{{ key }}={{ value }}{% endif %}{% endfor %}">{{ num }}</a>
+                </li>
+                {% endif %}
+            {% endfor %}
+
+            {% if employees.has_next %}
+            <li class="page-item">
+                <a class="page-link" href="?page={{ employees.next_page_number }}{% for key, value in filters.items %}{% if value %}&{{ key }}={{ value }}{% endif %}{% endfor %}">Next</a>
+            </li>
+            <li class="page-item">
+                <a class="page-link" href="?page={{ paginator.num_pages }}{% for key, value in filters.items %}{% if value %}&{{ key }}={{ value }}{% endif %}{% endfor %}">Last</a>
+            </li>
+            {% endif %}
+        </ul>
+    </nav>
+    {% endif %}
+</div>
+
+<style>
+    .btn-group-sm .btn {
+        padding: 4px 8px;
+        font-size: 12px;
+    }
+
+    .avatar-sm {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        overflow: hidden;
+        background: #f0f0f0;
+    }
+
+    .table tbody tr {
+        cursor: pointer;
+    }
+
+    .table tbody tr:hover {
+        background-color: #f9f9f9;
+    }
+
+    .breadcrumb-nav {
+        margin-bottom: 24px;
+    }
+</style>
+
+<script>
+    // Row click navigation (if not clicking on interactive elements)
+    document.querySelectorAll('table tbody tr').forEach(row => {
+        row.addEventListener('click', function() {
+            const href = this.dataset.href;
+            if (href) {
+                window.location.href = href;
+            }
+        });
+    });
+
+    // Auto submit form on dropdown changes
+    document.querySelectorAll('form select').forEach(select => {
+        select.addEventListener('change', function() {
+            this.form.submit();
+        });
+    });
+
+    // Auto submit form on search input (debounced)
+    let timeout = null;
+    const searchInput = document.querySelector('form input[name="search"]');
+    if (searchInput) {
+        // Submit on enter immediately
+        searchInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                this.form.submit();
+            }
+        });
+        // Debounce typing
+        searchInput.addEventListener('input', function() {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => {
+                this.form.submit();
+            }, 400);
+        });
+    }
+</script>
+{% endblock %}

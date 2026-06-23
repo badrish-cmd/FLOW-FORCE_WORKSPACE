@@ -1,0 +1,73 @@
+<div class="btn-group dropstart" role="group">
+    <button
+        class="btn btn-sm btn-outline-secondary dropdown-toggle"
+        type="button"
+        data-bs-toggle="dropdown"
+        aria-expanded="false"
+        title="More Actions"
+    >
+        <i class="bi bi-three-dots-vertical"></i>
+    </button>
+    <ul class="dropdown-menu">
+        {% if employee.status == "PENDING" %}
+            <li>
+                <form method="post" action="{% url 'employee_approve' employee.id %}" style="display: inline;">
+                    {% csrf_token %}
+                    <button type="submit" class="dropdown-item" onclick="return confirm('Approve this employee?')">
+                        <i class="bi bi-check-circle"></i> Approve
+                    </button>
+                </form>
+            </li>
+            <li>
+                <form method="post" action="{% url 'employee_reject' employee.id %}" style="display: inline;">
+                    {% csrf_token %}
+                    <button type="submit" class="dropdown-item" onclick="return confirm('Reject this employee?')">
+                        <i class="bi bi-x-circle"></i> Reject
+                    </button>
+                </form>
+            </li>
+            <li><hr class="dropdown-divider"></li>
+        {% endif %}
+
+        {% if employee.is_active %}
+            <li>
+                <form method="post" action="{% url 'employee_deactivate' employee.id %}" style="display: inline;">
+                    {% csrf_token %}
+                    <button type="submit" class="dropdown-item text-warning" onclick="return confirm('Deactivate this employee?')">
+                        <i class="bi bi-lock"></i> Deactivate
+                    </button>
+                </form>
+            </li>
+        {% else %}
+            <li>
+                <form method="post" action="{% url 'employee_activate' employee.id %}" style="display: inline;">
+                    {% csrf_token %}
+                    <button type="submit" class="dropdown-item text-success">
+                        <i class="bi bi-unlock"></i> Activate
+                    </button>
+                </form>
+            </li>
+        {% endif %}
+
+        <li>
+            <form method="post" action="{% url 'employee_reset_password' employee.id %}" style="display: inline;">
+                {% csrf_token %}
+                <button type="submit" class="dropdown-item" onclick="return confirm('Reset password for this employee?')">
+                    <i class="bi bi-key"></i> Reset Password
+                </button>
+            </form>
+        </li>
+
+        <li><hr class="dropdown-divider"></li>
+        <li>
+            <a href="{% url 'activity_history' employee.id %}" class="dropdown-item">
+                <i class="bi bi-clock-history"></i> Activity History
+            </a>
+        </li>
+        <li>
+            <a href="{% url 'login_history' employee.id %}" class="dropdown-item">
+                <i class="bi bi-door-open"></i> Login History
+            </a>
+        </li>
+    </ul>
+</div>

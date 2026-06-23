@@ -1,0 +1,137 @@
+{% extends 'base.html' %}
+
+{% block title %}Reports Generator - Flow-Force Workspace{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-6 max-w-7xl mx-auto">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">Reports Generator</h1>
+            <p class="text-sm text-gray-500 mt-1">Export tasks analytics, date-wise, month-wise, or employee-wise.</p>
+        </div>
+    </div>
+
+    <!-- Filters Section -->
+    <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6 shadow-sm">
+        <form method="GET" action="" class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+            <div>
+                <label for="employee" class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Assigned Employee</label>
+                <select name="employee" id="employee" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg focus:ring-primary focus:border-primary p-2.5 text-sm">
+                    <option value="">All Employees</option>
+                    {% for emp in employees %}
+                    <option value="{{ emp.id }}" {% if request.GET.employee == emp.id|stringformat:"i" %}selected{% endif %}>{{ emp.full_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <div>
+                <label for="month" class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Month-wise</label>
+                <input type="month" name="month" id="month" value="{{ request.GET.month }}" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg focus:ring-primary focus:border-primary p-2 text-sm">
+            </div>
+
+            <div>
+                <label for="date_from" class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Date From</label>
+                <input type="date" name="date_from" id="date_from" value="{{ request.GET.date_from }}" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg focus:ring-primary focus:border-primary p-2 text-sm">
+            </div>
+
+            <div>
+                <label for="date_to" class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Date To</label>
+                <input type="date" name="date_to" id="date_to" value="{{ request.GET.date_to }}" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg focus:ring-primary focus:border-primary p-2 text-sm">
+            </div>
+
+            <div class="md:col-span-4 flex flex-wrap justify-between gap-4 mt-2">
+                <button type="submit" class="bg-gray-800 hover:bg-gray-700 text-white font-medium rounded-lg text-sm px-5 py-2.5 transition duration-150 ease-in-out">
+                    <i class="fas fa-filter mr-2"></i> Apply Filters
+                </button>
+                
+                <div class="flex gap-2">
+                    <button type="submit" name="format" value="csv" class="bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out">
+                        <i class="fas fa-file-csv mr-2"></i> Export CSV
+                    </button>
+                    <button type="submit" name="format" value="excel" class="bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out">
+                        <i class="fas fa-file-excel mr-2"></i> Export Excel
+                    </button>
+                    <button type="submit" name="format" value="pdf" class="bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out">
+                        <i class="fas fa-file-pdf mr-2"></i> Export PDF
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Data Display Section -->
+    <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+            <span class="text-sm font-semibold text-gray-700">{{ tasks|length }} Tasks found</span>
+        </div>
+        
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">S_NO</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Task Name</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Due Date</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Priority</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Assigned To</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    {% for t in tasks %}
+                    <tr class="hover:bg-gray-50 transition duration-100">
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {% for c in t.row.cells.all %}
+                                {% if c.column.name == 'S_NO' %}{{ c.value }}{% endif %}
+                            {% empty %}
+                                {{ t.id }}
+                            {% endfor %}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-semibold">
+                            {% for c in t.row.cells.all %}
+                                {% if c.column.name == 'TASK_NAME' %}{{ c.value }}{% endif %}
+                            {% endfor %}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {{ t.due_date }}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm">
+                            <span class="px-2.5 py-1 inline-flex text-xs leading-5 font-semibold rounded-full 
+                                {% if t.priority == 'CRITICAL' %}bg-red-100 text-red-800
+                                {% elif t.priority == 'HIGH' %}bg-orange-100 text-orange-800
+                                {% elif t.priority == 'MEDIUM' %}bg-blue-100 text-blue-800
+                                {% else %}bg-gray-100 text-gray-800{% endif %}">
+                                {{ t.priority }}
+                            </span>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm">
+                            <span class="px-2.5 py-1 inline-flex text-xs leading-5 font-semibold rounded-full
+                                {% if t.status == 'APPROVED' %}bg-green-100 text-green-800
+                                {% elif t.status == 'READY_FOR_REVIEW' %}bg-purple-100 text-purple-800
+                                {% elif t.status == 'IN_PROGRESS' %}bg-yellow-100 text-yellow-800
+                                {% else %}bg-gray-100 text-gray-800{% endif %}">
+                                {{ t.get_status_display }}
+                            </span>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                            {% for u in t.assigned_to.all %}
+                                {{ u.full_name }}{% if not forloop.last %}, {% endif %}
+                            {% empty %}
+                                <span class="text-gray-400 italic">Unassigned</span>
+                            {% endfor %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="6" class="px-6 py-10 text-center text-sm text-gray-500">
+                            <i class="fas fa-info-circle text-gray-400 text-xl mb-2 block"></i>
+                            No tasks found matching current filters.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

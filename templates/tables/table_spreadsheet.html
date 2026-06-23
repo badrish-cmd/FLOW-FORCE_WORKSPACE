@@ -1,0 +1,1547 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ table.name }} - Flow-Force Workspace{% endblock %}
+
+{% block content %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<div class="container-fluid py-6 max-w-7xl mx-auto" x-data="spreadsheetApp({{ table.id }})">
+    <!-- Header/Title section -->
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                <i class="fas fa-table text-primary"></i>
+                <span>{{ table.name }}</span>
+            </h1>
+            <p class="text-sm text-gray-500 mt-1">{{ table.description|default:"Spreadsheet workspace" }}</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+            <button @click="toggleDashboard" class="bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out">
+                <i class="fas fa-chart-line mr-2"></i> <span x-text="showDashboard ? 'Hide Dashboard' : 'Show Dashboard'"></span>
+            </button>
+            <button @click="duplicateTable" class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out">
+                <i class="fas fa-copy mr-2"></i> Duplicate Table (Copy Layout)
+            </button>
+            <button @click="openImportModal" class="bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out">
+                <i class="fas fa-file-import mr-2"></i> Import CSV
+            </button>
+
+            <button @click="openColumnModal" class="bg-primary hover:bg-blue-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out">
+                <i class="fas fa-plus-circle mr-2"></i> Add Column
+            </button>
+        </div>
+    </div>
+
+    <!-- Dashboard Section -->
+    <div x-show="showDashboard" x-transition class="bg-gray-100 p-6 rounded-xl border border-gray-200 shadow-inner mb-6 space-y-6">
+        {% if table.job_type == 'SALES' %}
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- TASKS BY PRIORITY Chart Card -->
+            <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col">
+                <h3 class="text-sm font-bold text-center text-gray-700 uppercase tracking-wider mb-4">Tasks by Priority</h3>
+                <div class="relative h-64 w-full">
+                    <canvas id="priorityChart"></canvas>
+                </div>
+            </div>
+
+            <!-- TASKS BY STATUS Table Card -->
+            <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col justify-between">
+                <h3 class="text-sm font-bold text-center text-gray-700 uppercase tracking-wider mb-4">Tasks by Status</h3>
+                
+                <div class="border border-gray-300 rounded-lg overflow-hidden text-sm">
+                    <!-- Row 1: Headers -->
+                    <div class="grid grid-cols-4 bg-slate-800 text-white text-center font-bold py-2 border-b border-gray-300">
+                        <div class="border-r border-gray-300 text-xs px-1">New Enquiry</div>
+                        <div class="border-r border-gray-300 text-xs px-1">Follow-up</div>
+                        <div class="border-r border-gray-300 text-xs px-1">Quotation Prep</div>
+                        <div class="text-xs px-1">Waiting Cust Reply</div>
+                    </div>
+                    <!-- Row 2: Values -->
+                    <div class="grid grid-cols-4 bg-teal-600 text-white text-center font-bold py-2 border-b border-gray-300">
+                        <div class="border-r border-gray-300" x-text="getStatusCount('New Enquiry')"></div>
+                        <div class="border-r border-gray-300" x-text="getStatusCount('Follow-up')"></div>
+                        <div class="border-r border-gray-300" x-text="getStatusCount('Quotation Preparation')"></div>
+                        <div x-text="getStatusCount('Waiting Customer Reply')"></div>
+                    </div>
+                    <!-- Row 3: Headers -->
+                    <div class="grid grid-cols-4 bg-slate-800 text-white text-center font-bold py-2 border-b border-gray-300">
+                        <div class="border-r border-gray-300 text-xs px-1">Negotiation</div>
+                        <div class="border-r border-gray-300 text-xs px-1">Order Received</div>
+                        <div class="border-r border-gray-300 text-xs px-1">Lost</div>
+                        <div class="text-xs px-1">Closed</div>
+                    </div>
+                    <!-- Row 4: Values -->
+                    <div class="grid grid-cols-4 bg-teal-600 text-white text-center font-bold py-2">
+                        <div class="border-r border-gray-300" x-text="getStatusCount('Negotiation')"></div>
+                        <div class="border-r border-gray-300" x-text="getStatusCount('Order Received')"></div>
+                        <div class="border-r border-gray-300" x-text="getStatusCount('Lost')"></div>
+                        <div x-text="getStatusCount('Closed')"></div>
+                    </div>
+                </div>
+
+                <!-- Footer Stats -->
+                <div class="grid grid-cols-2 gap-4 mt-6">
+                    <div class="flex items-center justify-between border border-gray-300 rounded-lg overflow-hidden">
+                        <span class="bg-slate-800 text-white font-bold text-[10px] py-2 px-2 flex-1 text-center">SUCCESSFUL TASKS</span>
+                        <span class="bg-teal-600 text-white font-bold text-sm py-2 px-3 text-center" x-text="getSuccessfulTasksPercent() + '%'"></span>
+                    </div>
+                    <div class="flex items-center justify-between border border-gray-300 rounded-lg overflow-hidden">
+                        <span class="bg-slate-800 text-white font-bold text-[10px] py-2 px-2 flex-1 text-center">TASK ON OVERDUE</span>
+                        <span class="bg-teal-600 text-white font-bold text-sm py-2 px-3 text-center" x-text="getOverdueTasksCount()"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- WEEKLY KPI OVERVIEW Table Card -->
+            <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col justify-between">
+                <h3 class="text-sm font-bold text-center text-gray-700 uppercase tracking-wider mb-4">Weekly KPI Overview</h3>
+                
+                <div class="border border-gray-300 rounded-lg overflow-hidden text-sm">
+                    <!-- Header -->
+                    <div class="grid grid-cols-3 bg-slate-800 text-white text-center font-bold py-2 border-b border-gray-300">
+                        <div>KPI</div>
+                        <div class="border-l border-r border-gray-300 text-xs">WEEKLY TARGET</div>
+                        <div>ACTUAL</div>
+                    </div>
+                    <!-- Row 1 -->
+                    <div class="grid grid-cols-3 bg-teal-600 text-white text-center font-semibold py-1.5 border-b border-teal-500">
+                        <div class="text-left pl-3 text-xs">Customer calls</div>
+                        <div class="border-l border-r border-teal-500">20</div>
+                        <div x-text="getWeekActuals().calls"></div>
+                    </div>
+                    <!-- Row 2 -->
+                    <div class="grid grid-cols-3 bg-teal-600 text-white text-center font-semibold py-1.5 border-b border-teal-500">
+                        <div class="text-left pl-3 text-xs">Customer Visits</div>
+                        <div class="border-l border-r border-teal-500">5</div>
+                        <div x-text="getWeekActuals().visits"></div>
+                    </div>
+                    <!-- Row 3 -->
+                    <div class="grid grid-cols-3 bg-teal-600 text-white text-center font-semibold py-1.5 border-b border-teal-500">
+                        <div class="text-left pl-3 text-xs">New Enquiries</div>
+                        <div class="border-l border-r border-teal-500">10</div>
+                        <div x-text="getWeekActuals().enquiries"></div>
+                    </div>
+                    <!-- Row 4 -->
+                    <div class="grid grid-cols-3 bg-teal-600 text-white text-center font-semibold py-1.5 border-b border-teal-500">
+                        <div class="text-left pl-3 text-xs">Quotations Sent</div>
+                        <div class="border-l border-r border-teal-500">7</div>
+                        <div x-text="getWeekActuals().quotes"></div>
+                    </div>
+                    <!-- Row 5 -->
+                    <div class="grid grid-cols-3 bg-teal-600 text-white text-center font-semibold py-1.5">
+                        <div class="text-left pl-3 text-xs">Orders Received</div>
+                        <div class="border-l border-r border-teal-500">2</div>
+                        <div x-text="getWeekActuals().orders"></div>
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-between border border-gray-300 rounded-lg overflow-hidden mt-6 w-full">
+                    <span class="bg-slate-800 text-white font-bold text-xs py-2 px-4 flex-1 text-center">ACHIEVEMENT %</span>
+                    <span class="bg-teal-600 text-white font-bold text-sm py-2 px-8 text-center" x-text="getWeekActuals().achievementPercent + '%'"></span>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <!-- TASKS BY PRIORITY Chart Card -->
+            <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col">
+                <h3 class="text-sm font-bold text-center text-gray-700 uppercase tracking-wider mb-4">Tasks by Priority</h3>
+                <div class="relative h-64 w-full">
+                    <canvas id="priorityChart"></canvas>
+                </div>
+            </div>
+
+            <!-- TASKS STATUS CARD -->
+            <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col justify-between space-y-6">
+                <h3 class="text-sm font-bold text-center text-gray-700 uppercase tracking-wider">Tasks Status</h3>
+                
+                <!-- Top Mini Grid: Due Today & Overdue -->
+                <div class="flex justify-center">
+                    <div class="border border-gray-300 rounded-lg overflow-hidden text-sm w-full max-w-xs">
+                        <div class="grid grid-cols-2 bg-slate-800 text-white font-bold py-1.5 px-3 border-b border-gray-300">
+                            <div class="border-r border-gray-300 text-center">Due Today</div>
+                            <div class="text-center" x-text="getTasksDueTodayCount()"></div>
+                        </div>
+                        <div class="grid grid-cols-2 bg-teal-600 text-white font-bold py-1.5 px-3">
+                            <div class="border-r border-teal-500 text-center">Overdue Tasks</div>
+                            <div class="text-center" x-text="getOverdueTasksCount()"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Middle Status Table: Complete, In Progress, On Hold, Canceled -->
+                <div class="border border-gray-300 rounded-lg overflow-hidden text-sm">
+                    <div class="grid grid-cols-4 bg-slate-800 text-white text-center font-bold py-2 border-b border-gray-300">
+                        <div class="border-r border-gray-300 text-xs">Complete</div>
+                        <div class="border-r border-gray-300 text-xs">In Progress</div>
+                        <div class="border-r border-gray-300 text-xs">On Hold</div>
+                        <div class="text-xs">Canceled</div>
+                    </div>
+                    <div class="grid grid-cols-4 bg-teal-600 text-white text-center font-bold py-2">
+                        <div class="border-r border-teal-500" x-text="getGeneralStatusCount('complete')"></div>
+                        <div class="border-r border-teal-500" x-text="getGeneralStatusCount('in progress')"></div>
+                        <div class="border-r border-teal-500" x-text="getGeneralStatusCount('on hold')"></div>
+                        <div x-text="getGeneralStatusCount('canceled')"></div>
+                    </div>
+                </div>
+
+                <!-- Bottom Progress Bar -->
+                <div class="space-y-2">
+                    <div class="text-center text-sm font-bold text-gray-700" x-text="`${getCompletionStats().completed} Completed out of ${getCompletionStats().total}`"></div>
+                    <div class="w-full border-2 border-green-600 rounded-lg p-1 bg-gray-50 flex items-center justify-center relative h-10 overflow-hidden">
+                        <!-- Progress Bar Fill -->
+                        <div class="absolute left-0 top-0 bottom-0 bg-green-200 transition-all duration-300" :style="`width: ${getCompletionStats().percent}%`"></div>
+                        <span class="relative font-bold text-gray-800 text-sm z-10" x-text="`${getCompletionStats().percent}%`"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+
+
+    <!-- Project ID (PID) Filter Bar for Engineer Tables -->
+    {% if table.job_type == 'ENGINEER' %}
+    <div class="mb-6 bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex flex-wrap items-center gap-4">
+        <div class="flex items-center gap-2">
+            <span class="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                <i class="fas fa-filter text-primary"></i> Filter by Project ID (PID)
+            </span>
+        </div>
+        <div class="flex items-center gap-2">
+            <select x-model="selectedPidFilter" 
+                    @change="if (chartInstance && showDashboard) renderCharts();" 
+                    class="bg-gray-50 border border-gray-300 text-gray-700 rounded-lg py-1.5 px-3 text-xs focus:ring-primary focus:border-primary font-medium">
+                <option value="">-- All Projects / General --</option>
+                <template x-for="pid in getUniquePids()" :key="pid">
+                    <option :value="pid" x-text="pid"></option>
+                </template>
+            </select>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Main Table Container -->
+    <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div class="overflow-x-auto min-h-[400px]">
+            <table class="min-w-full divide-y divide-gray-200 border-collapse">
+                <thead class="bg-gray-50">
+                    <tr>
+                        {% for col in table.columns.all %}
+                        <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider border-r border-gray-200 min-w-[150px]">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-1.5">
+                                    <span class="font-bold text-gray-800">{{ col.name }}</span>
+                                    <span class="text-[9px] text-gray-400 lowercase">({{ col.data_type }})</span>
+                                </div>
+                                <div class="flex items-center gap-1 ml-2">
+                                    {% if user.role in 'SUPER_ADMIN,ADMIN,DEPARTMENT_ADMIN' %}
+                                    <button @click.stop="openEditColumnModal({{ col.id }}, '{{ col.name }}', '{{ col.data_type }}', '{{ col.options|default:""|escapejs }}')" class="text-blue-500 hover:text-blue-700 focus:outline-none mr-1" title="Edit Column">
+                                        <i class="fas fa-cog text-[9px]"></i>
+                                    </button>
+                                    <button @click.stop="moveColumnLeft({{ col.id }})" class="text-gray-400 hover:text-gray-600 focus:outline-none" title="Move Left">
+                                        <i class="fas fa-arrow-left text-[9px]"></i>
+                                    </button>
+                                    <button @click.stop="moveColumnRight({{ col.id }})" class="text-gray-400 hover:text-gray-600 focus:outline-none" title="Move Right">
+                                        <i class="fas fa-arrow-right text-[9px]"></i>
+                                    </button>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </th>
+                        {% endfor %}
+                        <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider min-w-[100px]">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    <!-- Standard rows -->
+                    <template x-for="(row, rowIndex) in filteredRows()" :key="row.id">
+                        <tr :class="{'line-through text-gray-400 bg-gray-50 opacity-75': isRowCompleted(row)}" class="hover:bg-gray-50 transition duration-100" @mouseenter="onRowHover(row.id)">
+                            {% for col in table.columns.all %}
+                             <td class="p-0 border-r border-gray-200 text-sm whitespace-nowrap align-middle relative group"
+                                  :class="isCellDragged(row.id, {{ col.id }}) ? 'bg-blue-50 border-2 border-blue-400' : ''"
+                                  @dblclick="if (rowEditingRowId !== row.id) editCell(row.id, {{ col.id }}, getCellValue(row, '{{ col.name }}'), '{{ col.data_type }}')">
+                                  
+                                  <!-- Row-Level Editing Inputs -->
+                                  <div x-show="rowEditingRowId === row.id" class="p-1">
+                                      <template x-if="'{{ col.data_type }}' === 'DATE' || '{{ col.data_type }}' === 'DATETIME'">
+                                          <input type="date" x-model="editingRowValues['{{ col.name }}']" 
+                                                 class="w-full bg-white border border-primary text-gray-900 rounded p-1 text-xs focus:outline-none">
+                                      </template>
+                                      <template x-if="'{{ col.data_type }}' === 'DROPDOWN'">
+                                          <select x-model="editingRowValues['{{ col.name }}']" 
+                                                  class="w-full bg-white border border-primary text-gray-900 rounded p-1 text-xs focus:outline-none">
+                                              <option value="">-- Select --</option>
+                                              <template x-for="opt in '{{ col.options|default:""|escapejs }}'.split(',').map(s => s.trim()).filter(Boolean)" :key="opt">
+                                                  <option :value="opt" x-text="opt" :selected="editingRowValues['{{ col.name }}'] === opt"></option>
+                                              </template>
+                                          </select>
+                                      </template>
+                                      <template x-if="'{{ col.data_type }}' === 'CHECKBOX'">
+                                          <input type="checkbox" 
+                                                 :checked="editingRowValues['{{ col.name }}'] === 'true' || editingRowValues['{{ col.name }}'] === true"
+                                                 @change="editingRowValues['{{ col.name }}'] = $event.target.checked ? 'true' : 'false'"
+                                                 class="h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded">
+                                      </template>
+                                      <template x-if="'{{ col.data_type }}' !== 'DATE' && '{{ col.data_type }}' !== 'DATETIME' && '{{ col.data_type }}' !== 'DROPDOWN' && '{{ col.data_type }}' !== 'CHECKBOX'">
+                                          <input type="text" x-model="editingRowValues['{{ col.name }}']" 
+                                                 class="w-full bg-white border border-primary text-gray-900 rounded p-1 text-xs focus:outline-none">
+                                      </template>
+                                  </div>
+
+                                  <!-- Cell Display / Single Cell Edit -->
+                                  <div x-show="rowEditingRowId !== row.id">
+                                      <div x-show="editingRowId !== row.id || editingColumnId !== {{ col.id }}"
+                                           class="px-4 py-3 min-h-[40px] flex items-center justify-between cursor-pointer">
+                                           
+                                           <!-- Display Status Badge or simple text -->
+                                           <template x-if="'{{ col.name }}' === 'S_NO'">
+                                               <span class="font-medium" x-text="getCellValue(row, '{{ col.name }}')"></span>
+                                           </template>
+                                           <template x-if="'{{ col.name }}' === 'TASK_NAME'">
+                                               <span class="font-semibold" x-text="getCellValue(row, '{{ col.name }}')"></span>
+                                           </template>
+                                           <template x-if="'{{ col.name }}' === 'DUE_DATE'">
+                                               <span :class="isOverdue(row) ? 'text-red-600 font-bold' : ''" x-text="getCellValue(row, '{{ col.name }}')"></span>
+                                           </template>
+                                           <template x-if="'{{ col.name }}' !== 'S_NO' && '{{ col.name }}' !== 'TASK_NAME' && '{{ col.name }}' !== 'DUE_DATE'">
+                                               <div class="w-full">
+                                                   <template x-if="'{{ col.data_type }}' === 'CHECKBOX'">
+                                                       <input type="checkbox" 
+                                                              :checked="getCellValue(row, '{{ col.name }}') === 'true' || getCellValue(row, '{{ col.name }}') === true"
+                                                              @change="toggleCheckbox(row.id, {{ col.id }}, $event.target.checked)"
+                                                              class="h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded">
+                                                   </template>
+                                                   <template x-if="'{{ col.data_type }}' !== 'CHECKBOX'">
+                                                       <span x-text="getCellValue(row, '{{ col.name }}') || '-'"></span>
+                                                   </template>
+                                               </div>
+                                           </template>
+                                      </div>
+
+                                      <!-- Inline Editing inputs -->
+                                      <div x-show="editingRowId === row.id && editingColumnId === {{ col.id }}"
+                                           class="p-1">
+                                          <template x-if="'{{ col.data_type }}' === 'DATE' || '{{ col.data_type }}' === 'DATETIME'">
+                                              <input type="date" x-model="editingValue" 
+                                                     @keydown.enter="$event.target.blur()" 
+                                                     @keydown.escape="cancelEdit"
+                                                     @blur="saveCell"
+                                                     class="w-full bg-white border border-primary text-gray-900 rounded p-1 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                                          </template>
+                                          <template x-if="'{{ col.data_type }}' === 'DROPDOWN'">
+                                              <select x-model="editingValue" 
+                                                      @change="saveCell" 
+                                                      class="w-full bg-white border border-primary text-gray-900 rounded p-1 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                                                  <option value="">-- Select --</option>
+                                                  <template x-for="opt in '{{ col.options|default:""|escapejs }}'.split(',').map(s => s.trim()).filter(Boolean)" :key="opt">
+                                                      <option :value="opt" x-text="opt" :selected="editingValue === opt"></option>
+                                                  </template>
+                                              </select>
+                                          </template>
+                                          <template x-if="'{{ col.data_type }}' !== 'DATE' && '{{ col.data_type }}' !== 'DATETIME' && '{{ col.data_type }}' !== 'DROPDOWN'">
+                                              <input type="text" x-model="editingValue" 
+                                                     @keydown.enter="$event.target.blur()" 
+                                                     @keydown.escape="cancelEdit"
+                                                     @blur="saveCell"
+                                                     class="w-full bg-white border border-primary text-gray-900 rounded p-1 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                                          </template>
+                                      </div>
+                                  </div>
+                             </td>
+                            {% endfor %}
+                            
+                            <!-- Action buttons -->
+                            <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500 flex gap-2 items-center">
+                                {% if has_edit_access %}
+                                <!-- Edit/Save Row Actions -->
+                                <template x-if="rowEditingRowId !== row.id">
+                                    <button @click="startRowEdit(row)" class="text-amber-500 hover:text-amber-700 font-medium" title="Edit Row">
+                                        <i class="fas fa-edit text-lg"></i>
+                                    </button>
+                                </template>
+                                <template x-if="rowEditingRowId === row.id">
+                                    <div class="flex gap-1.5 items-center">
+                                        <button @click="saveRowEdit" class="text-emerald-600 hover:text-emerald-800" title="Save Row">
+                                            <i class="fas fa-check-circle text-lg"></i>
+                                        </button>
+                                        <button @click="cancelRowEdit" class="text-gray-400 hover:text-gray-600" title="Cancel Edit">
+                                            <i class="fas fa-times-circle text-lg"></i>
+                                        </button>
+                                    </div>
+                                </template>
+                                {% endif %}
+
+                                <button @click="openTaskModal(row)" class="text-blue-600 hover:text-blue-900" title="Task & Comments">
+                                    <i class="fas fa-comment-dots text-lg"></i>
+                                </button>
+                                <template x-if="row.task_details">
+                                    <button @click="toggleTaskCompletion(row.task_details.id, row.task_details.status)" 
+                                            :class="(row.task_details.status === 'COMPLETED' || row.task_details.status === 'APPROVED') ? 'text-gray-400 hover:text-emerald-600' : 'text-emerald-600 hover:text-emerald-800'"
+                                            :title="(row.task_details.status === 'COMPLETED' || row.task_details.status === 'APPROVED') ? 'Mark Incomplete (Pending)' : 'Mark Completed'">
+                                        <i :class="(row.task_details.status === 'COMPLETED' || row.task_details.status === 'APPROVED') ? 'fas fa-undo-alt text-lg' : 'fas fa-check-circle text-lg'"></i>
+                                    </button>
+                                </template>
+                                {% if has_edit_access %}
+                                <button @click="deleteRow(row.id)" class="text-red-600 hover:text-red-900" title="Delete Row">
+                                    <i class="fas fa-trash-alt text-lg"></i>
+                                </button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    </template>
+
+                    <!-- Inline Row Creator at the bottom (No Prompts!) -->
+                    <tr class="bg-gray-50 border-t border-gray-200">
+                        {% for col in table.columns.all %}
+                        <td class="p-1 border-r border-gray-200 text-sm whitespace-nowrap align-middle">
+                            {% if col.name == 'S_NO' %}
+                                <div class="px-3 text-gray-400 font-semibold text-center">+</div>
+                            {% elif col.name == 'TASK_NAME' %}
+                                <input type="text" x-model="newRowCells.TASK_NAME" placeholder="Task Name (Required)" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
+                            {% elif col.name == 'DUE_DATE' %}
+                                <input type="date" x-model="newRowCells.DUE_DATE" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
+                            {% elif col.name == 'DATE' %}
+                                <div class="px-3 py-1 text-gray-400 text-xs italic">Auto</div>
+                            {% elif col.name == 'INITIAL_MAIL' or col.name == 'ALERT_MAIL' %}
+                                <div class="px-3 py-1 text-gray-400 text-xs italic">NO</div>
+                            {% else %}
+                                <template x-if="'{{ col.data_type }}' === 'DROPDOWN'">
+                                    <select x-model="newRowCells['{{ col.name }}']" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
+                                        <option value="">-- Select --</option>
+                                        <template x-for="opt in '{{ col.options|default:""|escapejs }}'.split(',').map(s => s.trim()).filter(Boolean)" :key="opt">
+                                            <option :value="opt" x-text="opt"></option>
+                                        </template>
+                                    </select>
+                                </template>
+                                <template x-if="'{{ col.data_type }}' !== 'DROPDOWN'">
+                                    <input type="text" x-model="newRowCells['{{ col.name }}']" placeholder="{{ col.name }} value" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
+                                </template>
+                            {% endif %}
+                        </td>
+                        {% endfor %}
+                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">
+                            <button @click="submitInlineRow" class="bg-emerald-600 hover:bg-emerald-700 text-white rounded px-3 py-1.5 text-xs font-semibold">
+                                <i class="fas fa-check mr-1"></i> Save
+                            </button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- COLUMN BUILDER MODAL -->
+    <div x-show="isColumnModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 bg-opacity-50" style="display: none;">
+        <div class="bg-white rounded-xl max-w-md w-full p-6 shadow-xl border border-gray-200" @click.away="isColumnModalOpen = false">
+            <h3 class="text-lg font-bold text-gray-900 mb-4">Add Custom Column</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Column Name</label>
+                    <input type="text" x-model="newColumnName" placeholder="e.g. Estimated Hours" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Data Type</label>
+                    <select x-model="newColumnType" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-sm">
+                        <option value="TEXT">Text</option>
+                        <option value="NUMBER">Number</option>
+                        <option value="DATE">Date</option>
+                        <option value="DATETIME">Datetime</option>
+                        <option value="CHECKBOX">Checkbox</option>
+                        <option value="DROPDOWN">Dropdown</option>
+                    </select>
+                </div>
+                <div x-show="newColumnType === 'DROPDOWN'">
+                    <label class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Dropdown Options (Comma-separated)</label>
+                    <textarea x-model="newColumnOptions" placeholder="e.g. Option A, Option B, Option C" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-sm" rows="3"></textarea>
+                </div>
+            </div>
+            <div class="flex justify-end gap-3 mt-6">
+                <button @click="isColumnModalOpen = false" class="bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg text-sm px-4 py-2.5">Cancel</button>
+                <button @click="createColumn" class="bg-primary hover:bg-blue-700 text-white font-medium rounded-lg text-sm px-4 py-2.5">Add Column</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- EDIT COLUMN MODAL -->
+    <div x-show="isEditColumnModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 bg-opacity-50" style="display: none;">
+        <div class="bg-white rounded-xl max-w-md w-full p-6 shadow-xl border border-gray-200" @click.away="isEditColumnModalOpen = false">
+            <h3 class="text-lg font-bold text-gray-900 mb-4">Edit Column Properties</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Column Name</label>
+                    <input type="text" x-model="editColumnName" placeholder="Column Name" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Data Type</label>
+                    <select x-model="editColumnType" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-sm">
+                        <option value="TEXT">Text</option>
+                        <option value="NUMBER">Number</option>
+                        <option value="DATE">Date</option>
+                        <option value="DATETIME">Datetime</option>
+                        <option value="CHECKBOX">Checkbox</option>
+                        <option value="DROPDOWN">Dropdown</option>
+                        <option value="USER">Employee/User</option>
+                    </select>
+                </div>
+                <div x-show="editColumnType === 'DROPDOWN'">
+                    <label class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Dropdown Options (Comma-separated)</label>
+                    <textarea x-model="editColumnOptions" placeholder="e.g. Option A, Option B, Option C" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-sm" rows="3"></textarea>
+                </div>
+            </div>
+            <div class="flex justify-end gap-3 mt-6">
+                <button @click="isEditColumnModalOpen = false" class="bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg text-sm px-4 py-2.5">Cancel</button>
+                <button @click="saveColumnProperties" class="bg-primary hover:bg-blue-700 text-white font-medium rounded-lg text-sm px-4 py-2.5">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- IMPORT MODAL -->
+    <div x-show="isImportModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 bg-opacity-50" style="display: none;">
+        <div class="bg-white rounded-xl max-w-md w-full p-6 shadow-xl border border-gray-200" @click.away="isImportModalOpen = false">
+            <h3 class="text-lg font-bold text-gray-900 mb-2">Import Tasks</h3>
+            
+            <!-- Tabs -->
+            <div class="flex border-b border-gray-200 mb-4">
+                <button @click="importTab = 'csv'" :class="importTab === 'csv' ? 'border-b-2 border-green-600 text-green-600 font-semibold' : 'text-gray-500'" class="flex-1 py-2 text-center text-sm focus:outline-none">
+                    <i class="fas fa-file-csv mr-1"></i> CSV File
+                </button>
+                <button @click="importTab = 'google'" :class="importTab === 'google' ? 'border-b-2 border-green-600 text-green-600 font-semibold' : 'text-gray-500'" class="flex-1 py-2 text-center text-sm focus:outline-none">
+                    <i class="fab fa-google mr-1"></i> Google Sheets Link
+                </button>
+            </div>
+
+            <!-- CSV Tab content -->
+            <div x-show="importTab === 'csv'" class="space-y-4">
+                <p class="text-xs text-gray-500">Make sure your CSV contains equal columns as this table. Note: Header must start at row 12 and data at row 13.</p>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Choose CSV File</label>
+                    <input type="file" id="csvFileInput" accept=".csv" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-sm">
+                </div>
+            </div>
+
+            <!-- Google Sheets Tab content -->
+            <div x-show="importTab === 'google'" class="space-y-4">
+                <p class="text-xs text-gray-500">Ensure the Google Sheet is shared with **"Anyone with the link can view"**. Column structure must match exactly. Header must start at row 12 and data at row 13.</p>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Google Sheet URL</label>
+                    <input type="text" x-model="googleSheetUrl" placeholder="https://docs.google.com/spreadsheets/d/.../edit" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-sm">
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-3 mt-6">
+                <button @click="isImportModalOpen = false" :disabled="isImporting" class="bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg text-sm px-4 py-2.5 disabled:opacity-50">Cancel</button>
+                
+                <button x-show="importTab === 'csv'" @click="uploadCSV" :disabled="isImporting" class="bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 disabled:opacity-50 flex items-center gap-2">
+                    <span x-show="isImporting"><i class="fas fa-spinner fa-spin mr-1"></i> Importing...</span>
+                    <span x-show="!isImporting">Import CSV</span>
+                </button>
+                <button x-show="importTab === 'google'" @click="uploadGoogleSheet" :disabled="isImporting" class="bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 disabled:opacity-50 flex items-center gap-2">
+                    <span x-show="isImporting"><i class="fas fa-spinner fa-spin mr-1"></i> Importing...</span>
+                    <span x-show="!isImporting">Import Sheet</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+
+
+    <!-- TASK DETAIL & COMMENTS DRAWER/MODAL -->
+    <div x-show="isTaskModalOpen" class="fixed inset-0 z-50 flex items-center justify-end bg-gray-900 bg-opacity-50" style="display: none;">
+        <div class="bg-white w-full max-w-lg h-full p-6 shadow-2xl flex flex-col justify-between border-l border-gray-200" @click.away="isTaskModalOpen = false">
+            <div>
+                <div class="flex items-center justify-between border-b border-gray-200 pb-4 mb-4">
+                    <h3 class="text-lg font-bold text-gray-900">Task Details & Discussion</h3>
+                    <button @click="isTaskModalOpen = false" class="text-gray-400 hover:text-gray-600">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+
+                <!-- Task Properties -->
+                <div class="space-y-4 mb-6 bg-gray-50 p-4 rounded-xl border border-gray-100">
+                    <div class="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                            <span class="text-gray-500 font-medium">Task Name:</span>
+                            <div class="font-bold text-gray-900 mt-1" x-text="activeTaskName"></div>
+                        </div>
+                        <div>
+                            <span class="text-gray-500 font-medium">Due Date:</span>
+                            <div class="font-bold mt-1" :class="isOverdue(activeRow) ? 'text-red-600' : 'text-gray-900'" x-text="activeTaskDueDate"></div>
+                        </div>
+                        <div>
+                            <span class="text-gray-500 font-medium">Status:</span>
+                            <select x-model="activeTaskStatus" @change="updateTaskStatus" class="w-full mt-1 bg-white border border-gray-300 rounded p-1 text-sm">
+                                <option value="PENDING">Pending</option>
+                                <option value="IN_PROGRESS">In Progress</option>
+                                <option value="READY_FOR_REVIEW">Ready for Review</option>
+                                <option value="APPROVED">Approved</option>
+                                <option value="COMPLETED">Completed</option>
+                            </select>
+                        </div>
+                        <div>
+                            <span class="text-gray-500 font-medium">Priority:</span>
+                            <div class="font-bold text-gray-900 mt-1" x-text="activeTaskPriority"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Report Issue Form -->
+                <div class="mb-6 bg-red-50 p-4 rounded-xl border border-red-100 space-y-3">
+                    <h4 class="text-xs font-bold uppercase tracking-wider text-red-800 flex items-center gap-1">
+                        <i class="fas fa-exclamation-circle"></i> Report / Flag Issue to Employee
+                    </h4>
+                    <div>
+                        <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Select Recipient</label>
+                        <select x-model="flagRecipientId" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs">
+                            <option value="">-- Select Recipient --</option>
+                            <template x-for="emp in recipients" :key="emp.id">
+                                <option :value="emp.id" x-text="`${emp.full_name || emp.email} (${emp.role})`"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Issue Description</label>
+                        <textarea x-model="flagDescription" placeholder="Enter description of the issue..." class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs" rows="2"></textarea>
+                    </div>
+                    <button @click="submitFlagIssue" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold rounded text-xs py-1.5 transition">
+                        Flag Issue
+                    </button>
+                </div>
+
+                <!-- Comments List -->
+                <h4 class="text-sm font-semibold text-gray-700 mb-3">Internal Notes & Comments</h4>
+                <div class="space-y-3 overflow-y-auto max-h-[300px] pr-2 mb-4">
+                    <template x-for="comment in comments" :key="comment.id">
+                        <div class="p-3 bg-gray-50 rounded-lg border border-gray-100 text-xs">
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="font-bold text-gray-800" x-text="comment.author_detail.full_name"></span>
+                                <span class="text-gray-400" x-text="new Date(comment.created_at).toLocaleString()"></span>
+                            </div>
+                            <p class="text-gray-700" x-text="comment.content"></p>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- Comment Input -->
+            <div class="border-t border-gray-200 pt-4">
+                <textarea x-model="newCommentText" placeholder="Write a comment..." class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-xs focus:ring-primary focus:border-primary mb-2" rows="3"></textarea>
+                <button @click="postComment" class="w-full bg-primary hover:bg-blue-700 text-white font-medium rounded-lg text-xs py-2 transition duration-150 ease-in-out">
+                    Post Comment
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function spreadsheetApp(tableId) {
+        return {
+            tableId: tableId,
+            columns: [{% for col in table.columns.all %}{id: {{ col.id }}, name: '{{ col.name }}'}{% if not forloop.last %}, {% endif %}{% endfor %}],
+            rows: [],
+            editingRowId: null,
+            editingColumnId: null,
+            editingValue: '',
+            autoOpenTaskId: null,
+            isSavingCell: false,
+            
+            selectedPidFilter: '',
+            rowEditingRowId: null,
+            editingRowValues: {},
+
+            // Inline row input fields holder
+            newRowCells: {
+                TASK_NAME: '',
+                DUE_DATE: ''
+            },
+
+            // Column Modal
+            isColumnModalOpen: false,
+            newColumnName: '',
+            newColumnType: 'TEXT',
+            newColumnOptions: '',
+
+            // Edit Column Modal
+            isEditColumnModalOpen: false,
+            editColumnId: null,
+            editColumnName: '',
+            editColumnType: 'TEXT',
+            editColumnOptions: '',
+
+             // Import Modal State
+             isImportModalOpen: false,
+             importTab: 'csv',
+             googleSheetUrl: '',
+             isImporting: false,
+
+             // Drag and Fill State
+             isDraggingFill: false,
+             dragStartRowId: null,
+             dragColumnId: null,
+             dragValue: null,
+             hoverRowId: null,
+
+            // Task Modal / Drawer
+            isTaskModalOpen: false,
+            activeRow: null,
+            activeTaskName: '',
+            activeTaskDueDate: '',
+            activeTaskPriority: '',
+            activeTaskStatus: '',
+            comments: [],
+            newCommentText: '',
+
+            recipients: [],
+            flagRecipientId: '',
+            flagDescription: '',
+
+            showDashboard: false,
+            chartInstance: null,
+
+             init() {
+                 // Check query parameters to automatically open task modal
+                 const urlParams = new URLSearchParams(window.location.search);
+                 const openTaskId = urlParams.get('open_task_id');
+                 if (openTaskId) {
+                     this.autoOpenTaskId = parseInt(openTaskId);
+                 }
+                 this.fetchRows();
+                 this.fetchRecipients();
+
+                 this.$watch('showDashboard', value => {
+                     if (value) {
+                         this.renderCharts();
+                     }
+                 });
+
+                 document.addEventListener('mouseup', () => {
+                     if (this.isDraggingFill) {
+                         this.endDragFill();
+                     }
+                 });
+             },
+
+             getUniquePids() {
+                 const pids = new Set();
+                 this.rows.forEach(row => {
+                     const pid = this.getCellValue(row, 'PID');
+                     if (pid) {
+                         pids.add(pid.trim());
+                     }
+                 });
+                 return Array.from(pids).sort();
+             },
+
+             filteredRows() {
+                 if (!this.selectedPidFilter) {
+                     return this.rows;
+                 }
+                 return this.rows.filter(row => {
+                     const pid = this.getCellValue(row, 'PID');
+                     return pid && pid.trim() === this.selectedPidFilter;
+                 });
+             },
+
+            toggleDashboard() {
+                this.showDashboard = !this.showDashboard;
+            },
+
+            getStatusCount(statusName) {
+                let count = 0;
+                this.filteredRows().forEach(row => {
+                    const val = this.getCellValue(row, 'STATUS');
+                    if (val && val.toLowerCase().trim() === statusName.toLowerCase().trim()) {
+                        count++;
+                    }
+                });
+                return count;
+            },
+
+            getSuccessfulTasksPercent() {
+                if (this.rows.length === 0) return 0;
+                const successfulCount = this.getStatusCount('Order Received');
+                return Math.round((successfulCount / this.rows.length) * 100);
+            },
+
+            getOverdueTasksCount() {
+                let count = 0;
+                this.filteredRows().forEach(row => {
+                    if (this.isOverdue(row)) {
+                        count++;
+                    }
+                });
+                return count;
+            },
+
+            getWeekRange() {
+                const now = new Date();
+                const day = now.getDay();
+                const diff = now.getDate() - day + (day === 0 ? -6 : 1); // Adjust for Monday start
+                const monday = new Date(now.setDate(diff));
+                monday.setHours(0, 0, 0, 0);
+                const sunday = new Date(monday);
+                sunday.setDate(monday.getDate() + 6);
+                sunday.setHours(23, 59, 59, 999);
+                return { monday, sunday };
+            },
+
+            getWeekActuals() {
+                const range = this.getWeekRange();
+                let calls = 0;
+                let visits = 0;
+                let enquiries = 0;
+                let quotes = 0;
+                let orders = 0;
+                
+                this.filteredRows().forEach(row => {
+                    const dateVal = this.getCellValue(row, 'FOLLOW - UP DATE') || this.getCellValue(row, 'FOLLOW-UP DATE') || this.getCellValue(row, 'DATE');
+                    if (!dateVal) return;
+                    
+                    const d = new Date(dateVal);
+                    if (d >= range.monday && d <= range.sunday) {
+                        const actType = (this.getCellValue(row, 'ACTIVITY TYPE') || '').toLowerCase().trim();
+                        const status = (this.getCellValue(row, 'STATUS') || '').toLowerCase().trim();
+                        
+                        if (actType.includes('call') || actType.includes('whatsapp') || actType.includes('linkedin')) {
+                            calls++;
+                        }
+                        if (actType.includes('visit')) {
+                            visits++;
+                        }
+                        if (status.includes('enquiry') || status.includes('enquiries')) {
+                            enquiries++;
+                        }
+                        if (status.includes('quotation') || status.includes('quote')) {
+                            quotes++;
+                        }
+                        if (status.includes('order received') || status.includes('order')) {
+                            orders++;
+                        }
+                    }
+                });
+                
+                const targetCalls = 20;
+                const targetVisits = 5;
+                const targetEnquiries = 10;
+                const targetQuotes = 7;
+                const targetOrders = 2;
+                
+                const callsAch = Math.min(100, (calls / targetCalls) * 100);
+                const visitsAch = Math.min(100, (visits / targetVisits) * 100);
+                const enquiriesAch = Math.min(100, (enquiries / targetEnquiries) * 100);
+                const quotesAch = Math.min(100, (quotes / targetQuotes) * 100);
+                const ordersAch = Math.min(100, (orders / targetOrders) * 100);
+                
+                const achievementPercent = ((callsAch + visitsAch + enquiriesAch + quotesAch + ordersAch) / 5).toFixed(2);
+                
+                return {
+                    calls,
+                    visits,
+                    enquiries,
+                    quotes,
+                    orders,
+                    achievementPercent
+                };
+            },
+
+            getTasksDueTodayCount() {
+                let count = 0;
+                const todayStr = new Date().toISOString().split('T')[0];
+                this.filteredRows().forEach(row => {
+                    const dueDate = this.getCellValue(row, 'DUE_DATE');
+                    if (dueDate && dueDate === todayStr) {
+                        count++;
+                    }
+                });
+                return count;
+            },
+
+            getGeneralStatusCount(statusName) {
+                let count = 0;
+                this.filteredRows().forEach(row => {
+                    const val = this.getCellValue(row, 'STATUS');
+                    if (val) {
+                        const vLower = val.toLowerCase().trim();
+                        const sLower = statusName.toLowerCase().trim();
+                        if (vLower === sLower || 
+                            (sLower === 'complete' && vLower === 'completed') || 
+                            (sLower === 'in progress' && vLower === 'in_progress') ||
+                            (sLower === 'on hold' && vLower === 'on_hold') ||
+                            (sLower === 'canceled' && (vLower === 'canceled' || vLower === 'cancelled'))) {
+                            count++;
+                        }
+                    }
+                });
+                return count;
+            },
+
+            getCompletionStats() {
+                const total = this.rows.length;
+                const completed = this.getGeneralStatusCount('complete');
+                const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+                return { completed, total, percent };
+            },
+
+            isRowCompleted(row) {
+                if (!row) return false;
+                const statusVal = (this.getCellValue(row, 'STATUS') || '').toLowerCase().trim();
+                if (statusVal === 'completed' || statusVal === 'complete') {
+                    return true;
+                }
+                if (row.task_details) {
+                    const taskStatus = (row.task_details.status || '').toLowerCase().trim();
+                    if (taskStatus === 'completed' || taskStatus === 'approved') {
+                        return true;
+                    }
+                }
+                return false;
+            },
+
+            renderCharts() {
+                this.$nextTick(() => {
+                    const ctx = document.getElementById('priorityChart');
+                    if (!ctx) return;
+                    
+                    const priorityCounts = { 'Urgent': 0, 'High': 0, 'Med': 0, 'Low': 0 };
+                    this.filteredRows().forEach(row => {
+                        const priority = this.getCellValue(row, 'PRIORITY');
+                        if (priority in priorityCounts) {
+                            priorityCounts[priority]++;
+                        } else if (priority) {
+                            const pl = priority.toLowerCase();
+                            if (pl.startsWith('med')) {
+                                priorityCounts['Med']++;
+                            } else if (pl.startsWith('urg')) {
+                                priorityCounts['Urgent']++;
+                            } else if (pl.startsWith('hi')) {
+                                priorityCounts['High']++;
+                            } else if (pl.startsWith('lo')) {
+                                priorityCounts['Low']++;
+                            }
+                        }
+                    });
+                    
+                    if (this.chartInstance) {
+                        this.chartInstance.destroy();
+                    }
+                    
+                    this.chartInstance = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: ['Urgent', 'High', 'Med', 'Low'],
+                            datasets: [{
+                                label: 'Tasks',
+                                data: [
+                                    priorityCounts['Urgent'],
+                                    priorityCounts['High'],
+                                    priorityCounts['Med'],
+                                    priorityCounts['Low']
+                                ],
+                                backgroundColor: [
+                                    '#ef4444',
+                                    '#f59e0b',
+                                    '#3b82f6',
+                                    '#10b981'
+                                ],
+                                borderRadius: 4
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { display: false }
+                            },
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    ticks: { stepSize: 1 }
+                                }
+                            }
+                        }
+                    });
+                });
+            },
+
+            fetchRows() {
+                fetch(`/tables/api/rows/?table=${this.tableId}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        this.rows = data;
+                        if (this.autoOpenTaskId) {
+                            const matchingRow = this.rows.find(r => r.task_details && r.task_details.id === this.autoOpenTaskId);
+                            if (matchingRow) {
+                                this.openTaskModal(matchingRow);
+                            }
+                            this.autoOpenTaskId = null;
+                        }
+                        if (this.showDashboard) {
+                            this.renderCharts();
+                        }
+                    });
+            },
+
+            fetchRecipients() {
+                fetch('/tasks/api/tasks/recipients/')
+                    .then(res => res.json())
+                    .then(data => {
+                        this.recipients = data;
+                    });
+            },
+
+            submitFlagIssue() {
+                if (!this.activeRow || !this.activeRow.task_details) {
+                    alert("No active task associated with this row. Please mark the task first.");
+                    return;
+                }
+                if (!this.flagRecipientId || !this.flagDescription) {
+                    alert("Please select a recipient and enter a description.");
+                    return;
+                }
+                fetch(`/tasks/api/tasks/${this.activeRow.task_details.id}/flag-issue/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({
+                        recipient_id: this.flagRecipientId,
+                        description: this.flagDescription
+                    })
+                })
+                .then(res => {
+                    if (res.ok) {
+                        alert("Issue flagged successfully!");
+                        this.flagRecipientId = '';
+                        this.flagDescription = '';
+                        this.fetchComments();
+                    } else {
+                        alert("Error flagging issue.");
+                    }
+                });
+            },
+
+            isOverdue(row) {
+                if (!row || !row.task_details) return false;
+                const status = row.task_details.status;
+                if (status === 'COMPLETED' || status === 'APPROVED') return false;
+                const dueDateVal = this.getCellValue(row, 'DUE_DATE');
+                if (!dueDateVal) return false;
+                
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                
+                const dueDate = new Date(dueDateVal);
+                dueDate.setHours(0, 0, 0, 0);
+                
+                return dueDate < today;
+            },
+
+            getCellValue(row, columnName) {
+                const cell = row.cells.find(c => c.column_name === columnName);
+                return cell ? cell.value : '';
+            },
+
+             editCell(rowId, columnId, currentValue, columnType) {
+                 if (columnType === 'CHECKBOX') return; // Checkbox toggles directly
+                 this.editingRowId = rowId;
+                 this.editingColumnId = columnId;
+                 this.editingValue = currentValue;
+             },
+
+             toggleCheckbox(rowId, columnId, isChecked) {
+                 fetch(`/tables/api/rows/${rowId}/edit-cell/`, {
+                     method: 'POST',
+                     headers: {
+                         'Content-Type': 'application/json',
+                         'X-CSRFToken': '{{ csrf_token }}'
+                     },
+                     body: JSON.stringify({
+                         column: columnId,
+                         value: isChecked ? 'true' : 'false'
+                     })
+                 })
+                 .then(res => {
+                     if (res.ok) {
+                         this.fetchRows();
+                     } else {
+                         alert("Error updating checkbox.");
+                     }
+                 });
+             },
+
+            cancelEdit() {
+                if (this.isSavingCell) return;
+                this.editingRowId = null;
+                this.editingColumnId = null;
+            },
+
+            startRowEdit(row) {
+                this.rowEditingRowId = row.id;
+                this.editingRowValues = {};
+                this.columns.forEach(col => {
+                    this.editingRowValues[col.name] = this.getCellValue(row, col.name);
+                });
+            },
+
+            cancelRowEdit() {
+                this.rowEditingRowId = null;
+                this.editingRowValues = {};
+            },
+
+            saveRowEdit() {
+                if (this.rowEditingRowId === null) return;
+                const rowId = this.rowEditingRowId;
+                
+                fetch(`/tables/api/rows/${rowId}/edit-row/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({
+                        cells: this.editingRowValues
+                    })
+                })
+                .then(res => {
+                    if (res.ok) {
+                        this.fetchRows();
+                    } else {
+                        alert("Error saving row changes.");
+                    }
+                })
+                .finally(() => {
+                    this.cancelRowEdit();
+                });
+            },
+
+            saveCell() {
+                if (this.editingRowId === null || this.isSavingCell) return;
+                this.isSavingCell = true;
+
+                const rowId = this.editingRowId;
+                const colId = this.editingColumnId;
+                const val = this.editingValue;
+
+                fetch(`/tables/api/rows/${rowId}/edit-cell/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({
+                        column: colId,
+                        value: val
+                    })
+                })
+                .then(res => {
+                    if (res.ok) {
+                        this.fetchRows();
+                    }
+                })
+                .finally(() => {
+                    this.isSavingCell = false;
+                    this.cancelEdit();
+                });
+            },
+
+            // Drag and Fill Methods
+            startDragFill(rowId, columnId, value, event) {
+                this.isDraggingFill = true;
+                this.dragStartRowId = rowId;
+                this.dragColumnId = columnId;
+                this.dragValue = value;
+                this.hoverRowId = rowId;
+            },
+
+            onRowHover(rowId) {
+                if (this.isDraggingFill) {
+                    this.hoverRowId = rowId;
+                }
+            },
+
+            endDragFill() {
+                if (!this.isDraggingFill) return;
+                const startIdx = this.rows.findIndex(r => r.id === this.dragStartRowId);
+                const endIdx = this.rows.findIndex(r => r.id === this.hoverRowId);
+                if (startIdx !== -1 && endIdx !== -1) {
+                    const minIdx = Math.min(startIdx, endIdx);
+                    const maxIdx = Math.max(startIdx, endIdx);
+                    const rowsToUpdate = this.rows.slice(minIdx, maxIdx + 1);
+
+                    const promises = rowsToUpdate.map(r => {
+                        return fetch(`/tables/api/rows/${r.id}/edit-cell/`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRFToken': '{{ csrf_token }}'
+                            },
+                            body: JSON.stringify({
+                                column: this.dragColumnId,
+                                value: this.dragValue
+                            })
+                        });
+                    });
+
+                    Promise.all(promises).then(() => {
+                        this.fetchRows();
+                    });
+                }
+                this.isDraggingFill = false;
+                this.dragStartRowId = null;
+                this.dragColumnId = null;
+                this.dragValue = null;
+            },
+
+            isCellDragged(rowId, columnId) {
+                if (!this.isDraggingFill || columnId !== this.dragColumnId) return false;
+                const startIdx = this.rows.findIndex(r => r.id === this.dragStartRowId);
+                const endIdx = this.rows.findIndex(r => r.id === this.hoverRowId);
+                const currentIdx = this.rows.findIndex(r => r.id === rowId);
+                if (startIdx === -1 || endIdx === -1 || currentIdx === -1) return false;
+                return currentIdx >= Math.min(startIdx, endIdx) && currentIdx <= Math.max(startIdx, endIdx);
+            },
+
+            submitInlineRow() {
+                if (!this.newRowCells.TASK_NAME || !this.newRowCells.DUE_DATE) {
+                    alert("Task Name and Due Date are mandatory fields.");
+                    return;
+                }
+
+                // If PID filter is active, automatically assign it to the new row
+                if (this.selectedPidFilter) {
+                    this.newRowCells['PID'] = this.selectedPidFilter;
+                }
+
+                fetch('/tables/api/rows/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({
+                        table: this.tableId,
+                        cells: this.newRowCells
+                    })
+                })
+                .then(res => {
+                    if (res.ok) {
+                        this.fetchRows();
+                        // Reset form fields
+                        this.newRowCells = {
+                            TASK_NAME: '',
+                            DUE_DATE: ''
+                        };
+                    } else {
+                        alert("Error saving row. Verify inputs.");
+                    }
+                });
+            },
+
+            deleteRow(rowId) {
+                if (!confirm("Are you sure you want to delete this row?")) return;
+                fetch(`/tables/api/rows/${rowId}/`, {
+                    method: 'DELETE',
+                    headers: {
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    }
+                })
+                .then(res => {
+                    if (res.ok) {
+                        this.fetchRows();
+                    } else {
+                        res.json().then(data => {
+                            alert(data.error || "Failed to delete row.");
+                        }).catch(() => {
+                            alert("Failed to delete row (Permission Denied).");
+                        });
+                    }
+                })
+                .catch(err => {
+                    alert("An error occurred: " + err);
+                });
+            },
+
+            // Column Builder
+            openColumnModal() {
+                this.isColumnModalOpen = true;
+                this.newColumnName = '';
+                this.newColumnType = 'TEXT';
+            },
+
+            createColumn() {
+                fetch('/tables/api/columns/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({
+                        table: this.tableId,
+                        name: this.newColumnName,
+                        data_type: this.newColumnType,
+                        options: this.newColumnOptions
+                    })
+                })
+                .then(res => {
+                    if (res.ok) {
+                        location.reload(); 
+                    } else {
+                        alert("Error adding column.");
+                    }
+                });
+            },
+
+            openEditColumnModal(columnId, columnName, columnType, columnOptions) {
+                this.editColumnId = columnId;
+                this.editColumnName = columnName;
+                this.editColumnType = columnType;
+                this.editColumnOptions = columnOptions || '';
+                this.isEditColumnModalOpen = true;
+            },
+
+            saveColumnProperties() {
+                if (!this.editColumnId) return;
+                fetch(`/tables/api/columns/${this.editColumnId}/`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({
+                        name: this.editColumnName,
+                        data_type: this.editColumnType,
+                        options: this.editColumnOptions
+                    })
+                })
+                .then(res => {
+                    if (res.ok) {
+                        location.reload();
+                    } else {
+                        alert("Error saving column properties.");
+                    }
+                });
+            },
+
+            // Duplication
+            duplicateTable() {
+                if (!confirm("Duplicate this table layout?")) return;
+                fetch(`/tables/api/tables/${this.tableId}/duplicate/`, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    }
+                })
+                .then(res => res.json())
+                .then(newTable => {
+                    if (newTable.id) {
+                        alert("Table duplicated successfully!");
+                        window.location.href = `/tables/${newTable.id}/`;
+                    }
+                });
+            },
+
+            // Import Actions
+            openImportModal() {
+                this.isImportModalOpen = true;
+                this.importTab = 'csv';
+                this.googleSheetUrl = '';
+                this.isImporting = false;
+            },
+
+            uploadCSV() {
+                const fileInput = document.getElementById("csvFileInput");
+                if (!fileInput.files.length) {
+                    alert("Please choose a file first.");
+                    return;
+                }
+                this.isImporting = true;
+                const formData = new FormData();
+                formData.append("file", fileInput.files[0]);
+
+                fetch(`/tables/api/tables/${this.tableId}/import-csv/`, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: formData
+                })
+                .then(res => res.json().then(data => ({ status: res.status, data })))
+                .then(result => {
+                    if (result.status === 201) {
+                        alert(result.data.message);
+                        this.isImportModalOpen = false;
+                        this.fetchRows();
+                    } else {
+                        alert(result.data.error || "Failed to import CSV");
+                    }
+                })
+                .catch(err => {
+                    alert("An error occurred: " + err);
+                })
+                .finally(() => {
+                    this.isImporting = false;
+                });
+            },
+
+            uploadGoogleSheet() {
+                if (!this.googleSheetUrl) {
+                    alert("Please enter a Google Sheet URL.");
+                    return;
+                }
+                this.isImporting = true;
+
+                fetch(`/tables/api/tables/${this.tableId}/import-google-sheet/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({ url: this.googleSheetUrl })
+                })
+                .then(res => res.json().then(data => ({ status: res.status, data })))
+                .then(result => {
+                    if (result.status === 201) {
+                        alert(result.data.message);
+                        this.isImportModalOpen = false;
+                        this.fetchRows();
+                    } else {
+                        alert(result.data.error || "Failed to import Google Sheet");
+                    }
+                })
+                .catch(err => {
+                    alert("An error occurred: " + err);
+                })
+                .finally(() => {
+                    this.isImporting = false;
+                });
+            },
+
+
+
+            // Task Details & Comment Drawer
+            openTaskModal(row) {
+                this.activeRow = row;
+                this.activeTaskName = this.getCellValue(row, 'TASK_NAME');
+                this.activeTaskDueDate = this.getCellValue(row, 'DUE_DATE');
+                this.activeTaskPriority = row.task_details ? row.task_details.priority : 'MEDIUM';
+                this.activeTaskStatus = row.task_details ? row.task_details.status : 'PENDING';
+                this.isTaskModalOpen = true;
+                
+                this.fetchComments();
+            },
+
+            fetchComments() {
+                if (!this.activeRow.task_details) return;
+                fetch(`/tasks/api/comments/?task=${this.activeRow.task_details.id}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        this.comments = data;
+                    });
+            },
+
+            postComment() {
+                if (!this.activeRow.task_details || !this.newCommentText) return;
+                fetch('/tasks/api/comments/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({
+                        task: this.activeRow.task_details.id,
+                        content: this.newCommentText
+                    })
+                })
+                .then(res => {
+                    if (res.ok) {
+                        this.newCommentText = '';
+                        this.fetchComments();
+                    }
+                });
+            },
+
+            updateTaskStatus() {
+                if (!this.activeRow.task_details) return;
+                fetch(`/tasks/api/tasks/${this.activeRow.task_details.id}/update-status/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({
+                        status: this.activeTaskStatus
+                    })
+                })
+                .then(res => {
+                    if (res.ok) {
+                        this.fetchRows();
+                    }
+                });
+            },
+
+             toggleTaskCompletion(taskId, currentStatus) {
+                 const newStatus = (currentStatus === 'COMPLETED' || currentStatus === 'APPROVED') ? 'PENDING' : 'COMPLETED';
+                 fetch(`/tasks/api/tasks/${taskId}/update-status/`, {
+                     method: 'POST',
+                     headers: {
+                         'Content-Type': 'application/json',
+                         'X-CSRFToken': '{{ csrf_token }}'
+                     },
+                     body: JSON.stringify({
+                         status: newStatus
+                     })
+                 })
+                 .then(res => {
+                     if (res.ok) {
+                         this.fetchRows();
+                     } else {
+                         alert("Failed to update task completion.");
+                     }
+                 });
+             },
+
+            moveColumnLeft(columnId) {
+                const index = this.columns.findIndex(c => c.id === columnId);
+                if (index <= 0) return;
+                const newCols = [...this.columns];
+                const temp = newCols[index];
+                newCols[index] = newCols[index - 1];
+                newCols[index - 1] = temp;
+                this.saveColumnOrder(newCols.map(c => c.id));
+            },
+
+            moveColumnRight(columnId) {
+                const index = this.columns.findIndex(c => c.id === columnId);
+                if (index < 0 || index >= this.columns.length - 1) return;
+                const newCols = [...this.columns];
+                const temp = newCols[index];
+                newCols[index] = newCols[index + 1];
+                newCols[index + 1] = temp;
+                this.saveColumnOrder(newCols.map(c => c.id));
+            },
+
+            saveColumnOrder(colIds) {
+                fetch('/tables/api/columns/reorder/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({
+                        columns: colIds
+                    })
+                })
+                .then(res => {
+                    if (res.ok) {
+                        location.reload();
+                    } else {
+                        alert("Error reordering columns.");
+                    }
+                });
+            }
+        };
+    }
+</script>
+{% endblock %}

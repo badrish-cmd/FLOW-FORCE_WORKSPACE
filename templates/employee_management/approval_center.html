@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+
+{% block title %}Employee Approvals - Flow-Force Workspace{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="breadcrumb-nav">
+    <ol class="breadcrumb mb-0">
+        <li class="breadcrumb-item">
+            <a href="/" class="text-decoration-none"><i class="fas fa-home"></i> Dashboard</a>
+        </li>
+        <li class="breadcrumb-item active" aria-current="page">
+            <i class="fas fa-check-circle"></i> Approval Center
+        </li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="card shadow-sm mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center bg-light border-bottom">
+            <h5 class="mb-0 fw-bold text-dark">Pending Employee Approvals</h5>
+            <span class="badge bg-primary">{{ pending_count }} Pending</span>
+        </div>
+        <div class="card-body">
+            <!-- Search & Filters -->
+            <div class="mb-4">
+                <form method="get" class="row g-2 align-items-end">
+                    <div class="col-12 col-md-6 col-lg-4">
+                        <label class="form-label small fw-bold">Search</label>
+                        <input
+                            type="text"
+                            name="search"
+                            class="form-control"
+                            placeholder="Search by name or email..."
+                            value="{{ search }}"
+                        >
+                    </div>
+                    <div class="col-12 col-md-4 col-lg-3">
+                        <label class="form-label small fw-bold">Priority</label>
+                        <select name="priority" class="form-select">
+                            <option value="">All Priorities</option>
+                            {% for value, label in priorities %}
+                                <option value="{{ value }}" {% if priority == value %}selected{% endif %}>
+                                    {{ label }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-2">
+                        <button type="submit" class="btn btn-primary btn-sm w-100" style="height: 38px;">Filter</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Approvals Table -->
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th>Employee</th>
+                            <th>Email</th>
+                            <th>Priority</th>
+                            <th>Submitted</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for approval in approvals %}
+                            <tr>
+                                <td>
+                                    <strong>{{ approval.employee.full_name }}</strong>
+                                </td>
+                                <td>
+                                    {{ approval.employee.email }}
+                                </td>
+
+                                <td>
+                                    {% if approval.priority == "LOW" %}
+                                        <span class="badge bg-success">{{ approval.get_priority_display }}</span>
+                                    {% elif approval.priority == "MEDIUM" %}
+                                        <span class="badge bg-warning text-dark">{{ approval.get_priority_display }}</span>
+                                    {% elif approval.priority == "HIGH" %}
+                                        <span class="badge bg-danger">{{ approval.get_priority_display }}</span>
+                                    {% elif approval.priority == "URGENT" %}
+                                        <span class="badge bg-danger text-uppercase">{{ approval.get_priority_display }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <small class="text-muted">{{ approval.submitted_at|date:"M d, Y" }}</small>
+                                </td>
+                                <td>
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <a
+                                            href="{% url 'employee_detail' approval.employee.id %}"
+                                            class="btn btn-ghost"
+                                            title="View Details"
+                                        >
+                                            <i class="fas fa-eye"></i> View
+                                        </a>
+                                        <form method="post" action="{% url 'employee_approve' approval.employee.id %}" style="display: inline;">
+                                            {% csrf_token %}
+                                            <button type="submit" class="btn btn-success text-white btn-sm px-2 ms-1" onclick="return confirm('Approve this employee?')">
+                                                <i class="fas fa-check"></i> Approve
+                                            </button>
+                                        </form>
+                                        <form method="post" action="{% url 'employee_reject' approval.employee.id %}" style="display: inline;">
+                                            {% csrf_token %}
+                                            <button type="submit" class="btn btn-danger text-white btn-sm px-2 ms-1" onclick="return confirm('Reject this employee?')">
+                                                <i class="fas fa-times"></i> Reject
+                                            </button>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="6" class="text-center py-5 text-muted">
+                                    <i class="fas fa-check-circle fa-3x mb-3 text-success"></i>
+                                    <p class="mb-0">No pending approvals!</p>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Pagination -->
+            {% if paginator.num_pages > 1 %}
+            <nav class="d-flex justify-content-between align-items-center mt-4">
+                <small class="text-muted">
+                    Page {{ approvals.number }} of {{ paginator.num_pages }}
+                </small>
+                <ul class="pagination mb-0">
+                    {% if approvals.has_previous %}
+                        <li class="page-item">
+                            <a class="page-link" href="?page=1&{{ request.GET.urlencode }}">First</a>
+                        </li>
+                        <li class="page-item">
+                            <a class="page-link" href="?page={{ approvals.previous_page_number }}&{{ request.GET.urlencode }}">Previous</a>
+                        </li>
+                    {% else %}
+                        <li class="page-item disabled"><span class="page-link">First</span></li>
+                        <li class="page-item disabled"><span class="page-link">Previous</span></li>
+                    {% endif %}
+
+                    {% for num in paginator.page_range %}
+                        {% if approvals.number == num %}
+                            <li class="page-item active"><span class="page-link">{{ num }}</span></li>
+                        {% elif num > approvals.number|add:'-3' and num < approvals.number|add:'3' %}
+                            <li class="page-item">
+                                <a class="page-link" href="?page={{ num }}&{{ request.GET.urlencode }}">{{ num }}</a>
+                            </li>
+                        {% endif %}
+                    {% endfor %}
+
+                    {% if approvals.has_next %}
+                        <li class="page-item">
+                            <a class="page-link" href="?page={{ approvals.next_page_number }}&{{ request.GET.urlencode }}">Next</a>
+                        </li>
+                        <li class="page-item">
+                            <a class="page-link" href="?page={{ paginator.num_pages }}&{{ request.GET.urlencode }}">Last</a>
+                        </li>
+                    {% else %}
+                        <li class="page-item disabled"><span class="page-link">Next</span></li>
+                        <li class="page-item disabled"><span class="page-link">Last</span></li>
+                    {% endif %}
+                </ul>
+            </nav>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

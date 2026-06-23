@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Trackers - Flow-Force Workspace{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="breadcrumb-nav">
+  <ol class="breadcrumb mb-0">
+    <li class="breadcrumb-item"><a href="/"><i class="fas fa-home"></i> Dashboard</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Trackers</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h4">Trackers</h1>
+    <a href="{% url 'task_tracker:tracker_create' %}" class="btn btn-primary btn-sm">Create Tracker</a>
+  </div>
+
+  {% if trackers %}
+    <div class="row g-3">
+      {% for tracker in trackers %}
+        <div class="col-md-4">
+          <div class="card h-100">
+            <div class="card-body d-flex flex-column">
+              <h5 class="card-title mb-1">{{ tracker.name }}</h5>
+              <p class="card-text text-muted mb-2">{{ tracker.description|default:'No description' }}</p>
+              <p class="mb-2"><span class="badge bg-info text-dark">{{ tracker.department.name }}</span></p>
+              <div class="mt-auto d-flex gap-2">
+                <a href="{% url 'task_tracker:tracker_detail' tracker.id %}" class="btn btn-outline-primary btn-sm">Open</a>
+                <a href="{% url 'task_tracker:tracker_edit' tracker.id %}" class="btn btn-outline-secondary btn-sm">Edit</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="text-center py-5 text-muted">
+      <i class="fas fa-inbox fa-2x mb-3"></i>
+      <p>No trackers available.</p>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

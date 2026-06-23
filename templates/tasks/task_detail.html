@@ -1,0 +1,119 @@
+{% extends 'base.html' %}
+
+{% block title %}Task Discussion - {{ task_name }} - Flow-Force Workspace{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-6 max-w-4xl mx-auto">
+    <!-- Breadcrumbs/Back navigation -->
+    <div class="mb-6 flex items-center justify-between">
+        <a href="/" class="inline-flex items-center text-xs font-semibold text-gray-500 hover:text-primary transition gap-1">
+            <i class="fas fa-arrow-left"></i> Back to Dashboard
+        </a>
+        <span class="text-xs bg-red-100 text-red-700 font-bold px-2.5 py-1 rounded-full uppercase tracking-wider">
+            Restricted Task View
+        </span>
+    </div>
+
+    <!-- Alert Box: Access Notice -->
+    <div class="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r-xl shadow-sm mb-6 flex gap-3">
+        <div class="text-amber-500 mt-0.5">
+            <i class="fas fa-exclamation-triangle text-lg"></i>
+        </div>
+        <div>
+            <h4 class="text-sm font-bold text-amber-800">Restricted Access Notice</h4>
+            <p class="text-xs text-amber-700 mt-1">
+                You do not have access permissions to view the full spreadsheet workspace for <strong>{{ table_name }}</strong>. 
+                However, you can view this task's details and participate in the discussion thread below.
+            </p>
+        </div>
+    </div>
+
+    <!-- Main Content Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Sidebar: Task Details -->
+        <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-4">
+            <h3 class="text-sm font-bold uppercase tracking-wider text-gray-400">Task Details</h3>
+            
+            <div class="space-y-3 text-xs">
+                <div>
+                    <span class="text-gray-400 font-medium block mb-0.5">Task Name</span>
+                    <span class="font-bold text-gray-800 text-sm block" style="word-wrap: break-word;">{{ task_name }}</span>
+                </div>
+                <div>
+                    <span class="text-gray-400 font-medium block mb-0.5">Spreadsheet Table</span>
+                    <span class="font-semibold text-gray-800 block">{{ table_name }}</span>
+                </div>
+                <div>
+                    <span class="text-gray-400 font-medium block mb-0.5">Due Date</span>
+                    <span class="font-semibold text-gray-800 block">{{ task.due_date|date:"F d, Y" }}</span>
+                </div>
+                <div>
+                    <span class="text-gray-400 font-medium block mb-0.5">Priority</span>
+                    <span class="inline-block px-2 py-0.5 font-bold rounded-full text-[10px] uppercase
+                        {% if task.priority == 'CRITICAL' %} bg-red-100 text-red-800
+                        {% elif task.priority == 'HIGH' %} bg-orange-100 text-orange-800
+                        {% elif task.priority == 'MEDIUM' %} bg-blue-100 text-blue-800
+                        {% else %} bg-gray-100 text-gray-800 {% endif %}">
+                        {{ task.priority }}
+                    </span>
+                </div>
+                <div>
+                    <span class="text-gray-400 font-medium block mb-0.5">Status</span>
+                    <span class="inline-block px-2 py-0.5 font-bold rounded-full text-[10px] uppercase
+                        {% if task.status == 'COMPLETED' or task.status == 'APPROVED' %} bg-green-100 text-green-800
+                        {% elif task.status == 'READY_FOR_REVIEW' %} bg-purple-100 text-purple-800
+                        {% elif task.status == 'IN_PROGRESS' %} bg-yellow-100 text-yellow-800
+                        {% else %} bg-slate-100 text-slate-800 {% endif %}">
+                        {{ task.status }}
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Panel: Comment Thread -->
+        <div class="lg:col-span-2 bg-white rounded-xl border border-gray-200 shadow-sm p-6 flex flex-col justify-between min-h-[500px]">
+            <div>
+                <h3 class="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4 flex items-center gap-1.5">
+                    <i class="fas fa-comments text-primary"></i> Task Discussion History
+                </h3>
+
+                <!-- Messages/Comments List -->
+                <div class="space-y-4 max-h-[350px] overflow-y-auto pr-2 mb-6">
+                    {% for comment in comments %}
+                        <div class="flex flex-col p-3.5 bg-gray-50 rounded-xl border border-gray-100 text-xs gap-1.5 
+                            {% if comment.author == request.user %} border-l-4 border-l-primary {% endif %}">
+                            <div class="flex items-center justify-between text-[11px] text-gray-400">
+                                <span class="font-bold text-gray-700">
+                                    {{ comment.author.full_name|default:comment.author.email }} 
+                                    <span class="text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded bg-gray-200/50 text-gray-500">
+                                        {{ comment.author.role }}
+                                    </span>
+                                </span>
+                                <span>{{ comment.created_at|date:"M d, Y H:i" }}</span>
+                            </div>
+                            <p class="text-gray-800 leading-relaxed" style="white-space: pre-wrap;">{{ comment.content }}</p>
+                        </div>
+                    {% empty %}
+                        <div class="text-center py-12 text-gray-400 italic">
+                            No messages or comments have been posted yet.
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Comment Posting Form -->
+            <div class="border-t border-gray-100 pt-4">
+                <form method="POST" action="">
+                    {% csrf_token %}
+                    <label for="content" class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Write your response</label>
+                    <textarea name="content" id="content" required placeholder="Type your reply to the sender or admin here..." class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-3 text-xs focus:ring-primary focus:border-primary mb-3 focus:bg-white transition-all" rows="3"></textarea>
+                    
+                    <button type="submit" class="w-full bg-primary hover:bg-blue-700 text-white font-semibold rounded-lg text-xs py-2.5 transition duration-150 ease-in-out flex items-center justify-center gap-1.5 shadow-sm">
+                        <i class="fas fa-paper-plane"></i> Send Reply
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

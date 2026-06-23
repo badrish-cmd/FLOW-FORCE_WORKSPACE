@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+{% load static %}
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#1F2937">
+    <title>{% block title %}Flow-Force Workspace{% endblock %}</title>
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#2563EB',
+                        secondary: '#1F2937',
+                        accent: '#10B981',
+                        warning: '#F59E0B',
+                        error: '#EF4444',
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    
+    <!-- HTMX -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Modern CSS -->
+    <link rel="stylesheet" href="{% static 'css/modern-style.css' %}">
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        {% block sidebar %}
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-brand">
+                    <i class="fas fa-rocket brand-icon"></i>
+                    <span class="brand-name">Flow-Force</span>
+                </div>
+                <button class="sidebar-toggler btn-sm d-lg-none">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <nav class="sidebar-nav">
+                {% if user.is_authenticated %}
+                    <div class="nav-section">
+                        <div class="nav-label">MAIN</div>
+                        <ul class="nav-menu">
+                            <li>
+                                <a href="/" class="nav-link {% if request.resolver_match.app_name == 'dashboard' %}active{% endif %}">
+                                    <i class="fas fa-chart-line"></i>
+                                    <span>Dashboard</span>
+                                </a>
+                            </li>
+                            <li>
+                                <a href="{% url 'tables:table_list' %}" class="nav-link {% if request.resolver_match.view_name == 'tables:table_list' %}active{% endif %}">
+                                    <i class="fas fa-table"></i>
+                                    <span>Tables</span>
+                                </a>
+                            </li>
+                            <li>
+                                <a href="/employees/" class="nav-link {% if request.resolver_match.app_name == 'employee_management' %}active{% endif %}">
+                                    <i class="fas fa-users"></i>
+                                    <span>{% if user.role == 'EMPLOYEE' %}Co-workers{% else %}Employees{% endif %}</span>
+                                </a>
+                            </li>
+                            <li>
+                                <a href="{% url 'task_tracker:tracker_dashboard' %}" class="nav-link {% if request.resolver_match.view_name == 'task_tracker:tracker_dashboard' %}active{% endif %}">
+                                    <i class="fas fa-tasks"></i>
+                                    <span>Trackers Dashboard</span>
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <!-- Dynamic Shared Trackers -->
+                    {% if user.role not in 'SUPER_ADMIN,ADMIN' %}
+                    <div class="nav-section">
+                        <div class="nav-label">MY TABLES</div>
+                        <ul class="nav-menu">
+                            {% for tracker in sidebar_trackers %}
+                            <li>
+                                <a href="{% url 'tables:table_spreadsheet' tracker.id %}" class="nav-link {% if request.resolver_match.kwargs.table_id == tracker.id %}active{% endif %}">
+                                    <i class="fas fa-table" style="color: {{ tracker.department.color|default:'#0066FF' }}"></i>
+                                    <span class="text-truncate" style="max-width: 180px;">{{ tracker.name }}</span>
+                                </a>
+                            </li>
+                            {% empty %}
+                            <li class="px-3 py-1 text-muted small"><i class="fas fa-info-circle me-1"></i>No tables shared.</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+                    
+                    {% if user.role in 'SUPER_ADMIN,ADMIN,DEPARTMENT_ADMIN' %}
+                    <div class="nav-section">
+                        <div class="nav-label">ADMIN</div>
+                        <ul class="nav-menu">
+                            <li>
+                                <a href="{% url 'approval_center' %}" class="nav-link {% if request.resolver_match.view_name == 'approval_center' %}active{% endif %}">
+                                    <i class="fas fa-check-circle"></i>
+                                    <span>Approvals</span>
+                                </a>
+                            </li>
+                            {% if user.role in 'SUPER_ADMIN,ADMIN' %}
+                            <li>
+                                <a href="{% url 'global_activity_logs' %}" class="nav-link {% if request.resolver_match.view_name == 'global_activity_logs' %}active{% endif %}">
+                                    <i class="fas fa-history"></i>
+                                    <span>Activity Logs</span>
+                                </a>
+                            </li>
+                            <li>
+                                <a href="{% url 'tables:table_create' %}" class="nav-link {% if request.resolver_match.view_name == 'tables:table_create' %}active{% endif %}">
+                                    <i class="fas fa-plus-circle"></i>
+                                    <span>Create Table</span>
+                                </a>
+                            </li>
+                            {% endif %}
+                            <li>
+                                <a href="{% url 'tasks:reports' %}" class="nav-link {% if request.resolver_match.view_name == 'tasks:reports' %}active{% endif %}">
+                                    <span style="width: 20px; display: inline-flex; justify-content: center; align-items: center;">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                            <polyline points="14 2 14 8 20 8"></polyline>
+                                            <line x1="16" y1="13" x2="8" y2="13"></line>
+                                            <line x1="16" y1="17" x2="8" y2="17"></line>
+                                            <polyline points="10 9 9 9 8 9"></polyline>
+                                        </svg>
+                                    </span>
+                                    <span>Reports</span>
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                    {% endif %}
+                {% endif %}
+            </nav>
+            
+            {% if user.is_authenticated %}
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <div class="user-avatar">
+                        <i class="fas fa-user-circle"></i>
+                    </div>
+                    <div class="user-details">
+                        <div class="user-name">{{ user.full_name }}</div>
+                        <div class="user-role">{{ user.get_role_display }}</div>
+                    </div>
+                </div>
+                <a href="/logout/" class="btn-logout" title="Logout">
+                    <i class="fas fa-sign-out-alt"></i>
+                </a>
+            </div>
+            {% endif %}
+        </aside>
+        {% endblock %}
+        
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            {% block header %}
+            <header class="app-header">
+                <div class="header-left">
+                    <button class="btn-sidebar-toggle d-lg-none">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                    {% block breadcrumbs %}{% endblock %}
+                </div>
+                
+                <div class="header-right">
+                    {% block header_actions %}
+                    <button class="btn btn-icon btn-sm position-relative" data-bs-toggle="offcanvas" data-bs-target="#notificationsPanel" title="Notifications" style="display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px;">
+                        <i class="fas fa-bell" style="font-size: 1.15rem;"></i>
+                        {% if task_notifications_unread %}
+                            <span class="position-absolute bg-danger rounded-circle" style="top: 4px; right: 4px; width: 8px; height: 8px; border: 1.5px solid #fff;" title="{{ task_notifications_unread }} new notification(s)"></span>
+                        {% else %}
+                            <span class="position-absolute bg-success rounded-circle" style="top: 4px; right: 4px; width: 8px; height: 8px; border: 1.5px solid #fff;"></span>
+                        {% endif %}
+                    </button>
+                    {% endblock %}
+                </div>
+            </header>
+            {% endblock %}
+            
+            <!-- Page Content -->
+            <div class="page-container">
+                {% if messages %}
+                <div class="messages-container">
+                    {% for message in messages %}
+                    <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                
+                {% block content %}
+                <div class="content-area">
+                    <!-- Content goes here -->
+                </div>
+                {% endblock %}
+            </div>
+        </main>
+    </div>
+    
+    <!-- Notifications Panel Offcanvas -->
+    <div class="offcanvas offcanvas-end" tabindex="-1" id="notificationsPanel">
+        <div class="offcanvas-header">
+            <h5 class="offcanvas-title">Notifications</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
+        </div>
+        <div class="offcanvas-body p-0">
+            <div class="notifications-list">
+                <!-- Need to See Section -->
+                <div class="px-3 py-2 bg-light border-bottom text-uppercase text-xs font-bold text-muted tracking-wider" style="font-size: 0.75rem; letter-spacing: 0.05em;">
+                    Need to See
+                </div>
+                {% if unread_notifications %}
+                    {% for notification in unread_notifications %}
+                        <a href="{% url 'notification_mark_read' notification.id %}" class="notification-item text-decoration-none text-reset d-flex p-3 border-bottom hover:bg-gray-50">
+                            <div class="notification-icon me-3">
+                                <i class="fas fa-bell text-primary"></i>
+                            </div>
+                            <div class="notification-content w-100">
+                                <div class="notification-title font-bold text-gray-800">{{ notification.title }}</div>
+                                <div class="notification-time small text-muted my-1"><i class="far fa-clock me-1"></i>{{ notification.created_at|date:'M j, Y H:i' }}</div>
+                                <div class="notification-text small text-gray-600 bg-gray-50 p-2 rounded border border-gray-100">
+                                    {% if notification.task %}
+                                        <div class="mb-1 text-xs text-gray-500"><i class="fas fa-table me-1 text-blue-500"></i><strong>Table:</strong> {{ notification.task.table_name }}</div>
+                                        <div class="mb-1 text-xs text-gray-500"><i class="fas fa-tasks me-1 text-emerald-500"></i><strong>Task:</strong> {{ notification.task.task_name }}</div>
+                                    {% endif %}
+                                    <div class="mt-1 text-xs">{{ notification.description }}</div>
+                                </div>
+                            </div>
+                        </a>
+                    {% endfor %}
+                {% else %}
+                    <div class="notification-item p-3 text-muted text-center small border-bottom">
+                        No new notifications.
+                    </div>
+                {% endif %}
+
+                <!-- Seen Section -->
+                <div class="px-3 py-2 bg-light border-bottom text-uppercase text-xs font-bold text-muted tracking-wider mt-2" style="font-size: 0.75rem; letter-spacing: 0.05em;">
+                    Seen
+                </div>
+                {% if read_notifications %}
+                    {% for notification in read_notifications %}
+                        <div class="notification-item d-flex p-3 border-bottom opacity-75">
+                            <div class="notification-icon me-3">
+                                <i class="fas fa-check-circle text-success"></i>
+                            </div>
+                            <div class="notification-content w-100">
+                                <div class="notification-title font-semibold text-gray-700">{{ notification.title }}</div>
+                                <div class="notification-time small text-muted my-1"><i class="far fa-clock me-1"></i>{{ notification.created_at|date:'M j, Y H:i' }}</div>
+                                <div class="notification-text small text-gray-600 bg-gray-50 p-2 rounded border border-gray-100">
+                                    {% if notification.task %}
+                                        <div class="mb-1 text-xs text-gray-500"><i class="fas fa-table me-1 text-blue-500"></i><strong>Table:</strong> {{ notification.task.table_name }}</div>
+                                        <div class="mb-1 text-xs text-gray-500"><i class="fas fa-tasks me-1 text-emerald-500"></i><strong>Task:</strong> {{ notification.task.task_name }}</div>
+                                    {% endif %}
+                                    <div class="mt-1 text-xs">{{ notification.description }}</div>
+                                </div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="notification-item p-3 text-muted text-center small">
+                        No seen notifications.
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <!-- Bootstrap 5 JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Modern JS -->
+    <script src="{% static 'js/modern-app.js' %}"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

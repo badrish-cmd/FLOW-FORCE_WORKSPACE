@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block title %}Activity History - {{ employee.full_name }} - Flow-Force Workspace{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="breadcrumb-nav">
+    <ol class="breadcrumb mb-0">
+        <li class="breadcrumb-item">
+            <a href="/" class="text-decoration-none"><i class="fas fa-home"></i> Dashboard</a>
+        </li>
+        <li class="breadcrumb-item">
+            <a href="/employees/" class="text-decoration-none"><i class="fas fa-users"></i> Employees</a>
+        </li>
+        <li class="breadcrumb-item">
+            <a href="{% url 'employee_detail' employee.id %}" class="text-decoration-none">{{ employee.full_name }}</a>
+        </li>
+        <li class="breadcrumb-item active" aria-current="page">
+            Activity History
+        </li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="card shadow-sm mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center bg-light border-bottom">
+            <div>
+                <h5 class="mb-0 fw-bold text-dark">Activity History</h5>
+                <small class="text-muted">Employee: <strong>{{ employee.full_name }}</strong></small>
+            </div>
+            <a href="{% url 'employee_detail' employee.id %}" class="btn btn-sm btn-ghost">
+                <i class="fas fa-arrow-left me-1"></i> Back to Employee
+            </a>
+        </div>
+        <div class="card-body">
+            <!-- Filter -->
+            <div class="mb-4">
+                <form method="get" class="row g-2 align-items-end">
+                    <div class="col-12 col-md-6 col-lg-4">
+                        <label class="form-label small fw-bold">Activity Type</label>
+                        <select name="type" class="form-select">
+                            <option value="">All Activity Types</option>
+                            {% for value, label in activity_types %}
+                                <option value="{{ value }}" {% if activity_type == value %}selected{% endif %}>
+                                    {{ label }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-2">
+                        <button type="submit" class="btn btn-primary btn-sm w-100" style="height: 38px;">Filter</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Activity List -->
+            {% if activity_logs %}
+                <div class="activity-list d-flex flex-column gap-3">
+                    {% for log in activity_logs %}
+                        <div class="p-3 rounded border-start border-primary border-4 bg-light shadow-sm" style="transition: transform 0.2s ease;">
+                            <div class="row align-items-start">
+                                <div class="col-auto">
+                                    {% include "employee_management/partials/activity_badge.html" with activity_type=log.activity_type %}
+                                </div>
+                                <div class="col">
+                                    <h6 class="mb-1 fw-bold text-dark">{{ log.get_activity_type_display }}</h6>
+                                    <p class="mb-2 text-muted small">{{ log.description }}</p>
+                                    <div class="d-flex flex-wrap gap-3 small text-muted">
+                                        {% if log.performed_by %}
+                                            <span><i class="fas fa-user me-1"></i><strong>By:</strong> {{ log.performed_by.full_name }}</span>
+                                        {% endif %}
+                                        <span><i class="fas fa-calendar-alt me-1"></i><strong>Date:</strong> {{ log.created_at|date:"M j, Y H:i" }}</span>
+                                        {% if log.ip_address %}
+                                            <span><i class="fas fa-desktop me-1"></i><strong>IP:</strong> {{ log.ip_address }}</span>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                {% if log.changes %}
+                                    <div class="col-auto">
+                                        <button
+                                            class="btn btn-sm btn-ghost"
+                                            data-bs-toggle="collapse"
+                                            data-bs-target="#changes-{{ log.id }}"
+                                        >
+                                            <i class="fas fa-info-circle me-1"></i> Changes
+                                        </button>
+                                    </div>
+                                {% endif %}
+                            </div>
+
+                            {% if log.changes %}
+                                <div class="collapse mt-3" id="changes-{{ log.id }}">
+                                    <div class="card card-body p-2 border-0 bg-white shadow-inner">
+                                        <div class="table-responsive">
+                                            <table class="table table-sm table-hover mb-0 text-center">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Field</th>
+                                                        <th>Before</th>
+                                                        <th>After</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% for field, change in log.changes.items %}
+                                                        <tr>
+                                                            <td><strong>{{ field }}</strong></td>
+                                                            <td>
+                                                                {% if change.old %}
+                                                                    <code>{{ change.old }}</code>
+                                                                {% else %}
+                                                                    <span class="text-muted">—</span>
+                                                                {% endif %}
+                                                            </td>
+                                                            <td>
+                                                                {% if change.new %}
+                                                                    <code>{{ change.new }}</code>
+                                                                {% else %}
+                                                                    <span class="text-muted">—</span>
+                                                                {% endif %}
+                                                            </td>
+                                                        </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+
+                <!-- Pagination -->
+                {% if paginator.num_pages > 1 %}
+                <nav class="d-flex justify-content-between align-items-center mt-4">
+                    <small class="text-muted">
+                        Showing {{ activity_logs.start_index }}-{{ activity_logs.end_index }} of {{ paginator.count }}
+                    </small>
+                    <ul class="pagination mb-0">
+                        {% if activity_logs.has_previous %}
+                            <li class="page-item">
+                                <a class="page-link" href="?page=1&type={{ activity_type }}">First</a>
+                            </li>
+                            <li class="page-item">
+                                <a class="page-link" href="?page={{ activity_logs.previous_page_number }}&type={{ activity_type }}">Previous</a>
+                            </li>
+                        {% else %}
+                            <li class="page-item disabled"><span class="page-link">First</span></li>
+                            <li class="page-item disabled"><span class="page-link">Previous</span></li>
+                        {% endif %}
+
+                        {% for num in paginator.page_range %}
+                            {% if activity_logs.number == num %}
+                                <li class="page-item active"><span class="page-link">{{ num }}</span></li>
+                            {% elif num > activity_logs.number|add:'-3' and num < activity_logs.number|add:'3' %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ num }}&type={{ activity_type }}">{{ num }}</a>
+                                </li>
+                            {% endif %}
+                        {% endfor %}
+
+                        {% if activity_logs.has_next %}
+                            <li class="page-item">
+                                <a class="page-link" href="?page={{ activity_logs.next_page_number }}&type={{ activity_type }}">Next</a>
+                            </li>
+                            <li class="page-item">
+                                <a class="page-link" href="?page={{ paginator.num_pages }}&type={{ activity_type }}">Last</a>
+                            </li>
+                        {% else %}
+                            <li class="page-item disabled"><span class="page-link">Next</span></li>
+                            <li class="page-item disabled"><span class="page-link">Last</span></li>
+                        {% endif %}
+                    </ul>
+                </nav>
+                {% endif %}
+            {% else %}
+                <div class="alert alert-info text-center py-4">
+                    <i class="fas fa-info-circle fa-2x mb-2 text-primary"></i>
+                    <p class="mb-0">No activity found for this employee.</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

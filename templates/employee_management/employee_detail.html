@@ -1,0 +1,325 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Employee: {{ employee.full_name }}{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="breadcrumb-nav">
+    <ol class="breadcrumb mb-0">
+        <li class="breadcrumb-item"><a href="/"><i class="fas fa-home"></i> Dashboard</a></li>
+        <li class="breadcrumb-item"><a href="{% url 'employee_list' %}">Employees</a></li>
+        <li class="breadcrumb-item active" aria-current="page">{{ employee.full_name }}</li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- Main Content -->
+    <div class="col-lg-8">
+        <!-- Employee Information Card -->
+        <div class="content-panel mb-4">
+            <div class="panel-header">
+                <h3>Employee Information</h3>
+                {% if can_manage %}
+                    <a href="{% url 'employee_edit' employee.id %}" class="btn btn-sm btn-primary">
+                        <i class="fas fa-edit me-1"></i> Edit
+                    </a>
+                {% endif %}
+            </div>
+
+            <div class="employee-info-grid">
+                <div class="info-item">
+                    <label>Full Name</label>
+                    <p>{{ employee.full_name }}</p>
+                </div>
+
+                <div class="info-item">
+                    <label>Email Address</label>
+                    <p><a href="mailto:{{ employee.email }}">{{ employee.email }}</a></p>
+                </div>
+
+                <div class="info-item">
+                    <label>Role</label>
+                    <p>{{ employee.get_role_display }}</p>
+                </div>
+
+                <div class="info-item">
+                    <label>Status</label>
+                    <p>
+                        <span class="badge bg-info">{{ employee.get_status_display }}</span>
+                    </p>
+                </div>
+
+                <div class="info-item">
+                    <label>Active Status</label>
+                    <p>
+                        {% if employee.is_active %}
+                            <span class="badge bg-success">Active</span>
+                        {% else %}
+                            <span class="badge bg-secondary">Inactive</span>
+                        {% endif %}
+                    </p>
+                </div>
+
+                <div class="info-item">
+                    <label>Account Created</label>
+                    <p>{{ employee.created_at|date:"F d, Y \a\t g:i A" }}</p>
+                </div>
+
+                <div class="info-item">
+                    <label>Last Updated</label>
+                    <p>{{ employee.updated_at|date:"F d, Y \a\t g:i A" }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        {% if can_manage %}
+        <div class="content-panel mb-4">
+            <div class="panel-header">
+                <h4>Quick Actions</h4>
+            </div>
+
+            <div class="actions-grid">
+                {% if employee.status == "PENDING" %}
+                    <form method="post" action="{% url 'employee_approve' employee.id %}" class="action-form">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-success btn-sm text-white" onclick="return confirm('Approve this employee?')">
+                            <i class="fas fa-check-circle me-1"></i> Approve
+                        </button>
+                    </form>
+
+                    <form method="post" action="{% url 'employee_reject' employee.id %}" class="action-form">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-danger btn-sm text-white" onclick="return confirm('Reject this employee?')">
+                            <i class="fas fa-times-circle me-1"></i> Reject
+                        </button>
+                    </form>
+                {% endif %}
+
+                {% if employee.is_active %}
+                    {% if employee.id != user.id %}
+                    <form method="post" action="{% url 'employee_deactivate' employee.id %}" class="action-form">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-warning btn-sm text-dark" onclick="return confirm('Deactivate this employee?')">
+                            <i class="fas fa-lock me-1"></i> Deactivate
+                        </button>
+                    </form>
+                    {% endif %}
+                {% else %}
+                    <form method="post" action="{% url 'employee_activate' employee.id %}" class="action-form">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-info btn-sm text-white">
+                            <i class="fas fa-unlock me-1"></i> Activate
+                        </button>
+                    </form>
+                    <form method="post" action="{% url 'employee_delete' employee.id %}" class="action-form">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-danger btn-sm text-white" onclick="return confirm('Permanently delete this employee? This action cannot be undone.')">
+                            <i class="fas fa-trash-alt me-1"></i> Delete Employee
+                        </button>
+                    </form>
+                {% endif %}
+
+                <form method="post" action="{% url 'employee_reset_password' employee.id %}" class="action-form">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-secondary btn-sm text-dark" onclick="return confirm('Reset password for this employee?')">
+                        <i class="fas fa-key me-1"></i> Reset Password
+                    </button>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Combined Activity & Work History -->
+        <div class="content-panel mb-4">
+            <div class="panel-header d-flex justify-content-between align-items-center flex-wrap gap-3">
+                <h4 class="mb-0">Unified Activity & Work Logs</h4>
+                <div class="d-flex align-items-center flex-wrap gap-3">
+                    <form method="get" class="d-flex align-items-center gap-2 m-0">
+                        <input type="hidden" name="sort" value="{{ sort_dir }}">
+                        <label for="date-select" class="text-muted small mb-0"><i class="fas fa-calendar-alt me-1"></i>Date:</label>
+                        <input type="date" id="date-select" name="date" class="form-control form-control-xs py-1 px-2 text-xs border-slate-300 rounded" value="{{ selected_date }}" onchange="this.form.submit()" style="max-width: 140px; font-size: 0.775rem;">
+                        {% if selected_date %}
+                            <a href="?sort={{ sort_dir }}" class="btn btn-xs btn-outline-secondary py-1 px-2 text-xs rounded" title="Clear Date Filter">
+                                <i class="fas fa-times"></i>
+                            </a>
+                        {% endif %}
+                    </form>
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="text-muted small"><i class="fas fa-sort me-1"></i>Sort:</span>
+                        <a href="?sort={% if sort_dir == 'desc' %}asc{% else %}desc{% endif %}{% if selected_date %}&date={{ selected_date }}{% endif %}" class="btn btn-xs btn-outline-primary py-1 px-2.5 font-semibold text-xs rounded">
+                            {% if sort_dir == 'desc' %}Newest First <i class="fas fa-arrow-down-9-1 ms-1"></i>{% else %}Oldest First <i class="fas fa-arrow-up-1-9 ms-1"></i>{% endif %}
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            {% if combined_timeline %}
+                <div class="activity-timeline" style="padding: 0;">
+                    {% for item in combined_timeline %}
+                        <div class="activity-item d-flex align-items-start gap-3 border-bottom py-3 px-4" style="border-bottom: 1px solid #f1f5f9 !important;">
+                            <div class="activity-icon rounded-circle d-flex align-items-center justify-center bg-slate-100 border border-slate-200" style="width: 38px; height: 38px; flex-shrink: 0; display: inline-flex !important;">
+                                <i class="{{ item.icon }} text-slate-600"></i>
+                            </div>
+                            <div class="activity-content flex-grow-1" style="width: 100%;">
+                                <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                                    <h6 class="mb-1 fw-bold text-dark text-sm" style="font-size: 0.925rem; font-weight: 600;">{{ item.title }}</h6>
+                                </div>
+                                <p class="mb-1 text-muted small" style="font-size: 0.85rem; color: #64748b;">{{ item.description }}</p>
+                                <p class="activity-meta text-xs text-muted mb-0" style="font-size: 0.775rem; color: #94a3b8;">
+                                    <i class="far fa-clock me-1"></i>{{ item.timestamp|date:"M j, Y at g:i A" }}
+                                    - <span class="italic">({{ item.timestamp|timesince }} ago)</span>
+                                </p>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-muted text-center py-4 my-2"><i class="fas fa-info-circle me-1"></i>No logs or activity recorded yet.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Sidebar -->
+    <div class="col-lg-4">
+        <div class="content-panel sticky-top" style="top: 20px;">
+            <div class="panel-header">
+                <h4>Status Summary</h4>
+            </div>
+
+            <div class="summary-items">
+                <div class="summary-item">
+                    <span class="label">Account Status</span>
+                    <strong><span class="badge bg-info">{{ employee.get_status_display }}</span></strong>
+                </div>
+
+                <div class="summary-item">
+                    <span class="label">Role</span>
+                    <strong>{{ employee.get_role_display }}</strong>
+                </div>
+
+                <div class="summary-item">
+                    <span class="label">Active</span>
+                    <strong>
+                        {% if employee.is_active %}
+                            <span class="badge bg-success">Yes</span>
+                        {% else %}
+                            <span class="badge bg-secondary">No</span>
+                        {% endif %}
+                    </strong>
+                </div>
+            </div>
+
+            <hr>
+
+            <div class="timestamps">
+                <p class="text-muted small">
+                    <strong>Created:</strong><br>
+                    {{ employee.created_at|date:"M d, Y" }}
+                </p>
+                <p class="text-muted small">
+                    <strong>Updated:</strong><br>
+                    {{ employee.updated_at|date:"M d, Y" }}
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.employee-info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+}
+
+.info-item label {
+    display: block;
+    font-weight: 600;
+    color: #666;
+    font-size: 0.875rem;
+    margin-bottom: 0.25rem;
+    text-transform: uppercase;
+}
+
+.info-item p {
+    margin: 0;
+    font-size: 1rem;
+}
+
+.actions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 0.75rem;
+}
+
+.action-form {
+    margin: 0;
+}
+
+.action-form button {
+    width: 100%;
+}
+
+.activity-timeline {
+    position: relative;
+}
+
+.activity-item {
+    display: flex;
+    gap: 1rem;
+    padding: 1rem 0;
+    border-bottom: 1px solid #eee;
+}
+
+.activity-item:last-child {
+    border-bottom: none;
+}
+
+.activity-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.activity-title {
+    font-weight: 600;
+    margin: 0 0 0.25rem 0;
+}
+
+.activity-description {
+    color: #666;
+    font-size: 0.9rem;
+    margin: 0 0 0.5rem 0;
+}
+
+.activity-meta {
+    color: #999;
+    font-size: 0.8rem;
+    margin: 0;
+}
+
+.summary-items {
+    display: grid;
+    gap: 1rem;
+    padding: 1.5rem 1.5rem 0.5rem 1.5rem;
+}
+
+.summary-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0;
+}
+
+.summary-item .label {
+    color: #666;
+    font-size: 0.9rem;
+}
+
+.timestamps {
+    padding: 0.5rem 1.5rem 1.5rem 1.5rem;
+}
+</style>
+{% endblock %}

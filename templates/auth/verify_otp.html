@@ -1,0 +1,111 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verify OTP - Flow-Force Workspace</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+
+    <link rel="stylesheet" href="{% static 'css/auth/verify_otp.css' %}">
+</head>
+
+<body>
+
+<div class="auth-wrapper">
+
+    <div class="auth-card">
+
+        <div class="auth-header">
+
+            <div class="icon-box">
+                <i class="fas fa-shield-alt"></i>
+            </div>
+
+            <h2>OTP Verification</h2>
+
+            <p>
+                Enter the 6-digit verification code
+                sent to your registered company email.
+            </p>
+
+        </div>
+
+        {% if messages %}
+            {% for message in messages %}
+                <div class="alert alert-{{ message.tags }}">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+
+        <form
+            id="otpForm"
+            method="POST"
+            action="{% url 'verify_otp' %}"
+        >
+
+            {% csrf_token %}
+
+            <input
+                type="hidden"
+                name="otp"
+                id="otpHidden"
+            >
+
+            <div class="otp-container">
+
+                <input type="text" maxlength="1" class="otp-input">
+                <input type="text" maxlength="1" class="otp-input">
+                <input type="text" maxlength="1" class="otp-input">
+                <input type="text" maxlength="1" class="otp-input">
+                <input type="text" maxlength="1" class="otp-input">
+                <input type="text" maxlength="1" class="otp-input">
+
+            </div>
+
+            <button
+                type="submit"
+                class="btn btn-primary btn-verify w-100 mt-4"
+            >
+                Verify OTP
+            </button>
+
+        </form>
+
+        <div class="resend-section mt-3">
+
+            <span id="timer">
+                Resend OTP in 60s
+            </span>
+
+            <button
+                type="button"
+                class="btn btn-link d-none"
+                id="resendBtn"
+            >
+                Resend OTP
+            </button>
+
+        </div>
+
+        <div class="back-link">
+
+            <a href="{% url 'forgot_password' %}">
+                <i class="fas fa-arrow-left"></i>
+                Back
+            </a>
+
+        </div>
+
+    </div>
+
+</div>
+
+<script src="{% static 'js/auth/verify_otp.js' %}"></script>
+
+</body>
+</html>

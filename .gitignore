@@ -1,0 +1,43 @@
+# Python
+*.py[cod]
+*$py.class
+__pycache__/
+.pytest_cache/
+.pyre/
+
+# Virtual environments
+venv/
+ENV/
+env/
+
+# SQLite database
+*.sqlite3
+*.db
+
+# Django stuff:
+local_settings.py
+db.sqlite3
+media/
+staticfiles/
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# IDE files
+.idea/
+*.iml
+
+# Shortcuts
+*.lnk
+
+# Environments and Secrets
+.env
+.env.*
+.env.local

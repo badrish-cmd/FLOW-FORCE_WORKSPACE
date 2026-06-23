@@ -1,0 +1,94 @@
+{% extends 'base.html' %}
+
+{% block title %}Admin Dashboard - Flow-Force Workspace{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-6 max-w-7xl mx-auto">
+    <div class="mb-6">
+        <h1 class="text-2xl font-bold text-gray-900">Welcome back, Admin {{ request.user.full_name }}</h1>
+        <p class="text-sm text-gray-500 mt-1">Department: {{ request.user.department|default:"Not assigned" }}</p>
+    </div>
+
+    <!-- Metrics Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-6 gap-6 mb-8">
+        <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm flex items-center gap-4">
+            <div class="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
+                <i class="fas fa-users text-lg"></i>
+            </div>
+            <div>
+                <span class="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Team Size</span>
+                <strong class="block text-xl font-bold text-gray-900 mt-0.5">{{ employees }}</strong>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm flex items-center gap-4">
+            <div class="w-10 h-10 rounded-lg bg-purple-50 flex items-center justify-center text-purple-600">
+                <i class="fas fa-list-check text-lg"></i>
+            </div>
+            <div>
+                <span class="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Total Tasks</span>
+                <strong class="block text-xl font-bold text-gray-900 mt-0.5">{{ task_stats.total_tasks }}</strong>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm flex items-center gap-4">
+            <div class="w-10 h-10 rounded-lg bg-yellow-50 flex items-center justify-center text-yellow-600">
+                <i class="fas fa-clock text-lg"></i>
+            </div>
+            <div>
+                <span class="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Pending</span>
+                <strong class="block text-xl font-bold text-gray-900 mt-0.5">{{ task_stats.pending_tasks }}</strong>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm flex items-center gap-4">
+            <div class="w-10 h-10 rounded-lg bg-orange-50 flex items-center justify-center text-orange-600">
+                <i class="fas fa-calendar-day text-lg"></i>
+            </div>
+            <div>
+                <span class="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Due Today</span>
+                <strong class="block text-xl font-bold text-gray-900 mt-0.5">{{ task_stats.due_today }}</strong>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm flex items-center gap-4">
+            <div class="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center text-red-600">
+                <i class="fas fa-triangle-exclamation text-lg"></i>
+            </div>
+            <div>
+                <span class="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Overdue</span>
+                <strong class="block text-xl font-bold text-gray-900 mt-0.5">{{ task_stats.overdue_tasks }}</strong>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm flex items-center gap-4">
+            <div class="w-10 h-10 rounded-lg bg-green-50 flex items-center justify-center text-green-600">
+                <i class="fas fa-circle-check text-lg"></i>
+            </div>
+            <div>
+                <span class="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Completed</span>
+                <strong class="block text-xl font-bold text-gray-900 mt-0.5">{{ task_stats.completed_tasks }}</strong>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Management Actions -->
+    <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm mb-8">
+        <h3 class="text-lg font-bold text-gray-900 mb-4">Quick Management Actions</h3>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <a href="{% url 'employee_list' %}" class="flex flex-col p-4 bg-gray-50 rounded-xl border border-gray-200 hover:bg-gray-100 transition duration-150 ease-in-out">
+                <span class="font-bold text-gray-800 text-sm">Team Directory</span>
+                <span class="text-xs text-gray-500 mt-1">View list of department employees.</span>
+            </a>
+            <a href="{% url 'approval_center' %}" class="flex flex-col p-4 bg-gray-50 rounded-xl border border-gray-200 hover:bg-gray-100 transition duration-150 ease-in-out">
+                <span class="font-bold text-gray-800 text-sm">Approvals Panel</span>
+                <span class="text-xs text-gray-500 mt-1">Approve or reject register requests.</span>
+            </a>
+            <a href="{% url 'tasks:reports' %}" class="flex flex-col p-4 bg-gray-50 rounded-xl border border-gray-200 hover:bg-gray-100 transition duration-150 ease-in-out">
+                <span class="font-bold text-gray-800 text-sm">Department Reports</span>
+                <span class="text-xs text-gray-500 mt-1">Export employee-wise or month-wise reports.</span>
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,17 @@
+{% if activity_type == "CREATE" %}
+    <span class="badge bg-primary">{{ activity_type }}</span>
+{% elif activity_type == "UPDATE" %}
+    <span class="badge bg-info">{{ activity_type }}</span>
+{% elif activity_type == "DELETE" %}
+    <span class="badge bg-danger">{{ activity_type }}</span>
+{% elif activity_type in "ACTIVATE,APPROVE" %}
+    <span class="badge bg-success">{{ activity_type }}</span>
+{% elif activity_type in "DEACTIVATE,REJECT" %}
+    <span class="badge bg-warning">{{ activity_type }}</span>
+{% elif activity_type == "LOGIN" %}
+    <span class="badge bg-success">{{ activity_type }}</span>
+{% elif activity_type == "LOGOUT" %}
+    <span class="badge bg-secondary">{{ activity_type }}</span>
+{% else %}
+    <span class="badge bg-secondary">{{ activity_type }}</span>
+{% endif %}

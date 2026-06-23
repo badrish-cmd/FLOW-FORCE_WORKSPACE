@@ -1,0 +1,125 @@
+:root {
+    --primary: #0F172A;
+    --secondary: #1E293B;
+    --accent: #2563EB;
+    --success: #22C55E;
+    --danger: #EF4444;
+    --background: #F8FAFC;
+}
+
+body {
+    background: var(--background);
+    min-height: 100vh;
+    font-family: "Segoe UI", sans-serif;
+}
+
+.register-wrapper {
+    min-height: 100vh;
+    display: flex;
+}
+
+.register-left {
+    width: 50%;
+    background: linear-gradient(
+        135deg,
+        #0F172A,
+        #1E293B
+    );
+
+    color: white;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    padding: 50px;
+}
+
+.register-left-content h1 {
+    font-weight: 700;
+    margin-bottom: 20px;
+}
+
+.register-left-content p {
+    opacity: .85;
+}
+
+.register-right {
+    width: 50%;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    padding: 40px;
+}
+
+.register-card {
+    width: 100%;
+    max-width: 520px;
+
+    background: white;
+
+    padding: 40px;
+
+    border-radius: 16px;
+
+    box-shadow:
+        0 10px 30px rgba(0,0,0,.08);
+}
+
+.register-title {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.register-subtitle {
+    color: #64748B;
+}
+
+.form-control {
+    height: 50px;
+    border-radius: 10px;
+}
+
+.btn-register {
+    background: var(--accent);
+    border: none;
+
+    height: 50px;
+
+    font-weight: 600;
+}
+
+.btn-register:hover {
+    background: #1D4ED8;
+}
+
+.password-strength {
+    font-size: 13px;
+    margin-top: 5px;
+}
+
+.strength-weak {
+    color: var(--danger);
+}
+
+.strength-good {
+    color: #F59E0B;
+}
+
+.strength-strong {
+    color: var(--success);
+}
+
+@media(max-width:991px){
+
+    .register-left{
+        display:none;
+    }
+
+    .register-right{
+        width:100%;
+    }
+}

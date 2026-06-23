@@ -1,0 +1,82 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Employee Management - Flow-Force Workspace{% endblock %}</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    
+    <!-- Employee Management CSS -->
+    <link rel="stylesheet" href="{% static 'css/employee_management/employee_management.css' %}">
+    
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <div class="dashboard-shell">
+        <aside class="sidebar">
+            <div class="brand">Flow-Force</div>
+            <nav class="sidebar-nav">
+                {% if request.user.role == "SUPER_ADMIN" %}
+                    <a href="{% url 'super_admin_dashboard' %}">
+                        <i class="bi bi-speedometer2"></i> Dashboard
+                    </a>
+                {% elif request.user.role == "ADMIN" %}
+                    <a href="{% url 'admin_dashboard' %}">
+                        <i class="bi bi-speedometer2"></i> Dashboard
+                    </a>
+                {% elif request.user.role == "DEPARTMENT_ADMIN" %}
+                    <a href="{% url 'department_dashboard' %}">
+                        <i class="bi bi-speedometer2"></i> Dashboard
+                    </a>
+                {% endif %}
+                <a href="{% url 'employee_list' %}" class="active">
+                    <i class="bi bi-people"></i> Employee Management
+                </a>
+                <a href="{% url 'logout' %}">
+                    <i class="bi bi-door-left"></i> Logout
+                </a>
+            </nav>
+        </aside>
+
+        <main class="main-content">
+            <nav class="topbar">
+                <div>
+                    <p class="eyebrow">Employee Management</p>
+                    <h1>{% block page_heading %}Employees{% endblock %}</h1>
+                </div>
+                <div class="user-meta">
+                    <span>{{ request.user.email }}</span>
+                    <strong>{{ request.user.get_role_display }}</strong>
+                </div>
+            </nav>
+
+            {% if messages %}
+                <div class="message-stack">
+                    {% for message in messages %}
+                        <div class="alert alert-{{ message.tags|default:'info' }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Employee Management JS -->
+    <script src="{% static 'js/employee_management/employee_management.js' %}"></script>
+    
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card shadow-sm">
+    <div class="card-body">
+        <h1 class="h4 mb-4">{{ page_title }}</h1>
+        <form method="post" class="row g-3">
+            {% csrf_token %}
+            {% for field in form %}
+                <div class="col-12 {% if field.name != 'description' %}col-md-6{% endif %}">
+                    <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.errors %}<div class="text-danger small">{{ field.errors|striptags }}</div>{% endif %}
+                </div>
+            {% endfor %}
+            <div class="col-12 d-flex gap-2">
+                <button class="btn btn-primary" type="submit">Save</button>
+                <a class="btn btn-outline-secondary" href="{% url 'task_tracker:tracker_dashboard' %}">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

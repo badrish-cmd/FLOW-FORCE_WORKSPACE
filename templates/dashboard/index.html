@@ -1,0 +1,362 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Dashboard - Flow-Force Workspace{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="breadcrumb-nav">
+    <ol class="breadcrumb mb-0">
+        <li class="breadcrumb-item active" aria-current="page">
+            <i class="fas fa-chart-line"></i> Dashboard
+        </li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Welcome Section -->
+    <div class="mb-5">
+        <div class="row align-items-center">
+            <div class="col-md-8">
+                <h1 class="h3 mb-2">Welcome back, {{ user.full_name }}</h1>
+                <p class="text-muted">Here's what's happening in your workspace today.</p>
+            </div>
+            <div class="col-md-4 text-end">
+                <small class="text-muted">
+                    <i class="fas fa-clock"></i> 
+                    <span id="currentTime"></span>
+                </small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Cards Row -->
+    <div class="row mb-5">
+        {% if dashboard_stats %}
+        <div class="col-md-3 mb-4">
+            <div class="card stat-card">
+                <div class="card-body">
+                    <div class="stat-header">
+                        <h6 class="stat-label">Total Tasks</h6>
+                        <i class="fas fa-tasks stat-icon text-primary"></i>
+                    </div>
+                    <div class="stat-value">{{ dashboard_stats.total_tasks }}</div>
+                    <div class="stat-footer">
+                        <small class="text-success"><i class="fas fa-arrow-up"></i> 12% from last week</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3 mb-4">
+            <div class="card stat-card">
+                <div class="card-body">
+                    <div class="stat-header">
+                        <h6 class="stat-label">Pending Tasks</h6>
+                        <i class="fas fa-clock stat-icon text-warning"></i>
+                    </div>
+                    <div class="stat-value">{{ dashboard_stats.pending_tasks }}</div>
+                    <div class="stat-footer">
+                        <small class="text-muted">Awaiting your attention</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3 mb-4">
+            <div class="card stat-card">
+                <div class="card-body">
+                    <div class="stat-header">
+                        <h6 class="stat-label">Due Today</h6>
+                        <i class="fas fa-calendar-day stat-icon text-info"></i>
+                    </div>
+                    <div class="stat-value">{{ dashboard_stats.due_today }}</div>
+                    <div class="stat-footer">
+                        <small class="text-muted">Don't miss these</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3 mb-4">
+            <div class="card stat-card">
+                <div class="card-body">
+                    <div class="stat-header">
+                        <h6 class="stat-label">Overdue</h6>
+                        <i class="fas fa-exclamation-circle stat-icon text-danger"></i>
+                    </div>
+                    <div class="stat-value">{{ dashboard_stats.overdue_tasks }}</div>
+                    <div class="stat-footer">
+                        <small class="text-danger"><i class="fas fa-alert"></i> Need attention</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Main Content Row -->
+    <div class="row">
+        <!-- Recent Tasks (Left Column) -->
+        <div class="col-lg-8 mb-4">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">My Recent Tasks</h5>
+                    <a href="/" class="btn btn-sm btn-ghost">View All</a>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Task Name</th>
+                                    <th>Due Date</th>
+                                    <th>Priority</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><strong>Complete Q1 Report</strong></td>
+                                    <td>Apr 5, 2026</td>
+                                    <td><span class="badge bg-danger">Critical</span></td>
+                                    <td><span class="badge bg-warning">In Progress</span></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Review API Documentation</strong></td>
+                                    <td>Apr 3, 2026</td>
+                                    <td><span class="badge bg-info">Medium</span></td>
+                                    <td><span class="badge bg-success">Completed</span></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Team Meeting Prep</strong></td>
+                                    <td>Today</td>
+                                    <td><span class="badge bg-success">Low</span></td>
+                                    <td><span class="badge bg-primary">Pending</span></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Database Migration Testing</strong></td>
+                                    <td>Apr 2, 2026</td>
+                                    <td><span class="badge bg-warning">High</span></td>
+                                    <td><span class="badge">Cancelled</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Links (Right Column) -->
+        <div class="col-lg-4">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Quick Navigation</h5>
+                </div>
+                <div class="card-body">
+                    <div class="list-group list-group-flush">
+                        <a href="/employees/" class="list-group-item list-group-item-action">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h6 class="mb-1">
+                                    <i class="fas fa-users text-primary"></i> Employees
+                                </h6>
+                                <small class="text-muted">42 active</small>
+                            </div>
+                            <small class="text-muted">Manage team members</small>
+                        </a>
+                        <a href="/trackers/" class="list-group-item list-group-item-action">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h6 class="mb-1">
+                                    <i class="fas fa-tasks text-success"></i> Trackers
+                                </h6>
+                                <small class="text-muted">7 active</small>
+                            </div>
+                            <small class="text-muted">View all task trackers</small>
+                        </a>
+                        <a href="/admin/" class="list-group-item list-group-item-action">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h6 class="mb-1">
+                                    <i class="fas fa-cog text-warning"></i> Admin
+                                </h6>
+                                <small class="text-muted">System</small>
+                            </div>
+                            <small class="text-muted">Access admin panel</small>
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Your Info</h5>
+                </div>
+                <div class="card-body">
+                    <div class="info-group mb-3">
+                        <small class="text-muted d-block">Department</small>
+                        <strong>{{ user.department.name|default:"Not Assigned" }}</strong>
+                    </div>
+                    <div class="info-group mb-3">
+                        <small class="text-muted d-block">Role</small>
+                        <strong>{{ user.get_role_display }}</strong>
+                    </div>
+                    <div class="info-group mb-3">
+                        <small class="text-muted d-block">Status</small>
+                        {% if user.status == "APPROVED" %}
+                        <span class="badge bg-success">Approved</span>
+                        {% else %}
+                        <span class="badge bg-warning">{{ user.get_status_display }}</span>
+                        {% endif %}
+                    </div>
+                    <hr>
+                    <a href="/profile/" class="btn btn-sm btn-primary w-100">
+                        <i class="fas fa-edit"></i> Edit Profile
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Activity Section -->
+    <div class="row mt-5">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Recent Activity</h5>
+                </div>
+                <div class="card-body">
+                    <div class="activity-feed">
+                        <div class="activity-item">
+                            <div class="activity-icon bg-primary">
+                                <i class="fas fa-plus-circle"></i>
+                            </div>
+                            <div class="activity-content">
+                                <h6>Task Created: "Complete Q1 Report"</h6>
+                                <small class="text-muted">Created by John Admin • 2 hours ago</small>
+                            </div>
+                        </div>
+                        <div class="activity-item">
+                            <div class="activity-icon bg-success">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                            <div class="activity-content">
+                                <h6>Task Completed: "API Documentation Review"</h6>
+                                <small class="text-muted">Completed by You • 4 hours ago</small>
+                            </div>
+                        </div>
+                        <div class="activity-item">
+                            <div class="activity-icon bg-info">
+                                <i class="fas fa-comment-circle"></i>
+                            </div>
+                            <div class="activity-content">
+                                <h6>Comment Added on "Database Migration Testing"</h6>
+                                <small class="text-muted">Sarah Employee commented • 6 hours ago</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .stat-card {
+        border: 1px solid var(--gray-300);
+        transition: all 0.3s ease;
+    }
+
+    .stat-card:hover {
+        box-shadow: var(--shadow-md);
+        transform: translateY(-2px);
+    }
+
+    .stat-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: var(--spacing-md);
+    }
+
+    .stat-label {
+        color: var(--gray-600);
+        font-weight: 500;
+        margin: 0;
+    }
+
+    .stat-icon {
+        font-size: 24px;
+    }
+
+    .stat-value {
+        font-size: 28px;
+        font-weight: 700;
+        color: var(--gray-900);
+        margin-bottom: var(--spacing-md);
+    }
+
+    .stat-footer {
+        padding-top: var(--spacing-md);
+        border-top: 1px solid var(--gray-200);
+    }
+
+    .list-group-item-action {
+        border: 1px solid var(--gray-300);
+        margin-bottom: var(--spacing-sm);
+        border-radius: var(--border-radius);
+    }
+
+    .list-group-item-action:hover {
+        background-color: var(--gray-50);
+        border-color: var(--primary-color);
+    }
+
+    .info-group {
+        line-height: 1.4;
+    }
+
+    .activity-feed {
+        position: relative;
+        padding: var(--spacing-lg) 0;
+    }
+
+    .activity-item {
+        display: flex;
+        gap: var(--spacing-lg);
+        margin-bottom: var(--spacing-lg);
+        padding-bottom: var(--spacing-lg);
+        border-bottom: 1px solid var(--gray-200);
+    }
+
+    .activity-item:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+        padding-bottom: 0;
+    }
+
+    .activity-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        flex-shrink: 0;
+    }
+
+    .activity-content h6 {
+        margin-bottom: var(--spacing-xs);
+    }
+</style>
+
+<script>
+    // Update current time
+    function updateTime() {
+        const now = new Date();
+        document.getElementById('currentTime').textContent = now.toLocaleTimeString();
+    }
+    updateTime();
+    setInterval(updateTime, 1000);
+</script>
+{% endblock %}

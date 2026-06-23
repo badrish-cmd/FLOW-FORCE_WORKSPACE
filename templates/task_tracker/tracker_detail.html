@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% load task_tracker_extras %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h1 class="h3 mb-1">{{ tracker.department }} Tracker</h1>
+        <p class="text-muted mb-0">{{ tracker.name }}</p>
+    </div>
+    <div class="d-flex gap-2">
+        {% if can_manage_columns %}
+            <a class="btn btn-outline-primary" href="{% url 'task_tracker:tracker_edit' tracker.id %}">Edit Tracker</a>
+            <form method="post" action="{% url 'task_tracker:tracker_delete' tracker.id %}" onsubmit="return confirm('Delete this tracker? This will remove its rows and columns.');">
+                {% csrf_token %}
+                <button class="btn btn-outline-danger" type="submit">Delete Tracker</button>
+            </form>
+        {% endif %}
+        {% if can_manage_tasks %}
+            <a class="btn btn-primary" href="{% url 'task_tracker:task_create' tracker.id %}">Create Task</a>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-body">
+        <h2 class="h5">Columns</h2>
+        <div class="d-flex flex-wrap gap-2 mb-3">
+            {% for column in columns %}
+                <div class="me-2 mb-2 align-items-center">
+                    <span class="badge {% if column.is_fixed %}text-bg-dark{% else %}text-bg-secondary{% endif %}">{{ column.label }}</span>
+                    {% if not column.is_fixed and can_manage_columns %}
+                        <form method="post" action="{% url 'task_tracker:tracker_column_update' tracker.id column.id %}" class="d-inline-block ms-2" style="display:inline-block;">
+                            {% csrf_token %}
+                            <input type="text" name="label" value="{{ column.label }}" class="form-control form-control-sm d-inline-block" style="width:140px; display:inline-block;" />
+                            <button class="btn btn-sm btn-outline-primary ms-1" type="submit">Save</button>
+                        </form>
+                        <form method="post" action="{% url 'task_tracker:tracker_column_delete' tracker.id column.id %}" class="d-inline-block ms-1" style="display:inline-block;" onsubmit="return confirm('Delete column {{ column.label }}?');">
+                            {% csrf_token %}
+                            <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                        </form>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+        {% if can_manage_columns %}
+            <form method="post" action="{% url 'task_tracker:tracker_column_create' tracker.id %}" class="row g-3">
+                {% csrf_token %}
+                <div class="col-12 col-md-8">
+                    <label class="form-label">Add Custom Column</label>
+                    <input type="text" name="label" class="form-control" placeholder="Example: STATUS or CLIENT">
+                </div>
+                <div class="col-12 col-md-4">
+                    <button class="btn btn-outline-primary w-100" type="submit">Add Column</button>
+                </div>
+            </form>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-bordered align-middle">
+                <thead>
+                    <tr>
+                        {% for column in columns %}
+                            <th>{{ column.label }}</th>
+                        {% endfor %}
+                        <th>Assigned To</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for task in tasks %}
+                        <tr>
+                            {% for column in columns %}
+                                <td>
+                                    {% if column.key == 'S_NO' %}{{ task.s_no }}{% elif column.key == 'DATE' %}{{ task.date }}{% elif column.key == 'DUE_DATE' %}{{ task.due_date }}{% elif column.key == 'TASK_NAME' %}{{ task.task_name }}{% elif column.key == 'INITIAL_MAIL' %}{{ task.initial_mail }}{% elif column.key == 'ALERT_MAIL' %}{{ task.alert_mail }}{% else %}{{ task.cells_map|get_item:column.id }}{% endif %}
+                                </td>
+                            {% endfor %}
+                            <td>{{ task.assigned_to.full_name }}</td>
+                            <td>{{ task.status }}</td>
+                            <td><a class="btn btn-sm btn-outline-primary" href="{% url 'task_tracker:task_detail' tracker.id task.id %}">View</a></td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="{{ columns|length|add:'3' }}" class="text-muted">No tasks found.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

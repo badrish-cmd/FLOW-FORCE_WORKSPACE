@@ -1,0 +1,29 @@
+{% if employee.is_active %}
+    <form method="post" action="{% url 'employee_status_action' employee.id 'deactivate' %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ next_url }}">
+        <button class="btn btn-sm btn-outline-warning" type="submit">Deactivate</button>
+    </form>
+{% else %}
+    <form method="post" action="{% url 'employee_status_action' employee.id 'activate' %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ next_url }}">
+        <button class="btn btn-sm btn-outline-success" type="submit">Activate</button>
+    </form>
+{% endif %}
+
+{% if employee.status != "APPROVED" %}
+    <form method="post" action="{% url 'employee_status_action' employee.id 'approve' %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ next_url }}">
+        <button class="btn btn-sm btn-outline-success" type="submit">Approve</button>
+    </form>
+{% endif %}
+
+{% if employee.status != "REJECTED" %}
+    <form method="post" action="{% url 'employee_status_action' employee.id 'reject' %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ next_url }}">
+        <button class="btn btn-sm btn-outline-danger" type="submit">Reject</button>
+    </form>
+{% endif %}

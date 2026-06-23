@@ -1,0 +1,305 @@
+{% extends "base.html" %}
+
+{% block title %}Global Activity Logs - Flow-Force Workspace{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="breadcrumb-nav">
+    <ol class="breadcrumb mb-0">
+        <li class="breadcrumb-item">
+            <a href="/" class="text-decoration-none"><i class="fas fa-home"></i> Dashboard</a>
+        </li>
+        <li class="breadcrumb-item active" aria-current="page">
+            <i class="fas fa-history"></i> Activity Logs
+        </li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid animate-fade-in">
+    <div class="card shadow-sm mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center bg-light border-bottom py-3">
+            <div>
+                <h5 class="mb-0 fw-bold text-dark">Workspace Activity Logs</h5>
+                <small class="text-muted">Track employee motion, login history, and task updates in real-time</small>
+            </div>
+        </div>
+        <div class="card-body">
+            
+            <!-- Tabs Navigation -->
+            <ul class="nav nav-tabs mb-4 border-bottom-0" id="activityTab" role="tablist" style="gap: 4px;">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active px-4 py-2.5 rounded-t-lg font-semibold text-sm transition-all duration-150 border border-slate-200" id="summary-tab" data-bs-toggle="tab" data-bs-target="#summary" type="button" role="tab" aria-controls="summary" aria-selected="true" style="margin-bottom: -1px;">
+                        <i class="fas fa-users-cog me-1.5 text-primary"></i> Employee Summary
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link px-4 py-2.5 rounded-t-lg font-semibold text-sm transition-all duration-150 border border-slate-200" id="timeline-tab" data-bs-toggle="tab" data-bs-target="#timeline" type="button" role="tab" aria-controls="timeline" aria-selected="false" style="margin-bottom: -1px;">
+                        <i class="fas fa-stream me-1.5 text-emerald-600"></i> Detailed Timeline
+                    </button>
+                </li>
+            </ul>
+
+            <!-- Tab Content -->
+            <div class="tab-content" id="activityTabContent">
+                
+                <!-- Tab 1: Employee Summary (Employee Wise Logs) -->
+                <div class="tab-pane fade show active" id="summary" role="tabpanel" aria-labelledby="summary-tab">
+                    <div class="table-responsive rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="bg-slate-50 text-slate-700">
+                                <tr>
+                                    <th class="py-3 px-4">Employee</th>
+                                    <th class="py-3 px-4">Role</th>
+                                    <th class="py-3 px-4">Last Login Time</th>
+                                    <th class="py-3 px-4">Last Task Action</th>
+                                    <th class="py-3 px-4 text-center">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100 bg-white">
+                                {% for item in employees_activity %}
+                                    <tr class="hover:bg-slate-50/50 transition">
+                                        <td class="py-3 px-4">
+                                            <div class="d-flex align-items-center gap-3">
+                                                <div class="w-10 h-10 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center font-bold text-sm">
+                                                    {{ item.employee.full_name|slice:":2"|upper }}
+                                                </div>
+                                                <div>
+                                                    <a href="{% url 'employee_detail' item.employee.id %}" class="fw-bold text-decoration-none text-slate-800 hover:text-blue-600 transition-colors">
+                                                        {{ item.employee.full_name }}
+                                                    </a>
+                                                    <p class="text-muted small mb-0">{{ item.employee.email }}</p>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td class="py-3 px-4">
+                                            <span class="badge bg-primary px-2.5 py-1 text-xs font-semibold">{{ item.employee.get_role_display }}</span>
+                                        </td>
+                                        <td class="py-3 px-4">
+                                            {% if item.last_login %}
+                                                <span class="text-slate-700 font-medium d-block">
+                                                    <i class="far fa-clock me-1 text-blue-500"></i>
+                                                    {{ item.last_login|date:"M j, Y at g:i A" }}
+                                                </span>
+                                                <small class="text-muted text-xs">({{ item.last_login|timesince }} ago)</small>
+                                            {% else %}
+                                                <span class="text-muted italic small"><i class="fas fa-exclamation-circle me-1"></i>Never Logged In</span>
+                                            {% endif %}
+                                        </td>
+                                        <td class="py-3 px-4">
+                                            {% if item.last_task_time %}
+                                                <span class="text-slate-700 font-medium d-block">
+                                                    <i class="fas fa-edit me-1 text-emerald-500"></i>
+                                                    {{ item.last_task_action|default:"Task Modified" }}
+                                                </span>
+                                                <small class="text-muted text-xs">
+                                                    {{ item.last_task_time|date:"M j, Y" }}
+                                                    - ({{ item.last_task_time|timesince }} ago)
+                                                </small>
+                                            {% else %}
+                                                <span class="text-muted italic small"><i class="fas fa-tasks me-1"></i>No Task Actions Yet</span>
+                                            {% endif %}
+                                        </td>
+                                        <td class="py-3 px-4 text-center">
+                                            <a href="{% url 'employee_detail' item.employee.id %}" class="btn btn-sm btn-ghost px-3 py-1.5 rounded-lg text-xs font-semibold transition" title="View Profile">
+                                                <i class="fas fa-user-circle me-1"></i> Profile Logs
+                                            </a>
+                                        </td>
+                                    </tr>
+                                {% empty %}
+                                    <tr>
+                                        <td colspan="5" class="text-center py-5 text-muted">No employees registered.</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Tab 2: Detailed Timeline (Timeline of All Actions) -->
+                <div class="tab-pane fade" id="timeline" role="tabpanel" aria-labelledby="timeline-tab">
+                    
+                    <!-- Filters -->
+                    <div class="mb-4 bg-slate-50/50 p-4 rounded-xl border border-slate-100">
+                        <form method="get" class="row g-3 align-items-end">
+                            <div class="col-12 col-md-4">
+                                <label class="form-label small fw-bold text-slate-600">Filter by Employee</label>
+                                <select name="employee" class="form-select border-slate-200">
+                                    <option value="">All Employees</option>
+                                    {% for emp in employees %}
+                                        <option value="{{ emp.id }}" {% if selected_employee == emp.id|stringformat:"i" %}selected{% endif %}>
+                                            {{ emp.full_name }} ({{ emp.email }})
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-12 col-md-4">
+                                <label class="form-label small fw-bold text-slate-600">Filter by Activity Type</label>
+                                <select name="type" class="form-select border-slate-200">
+                                    <option value="">All Activity Types</option>
+                                    {% for value, label in activity_types %}
+                                        <option value="{{ value }}" {% if selected_type == value %}selected{% endif %}>
+                                            {{ label }}
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-12 col-md-2">
+                                <input type="hidden" name="tab" value="timeline"> <!-- Keep tab on reload -->
+                                <button type="submit" class="btn btn-primary btn-sm w-100" style="height: 38px;">
+                                    <i class="fas fa-filter me-1"></i> Apply Filters
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- Activity Timeline List -->
+                    {% if activity_logs %}
+                        <div class="activity-list d-flex flex-column gap-3">
+                            {% for log in activity_logs %}
+                                <div class="p-3.5 rounded-xl border-start border-primary border-4 bg-light shadow-sm" style="transition: transform 0.2s ease;">
+                                    <div class="row align-items-start">
+                                        <div class="col-auto">
+                                            {% include "employee_management/partials/activity_badge.html" with activity_type=log.activity_type %}
+                                        </div>
+                                        <div class="col">
+                                            <div class="d-flex align-items-center gap-2 mb-1.5">
+                                                <h6 class="mb-0 fw-bold text-slate-800">{{ log.get_activity_type_display }}</h6>
+                                                <span class="text-slate-300 small">&bull;</span>
+                                                <a href="{% url 'employee_detail' log.employee.id %}" class="small fw-bold text-decoration-none text-primary hover:underline">
+                                                    {{ log.employee.full_name }}
+                                                </a>
+                                            </div>
+                                            <p class="mb-2 text-muted small">{{ log.description }}</p>
+                                            <div class="d-flex flex-wrap gap-3 small text-muted">
+                                                {% if log.performed_by %}
+                                                    <span><i class="fas fa-user-shield me-1"></i><strong>By:</strong> {{ log.performed_by.full_name }}</span>
+                                                {% endif %}
+                                                <span><i class="fas fa-calendar-alt me-1"></i><strong>Date:</strong> {{ log.created_at|date:"M j, Y H:i" }}</span>
+                                                {% if log.ip_address %}
+                                                    <span><i class="fas fa-desktop me-1"></i><strong>IP:</strong> {{ log.ip_address }}</span>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                        {% if log.changes %}
+                                            <div class="col-auto">
+                                                <button class="btn btn-sm btn-ghost px-3 py-1.5 text-xs font-semibold rounded-lg" data-bs-toggle="collapse" data-bs-target="#changes-{{ log.id }}">
+                                                    <i class="fas fa-info-circle me-1"></i> View Changes
+                                                </button>
+                                            </div>
+                                        {% endif %}
+                                    </div>
+
+                                    {% if log.changes %}
+                                        <div class="collapse mt-3" id="changes-{{ log.id }}">
+                                            <div class="card card-body p-2 border-0 bg-white shadow-inner">
+                                                <div class="table-responsive">
+                                                    <table class="table table-sm table-hover mb-0 text-center">
+                                                        <thead>
+                                                            <tr>
+                                                                <th>Field</th>
+                                                                <th>Before</th>
+                                                                <th>After</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {% for field, change in log.changes.items %}
+                                                                <tr>
+                                                                    <td><strong>{{ field }}</strong></td>
+                                                                    <td>
+                                                                        {% if change.old %}
+                                                                            <code>{{ change.old }}</code>
+                                                                        {% else %}
+                                                                            <span class="text-muted">—</span>
+                                                                        {% endif %}
+                                                                    </td>
+                                                                    <td>
+                                                                        {% if change.new %}
+                                                                            <code>{{ change.new }}</code>
+                                                                        {% else %}
+                                                                            <span class="text-muted">—</span>
+                                                                        {% endif %}
+                                                                    </td>
+                                                                </tr>
+                                                            {% endfor %}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            {% endfor %}
+                        </div>
+
+                        <!-- Pagination -->
+                        {% if paginator.num_pages > 1 %}
+                        <nav class="d-flex justify-content-between align-items-center mt-4">
+                            <small class="text-muted">
+                                Showing {{ activity_logs.start_index }}-{{ activity_logs.end_index }} of {{ paginator.count }}
+                            </small>
+                            <ul class="pagination mb-0">
+                                {% if activity_logs.has_previous %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="?page=1&employee={{ selected_employee }}&type={{ selected_type }}&tab=timeline">First</a>
+                                    </li>
+                                    <li class="page-item">
+                                        <a class="page-link" href="?page={{ activity_logs.previous_page_number }}&employee={{ selected_employee }}&type={{ selected_type }}&tab=timeline">Previous</a>
+                                    </li>
+                                {% else %}
+                                    <li class="page-item disabled"><span class="page-link">First</span></li>
+                                    <li class="page-item disabled"><span class="page-link">Previous</span></li>
+                                {% endif %}
+
+                                {% for num in paginator.page_range %}
+                                    {% if activity_logs.number == num %}
+                                        <li class="page-item active"><span class="page-link">{{ num }}</span></li>
+                                    {% elif num > activity_logs.number|add:'-3' and num < activity_logs.number|add:'3' %}
+                                        <li class="page-item">
+                                            <a class="page-link" href="?page={{ num }}&employee={{ selected_employee }}&type={{ selected_type }}&tab=timeline">{{ num }}</a>
+                                        </li>
+                                    {% endif %}
+                                {% endfor %}
+
+                                {% if activity_logs.has_next %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="?page={{ activity_logs.next_page_number }}&employee={{ selected_employee }}&type={{ selected_type }}&tab=timeline">Next</a>
+                                    </li>
+                                    <li class="page-item">
+                                        <a class="page-link" href="?page={{ paginator.num_pages }}&employee={{ selected_employee }}&type={{ selected_type }}&tab=timeline">Last</a>
+                                    </li>
+                                {% else %}
+                                    <li class="page-item disabled"><span class="page-link">Next</span></li>
+                                    <li class="page-item disabled"><span class="page-link">Last</span></li>
+                                {% endif %}
+                            </ul>
+                        </nav>
+                        {% endif %}
+                    {% else %}
+                        <div class="alert alert-info text-center py-4">
+                            <i class="fas fa-info-circle fa-2x mb-2 text-primary"></i>
+                            <p class="mb-0">No workspace activity logs found matching the filter criteria.</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        // Keep active tab state on reload/filter submit
+        const urlParams = new URLSearchParams(window.location.search);
+        const tab = urlParams.get('tab');
+        if (tab === 'timeline') {
+            const timelineTab = document.querySelector('#timeline-tab');
+            if (timelineTab) {
+                const tabTrigger = new bootstrap.Tab(timelineTab);
+                tabTrigger.show();
+            }
+        }
+    });
+</script>
+{% endblock %}

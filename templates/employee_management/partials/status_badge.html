@@ -1,0 +1,9 @@
+{% if status_value == "APPROVED" %}
+    <span class="badge bg-success">{{ status }}</span>
+{% elif status_value == "PENDING" %}
+    <span class="badge bg-warning text-dark">{{ status }}</span>
+{% elif status_value == "REJECTED" %}
+    <span class="badge bg-danger">{{ status }}</span>
+{% else %}
+    <span class="badge bg-secondary">{{ status }}</span>
+{% endif %}
