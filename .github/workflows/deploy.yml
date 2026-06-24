@@ -1,0 +1,48 @@
+name: CD - Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            echo "Starting deployment..."
+            
+            # Navigate to the project directory
+            cd /var/www/flowforce
+            
+            # Fetch latest code
+            git fetch --all
+            git reset --hard origin/main
+            
+            # Activate virtual environment and install dependencies
+            source venv/bin/activate
+            pip install -r requirements.txt
+            
+            # Run database migrations
+            python manage.py migrate --noinput
+            
+            # Collect static files
+            python manage.py collectstatic --noinput
+            
+            # Restart Services (Gunicorn & Celery)
+            echo "Restarting application services..."
+            sudo systemctl restart gunicorn
+            sudo systemctl restart celery
+            sudo systemctl restart celerybeat
+            
+            echo "Deployment finished successfully!"
