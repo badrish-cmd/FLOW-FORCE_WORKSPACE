@@ -299,3 +299,94 @@ class TablesTestCase(TestCase):
         
         # Verify that no TableAccess was created
         self.assertFalse(TableAccess.objects.filter(table=table).exists())
+
+    def test_bulk_update_action(self):
+        from tables.views import TableViewSet
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        factory = APIRequestFactory()
+
+        table = Table.objects.create(name="Bulk Update Table", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+        TableAccess.objects.create(table=table, user=self.employee, access_level="VIEW")
+
+        row = Row.objects.create(table=table, created_by=self.admin)
+        task = Task.objects.create(row=row, due_date="2026-07-15", status="PENDING", priority="MEDIUM", assigned_by=self.admin)
+
+        # 1. Employee is forbidden
+        view = TableViewSet.as_view({'post': 'bulk_update'})
+        request = factory.post(f"/tables/api/tables/{table.id}/bulk-update/", {"field": "INITIAL_MAIL", "value": "YES"}, format="json")
+        force_authenticate(request, user=self.employee)
+        response = view(request, pk=table.id)
+        self.assertEqual(response.status_code, 403)
+
+        # 2. Admin successfully bulk updates INITIAL_MAIL to YES
+        request = factory.post(f"/tables/api/tables/{table.id}/bulk-update/", {"field": "INITIAL_MAIL", "value": "YES"}, format="json")
+        force_authenticate(request, user=self.admin)
+        response = view(request, pk=table.id)
+        self.assertEqual(response.status_code, 200)
+
+        # Verify initial_mail_sent is True on task and cell value is YES
+        task.refresh_from_db()
+        self.assertTrue(task.initial_mail_sent)
+        init_col = table.columns.get(name="INITIAL_MAIL")
+        self.assertEqual(CellValue.objects.get(row=row, column=init_col).value, "YES")
+
+        # 3. Admin successfully bulk updates STATUS to COMPLETED
+        # Create STATUS custom column
+        status_col = Column.objects.create(table=table, name="STATUS", data_type="TEXT")
+        request = factory.post(f"/tables/api/tables/{table.id}/bulk-update/", {"field": "STATUS", "value": "COMPLETED"}, format="json")
+        force_authenticate(request, user=self.admin)
+        response = view(request, pk=table.id)
+        self.assertEqual(response.status_code, 200)
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, "COMPLETED")
+        self.assertEqual(CellValue.objects.get(row=row, column=status_col).value, "COMPLETED")
+
+    def test_sync_status_cell_to_task(self):
+        from tables.views import RowViewSet
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        factory = APIRequestFactory()
+
+        table = Table.objects.create(name="Status Sync Table", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+        status_col = Column.objects.create(table=table, name="STATUS", data_type="TEXT")
+
+        row = Row.objects.create(table=table, created_by=self.admin)
+        task = Task.objects.create(row=row, due_date="2026-07-15", status="PENDING", priority="MEDIUM", assigned_by=self.admin)
+
+        view = RowViewSet.as_view({'post': 'edit_cell'})
+        request = factory.post(f"/tables/api/rows/{row.id}/edit-cell/", {
+            "column": status_col.id,
+            "value": "IN_PROGRESS"
+        }, format="json")
+        force_authenticate(request, user=self.admin)
+        response = view(request, pk=row.id)
+        self.assertEqual(response.status_code, 200)
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, "IN_PROGRESS")
+
+    def test_sync_task_to_status_cell(self):
+        from tasks.views import TaskViewSet
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        factory = APIRequestFactory()
+
+        table = Table.objects.create(name="Task to Cell Table", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+        status_col = Column.objects.create(table=table, name="STATUS", data_type="TEXT")
+
+        row = Row.objects.create(table=table, created_by=self.admin)
+        task = Task.objects.create(row=row, due_date="2026-07-15", status="PENDING", priority="MEDIUM", assigned_by=self.admin)
+
+        view = TaskViewSet.as_view({'post': 'update_status'})
+        request = factory.post(f"/tasks/api/tasks/{task.id}/update-status/", {
+            "status": "COMPLETED"
+        }, format="json")
+        force_authenticate(request, user=self.admin)
+        response = view(request, pk=task.id)
+        self.assertEqual(response.status_code, 200)
+
+        # Verify STATUS cell in spreadsheet was updated to COMPLETED
+        cell = CellValue.objects.get(row=row, column=status_col)
+        self.assertEqual(cell.value, "COMPLETED")

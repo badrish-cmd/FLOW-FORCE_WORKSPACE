@@ -45,6 +45,15 @@ class TaskViewSet(viewsets.ModelViewSet):
         task.status = new_status
         task.save(update_fields=["status"])
 
+        # Sync back to STATUS cell if such a column exists
+        from tables.models import Column, CellValue
+        status_col = Column.objects.filter(table=task.row.table, name__iexact="STATUS").first()
+        if status_col:
+            CellValue.objects.update_or_create(
+                row=task.row, column=status_col,
+                defaults={"value": new_status, "updated_by": request.user}
+            )
+
         # Create Activity Log
         ActivityLog.objects.create(
             task=task,

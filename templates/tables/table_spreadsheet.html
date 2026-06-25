@@ -25,6 +25,27 @@
                 <i class="fas fa-file-import mr-2"></i> Import CSV
             </button>
 
+            {% if has_admin_access %}
+            <div class="relative inline-block text-left" x-data="{ open: false }">
+                <button @click="open = !open" class="bg-rose-600 hover:bg-rose-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out flex items-center gap-1.5">
+                    <i class="fas fa-tools"></i> <span>Bulk Update</span> <i class="fas fa-chevron-down text-xs"></i>
+                </button>
+                <div x-show="open" @click.away="open = false" class="origin-top-right absolute right-0 mt-2 w-56 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 focus:outline-none z-30" style="display: none;" x-transition>
+                    <div class="py-1">
+                        <button @click="open = false; bulkUpdate('INITIAL_MAIL')" class="text-gray-700 block w-full text-left px-4 py-2.5 text-sm hover:bg-gray-100 font-medium">
+                            <i class="fas fa-envelope mr-2 text-blue-500"></i> Set All Initial Mail to YES
+                        </button>
+                        <button @click="open = false; bulkUpdate('ALERT_MAIL')" class="text-gray-700 block w-full text-left px-4 py-2.5 text-sm hover:bg-gray-100 font-medium">
+                            <i class="fas fa-bell mr-2 text-amber-500"></i> Set All Alert Mail to YES
+                        </button>
+                        <button @click="open = false; bulkUpdate('STATUS')" class="text-gray-700 block w-full text-left px-4 py-2.5 text-sm hover:bg-gray-100 font-medium">
+                            <i class="fas fa-check-double mr-2 text-emerald-500"></i> Set All Status to COMPLETED
+                        </button>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
             <button @click="openColumnModal" class="bg-primary hover:bg-blue-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out">
                 <i class="fas fa-plus-circle mr-2"></i> Add Column
             </button>
@@ -168,19 +189,21 @@
                     </div>
                 </div>
 
-                <!-- Middle Status Table: Complete, In Progress, On Hold, Canceled -->
+                <!-- Middle Status Table: Pending, In Progress, Review, Approved, Completed -->
                 <div class="border border-gray-300 rounded-lg overflow-hidden text-sm">
-                    <div class="grid grid-cols-4 bg-slate-800 text-white text-center font-bold py-2 border-b border-gray-300">
-                        <div class="border-r border-gray-300 text-xs">Complete</div>
-                        <div class="border-r border-gray-300 text-xs">In Progress</div>
-                        <div class="border-r border-gray-300 text-xs">On Hold</div>
-                        <div class="text-xs">Canceled</div>
+                    <div class="grid grid-cols-5 bg-slate-800 text-white text-center font-bold py-2 border-b border-gray-300">
+                        <div class="border-r border-gray-300 text-[10px] md:text-xs px-0.5">Pending</div>
+                        <div class="border-r border-gray-300 text-[10px] md:text-xs px-0.5">In Progress</div>
+                        <div class="border-r border-gray-300 text-[10px] md:text-xs px-0.5">Review</div>
+                        <div class="border-r border-gray-300 text-[10px] md:text-xs px-0.5">Approved</div>
+                        <div class="text-[10px] md:text-xs px-0.5">Completed</div>
                     </div>
-                    <div class="grid grid-cols-4 bg-teal-600 text-white text-center font-bold py-2">
-                        <div class="border-r border-teal-500" x-text="getGeneralStatusCount('complete')"></div>
-                        <div class="border-r border-teal-500" x-text="getGeneralStatusCount('in progress')"></div>
-                        <div class="border-r border-teal-500" x-text="getGeneralStatusCount('on hold')"></div>
-                        <div x-text="getGeneralStatusCount('canceled')"></div>
+                    <div class="grid grid-cols-5 bg-teal-600 text-white text-center font-bold py-2">
+                        <div class="border-r border-teal-500" x-text="getGeneralStatusCount('PENDING')"></div>
+                        <div class="border-r border-teal-500" x-text="getGeneralStatusCount('IN_PROGRESS')"></div>
+                        <div class="border-r border-teal-500" x-text="getGeneralStatusCount('READY_FOR_REVIEW')"></div>
+                        <div class="border-r border-teal-500" x-text="getGeneralStatusCount('APPROVED')"></div>
+                        <div x-text="getGeneralStatusCount('COMPLETED')"></div>
                     </div>
                 </div>
 
@@ -859,16 +882,17 @@
 
             getGeneralStatusCount(statusName) {
                 let count = 0;
+                const target = statusName.toUpperCase().replace(/\s+/g, '_');
                 this.filteredRows().forEach(row => {
-                    const val = this.getCellValue(row, 'STATUS');
+                    let val = this.getCellValue(row, 'STATUS');
+                    if (!val && row.task_details) {
+                        val = row.task_details.status;
+                    }
                     if (val) {
-                        const vLower = val.toLowerCase().trim();
-                        const sLower = statusName.toLowerCase().trim();
-                        if (vLower === sLower || 
-                            (sLower === 'complete' && vLower === 'completed') || 
-                            (sLower === 'in progress' && vLower === 'in_progress') ||
-                            (sLower === 'on hold' && vLower === 'on_hold') ||
-                            (sLower === 'canceled' && (vLower === 'canceled' || vLower === 'cancelled'))) {
+                        const normalized = val.toUpperCase().replace(/\s+/g, '_');
+                        if (normalized === target || 
+                            (target === 'COMPLETED' && (normalized === 'COMPLETE' || normalized === 'COMPLETED')) ||
+                            (target === 'COMPLETE' && (normalized === 'COMPLETED' || normalized === 'COMPLETE'))) {
                             count++;
                         }
                     }
@@ -878,7 +902,7 @@
 
             getCompletionStats() {
                 const total = this.rows.length;
-                const completed = this.getGeneralStatusCount('complete');
+                const completed = this.getGeneralStatusCount('COMPLETED');
                 const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
                 return { completed, total, percent };
             },
@@ -1338,6 +1362,49 @@
                     if (newTable.id) {
                         alert("Table duplicated successfully!");
                         window.location.href = `/tables/${newTable.id}/`;
+                    }
+                });
+            },
+
+            bulkUpdate(field) {
+                let displayField = '';
+                let targetVal = '';
+                if (field === 'INITIAL_MAIL') {
+                    displayField = 'Initial Mail to YES';
+                    targetVal = 'YES';
+                } else if (field === 'ALERT_MAIL') {
+                    displayField = 'Alert Mail to YES';
+                    targetVal = 'YES';
+                } else if (field === 'STATUS') {
+                    displayField = 'Status to COMPLETED';
+                    targetVal = 'COMPLETED';
+                }
+                
+                if (!confirm(`Are you sure you want to bulk update all rows' ${displayField}? This will modify all rows in this table.`)) {
+                    return;
+                }
+                
+                fetch(`/tables/api/tables/${this.tableId}/bulk-update/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({
+                        field: field,
+                        value: targetVal
+                    })
+                })
+                .then(res => {
+                    if (res.ok) {
+                        alert("Bulk update completed successfully!");
+                        this.fetchRows();
+                    } else {
+                        res.json().then(data => {
+                            alert(data.error || "Failed to perform bulk update.");
+                        }).catch(() => {
+                            alert("Failed to perform bulk update.");
+                        });
                     }
                 });
             },

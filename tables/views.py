@@ -181,18 +181,44 @@ class TableViewSet(viewsets.ModelViewSet):
                     latest_s_no = latest_cell.value
             s_no = latest_s_no + 1
 
+            # Parse and normalize other system fields
+            csv_date_str = normalized_row.get("DATE")
+            date_val = None
+            if csv_date_str:
+                parsed_d = parse_date(csv_date_str)
+                if parsed_d:
+                    date_val = parsed_d.isoformat()
+            if not date_val:
+                date_val = timezone.localdate().isoformat()
+
+            initial_mail_val = normalized_row.get("INITIAL_MAIL", "NO")
+            if initial_mail_val:
+                initial_mail_val = initial_mail_val.strip().upper()
+                if initial_mail_val not in ["YES", "NO"]:
+                    initial_mail_val = "NO"
+            else:
+                initial_mail_val = "NO"
+
+            alert_mail_val = normalized_row.get("ALERT_MAIL", "NO")
+            if alert_mail_val:
+                alert_mail_val = alert_mail_val.strip().upper()
+                if alert_mail_val not in ["YES", "NO"]:
+                    alert_mail_val = "NO"
+            else:
+                alert_mail_val = "NO"
+
             cell_values = {
                 "S_NO": s_no,
-                "DATE": timezone.localdate().isoformat(),
+                "DATE": date_val,
                 "DUE_DATE": due_date.isoformat(),
                 "TASK_NAME": task_name,
-                "INITIAL_MAIL": "NO",
-                "ALERT_MAIL": "NO"
+                "INITIAL_MAIL": initial_mail_val,
+                "ALERT_MAIL": alert_mail_val
             }
 
-            # Map remaining headers to custom columns
+            # Map remaining custom columns including status, priority, and date columns
             for col_name, val in normalized_row.items():
-                if col_name not in ["S_NO", "DATE", "DUE_DATE", "TASK_NAME", "INITIAL_MAIL", "ALERT_MAIL", "STATUS", "PRIORITY"]:
+                if col_name not in ["S_NO", "DATE", "DUE_DATE", "TASK_NAME", "INITIAL_MAIL", "ALERT_MAIL"]:
                     if col_name in db_cols:
                         cell_values[col_name] = val
 
@@ -201,14 +227,51 @@ class TableViewSet(viewsets.ModelViewSet):
                 if col:
                     CellValue.objects.create(row=row, column=col, value=val, updated_by=request_user)
 
+            # Normalize priority and status for Task model
+            norm_priority = priority.upper().strip().replace(" ", "_")
+            if norm_priority not in [choice[0] for choice in Task.PRIORITY_CHOICES]:
+                norm_priority = "MEDIUM"
+
+            norm_status = status_val.upper().strip().replace(" ", "_")
+            if norm_status in ["COMPLETE", "COMPLETED"]:
+                norm_status = "COMPLETED"
+            elif norm_status not in [choice[0] for choice in Task.STATUS_CHOICES]:
+                norm_status = "PENDING"
+
             # Create Task
-            Task.objects.create(
+            task = Task.objects.create(
                 row=row,
                 due_date=due_date,
-                priority=priority.upper(),
-                status=status_val.upper(),
-                assigned_by=request_user
+                priority=norm_priority,
+                status=norm_status,
+                assigned_by=request_user,
+                initial_mail_sent=(initial_mail_val == "YES"),
+                alert_mail_sent=(alert_mail_val == "YES")
             )
+
+            # Resolve assignee user if provided in any USER data_type column or header representation
+            user_to_assign = None
+            from django.db.models import Q
+            for col_name, val in cell_values.items():
+                col = db_cols.get(col_name)
+                if col and (col.data_type == "USER" or col_name.upper() in ["ASSIGNED_TO", "ASSIGNED TO", "ASSIGNEE"]):
+                    if val:
+                        try:
+                            if str(val).isdigit():
+                                user_to_assign = EmployeeUser.objects.get(id=int(val), is_active=True)
+                            elif "@" in str(val):
+                                user_to_assign = EmployeeUser.objects.get(email=val, is_active=True)
+                            else:
+                                user_to_assign = EmployeeUser.objects.get(full_name__iexact=val, is_active=True)
+                        except EmployeeUser.DoesNotExist:
+                            user_to_assign = EmployeeUser.objects.filter(
+                                Q(full_name__icontains=val) | Q(email__icontains=val),
+                                is_active=True
+                            ).first()
+                        break
+
+            if user_to_assign:
+                task.assigned_to.set([user_to_assign])
 
             created_rows.append(row)
 
@@ -275,6 +338,71 @@ class TableViewSet(viewsets.ModelViewSet):
             return Response({"error": err}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({"message": f"Successfully imported {len(created_rows)} rows from Google Sheets"}, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="bulk-update")
+    @transaction.atomic
+    def bulk_update(self, request, pk=None):
+        table = self.get_object_or_404(pk)
+        if not has_table_access(request.user, table, "ADMIN"):
+            return Response({"error": "Only admins can perform bulk updates"}, status=status.HTTP_403_FORBIDDEN)
+
+        field = request.data.get("field")
+        value = request.data.get("value")
+
+        if field not in ["INITIAL_MAIL", "ALERT_MAIL", "STATUS"]:
+            return Response({"error": "Invalid field for bulk update"}, status=status.HTTP_400_BAD_REQUEST)
+
+        rows = table.rows.filter(is_archived=False)
+        updated_count = 0
+
+        if field == "INITIAL_MAIL":
+            col = table.columns.filter(name__iexact="INITIAL_MAIL").first()
+            if col:
+                for row in rows:
+                    CellValue.objects.update_or_create(
+                        row=row, column=col,
+                        defaults={"value": "YES", "updated_by": request.user}
+                    )
+                    task = getattr(row, "task", None)
+                    if task:
+                        task.initial_mail_sent = True
+                        task.save(update_fields=["initial_mail_sent"])
+                    updated_count += 1
+        elif field == "ALERT_MAIL":
+            col = table.columns.filter(name__iexact="ALERT_MAIL").first()
+            if col:
+                for row in rows:
+                    CellValue.objects.update_or_create(
+                        row=row, column=col,
+                        defaults={"value": "YES", "updated_by": request.user}
+                    )
+                    task = getattr(row, "task", None)
+                    if task:
+                        task.alert_mail_sent = True
+                        task.save(update_fields=["alert_mail_sent"])
+                    updated_count += 1
+        elif field == "STATUS":
+            status_col = table.columns.filter(name__iexact="STATUS").first()
+            for row in rows:
+                if status_col:
+                    CellValue.objects.update_or_create(
+                        row=row, column=status_col,
+                        defaults={"value": "COMPLETED", "updated_by": request.user}
+                    )
+                task = getattr(row, "task", None)
+                if task:
+                    task.status = "COMPLETED"
+                    task.save(update_fields=["status"])
+                    
+                    ActivityLog.objects.create(
+                        task=task,
+                        action="Updated cell STATUS via Bulk Update",
+                        user=request.user,
+                        details={"column": "STATUS", "value": "COMPLETED"}
+                    )
+                updated_count += 1
+
+        return Response({"message": f"Successfully updated {updated_count} rows"}, status=status.HTTP_200_OK)
 
     def get_object_or_404(self, pk):
         obj = get_object_or_404(Table, pk=pk)
@@ -516,6 +644,17 @@ class RowViewSet(viewsets.ModelViewSet):
 
         # Sync with Task assigned_to if column data_type is USER or column name represents assignment
         col_name_upper = column.name.upper()
+        if col_name_upper == "STATUS":
+            task = getattr(row, "task", None)
+            if task:
+                val_upper = str(value).upper().strip().replace(" ", "_")
+                if val_upper in ["COMPLETE", "COMPLETED"]:
+                    val_upper = "COMPLETED"
+                valid_statuses = [choice[0] for choice in Task.STATUS_CHOICES]
+                if val_upper in valid_statuses:
+                    task.status = val_upper
+                    task.save(update_fields=["status"])
+
         if column.data_type == "USER" or col_name_upper in ["ASSIGNED_TO", "ASSIGNED TO", "ASSIGNEE"]:
             task = getattr(row, "task", None)
             if task:
@@ -613,6 +752,17 @@ class RowViewSet(viewsets.ModelViewSet):
 
             # Sync with Task assigned_to if column data_type is USER or column name represents assignment
             col_name_upper = column.name.upper()
+            if col_name_upper == "STATUS":
+                task = getattr(row, "task", None)
+                if task:
+                    val_upper = str(value).upper().strip().replace(" ", "_")
+                    if val_upper in ["COMPLETE", "COMPLETED"]:
+                        val_upper = "COMPLETED"
+                    valid_statuses = [choice[0] for choice in Task.STATUS_CHOICES]
+                    if val_upper in valid_statuses:
+                        task.status = val_upper
+                        task.save(update_fields=["status"])
+
             if column.data_type == "USER" or col_name_upper in ["ASSIGNED_TO", "ASSIGNED TO", "ASSIGNEE"]:
                 task = getattr(row, "task", None)
                 if task:
@@ -681,9 +831,11 @@ def table_spreadsheet_view(request, table_id):
     if not has_table_access(request.user, table, "VIEW"):
         return redirect("/")
     has_edit = has_table_access(request.user, table, "EDIT")
+    has_admin = has_table_access(request.user, table, "ADMIN")
     return render(request, "tables/table_spreadsheet.html", {
         "table": table,
-        "has_edit_access": has_edit
+        "has_edit_access": has_edit,
+        "has_admin_access": has_admin
     })
 
 @login_required
