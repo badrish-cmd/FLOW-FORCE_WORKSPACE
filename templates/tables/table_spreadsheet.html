@@ -11,6 +11,11 @@
             <h1 class="text-2xl font-bold text-gray-900 flex items-center gap-2">
                 <i class="fas fa-table text-primary"></i>
                 <span>{{ table.name }}</span>
+                {% if has_admin_access %}
+                <button @click="openEditTableModal" class="text-gray-400 hover:text-blue-600 focus:outline-none transition duration-150" title="Edit Table Details">
+                    <i class="fas fa-edit text-sm"></i>
+                </button>
+                {% endif %}
             </h1>
             <p class="text-sm text-gray-500 mt-1">{{ table.description|default:"Spreadsheet workspace" }}</p>
         </div>
@@ -23,6 +28,9 @@
             </button>
             <button @click="openImportModal" class="bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out">
                 <i class="fas fa-file-import mr-2"></i> Import CSV
+            </button>
+            <button x-show="selectedRowIds.length > 0" @click="bulkDeleteRows(true)" class="bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out flex items-center gap-1.5" x-transition style="display: none;">
+                <i class="fas fa-trash-alt"></i> <span>Delete Selected (<span x-text="selectedRowIds.length"></span>)</span>
             </button>
 
             {% if has_admin_access %}
@@ -40,6 +48,10 @@
                         </button>
                         <button @click="open = false; bulkUpdate('STATUS')" class="text-gray-700 block w-full text-left px-4 py-2.5 text-sm hover:bg-gray-100 font-medium">
                             <i class="fas fa-check-double mr-2 text-emerald-500"></i> Set All Status to COMPLETED
+                        </button>
+                        <hr class="border-gray-200">
+                        <button @click="open = false; bulkDeleteRows(false)" class="text-red-700 block w-full text-left px-4 py-2.5 text-sm hover:bg-red-50 font-medium">
+                            <i class="fas fa-dumpster mr-2 text-red-500"></i> Bulk Delete All Tasks
                         </button>
                     </div>
                 </div>
@@ -250,6 +262,9 @@
             <table class="min-w-full divide-y divide-gray-200 border-collapse">
                 <thead class="bg-gray-50">
                     <tr>
+                        <th scope="col" class="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider border-r border-gray-200 w-10">
+                            <input type="checkbox" @change="toggleSelectAll" :checked="isAllSelected" class="rounded text-primary focus:ring-primary">
+                        </th>
                         {% for col in table.columns.all %}
                         <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider border-r border-gray-200 min-w-[150px]">
                             <div class="flex items-center justify-between">
@@ -280,6 +295,9 @@
                     <!-- Standard rows -->
                     <template x-for="(row, rowIndex) in filteredRows()" :key="row.id">
                         <tr :class="{'line-through text-gray-400 bg-gray-50 opacity-75': isRowCompleted(row)}" class="hover:bg-gray-50 transition duration-100" @mouseenter="onRowHover(row.id)">
+                            <td class="p-1 border-r border-gray-200 text-center align-middle w-10">
+                                <input type="checkbox" :value="row.id" x-model="selectedRowIds" class="rounded text-primary focus:ring-primary">
+                            </td>
                             {% for col in table.columns.all %}
                              <td class="p-0 border-r border-gray-200 text-sm whitespace-nowrap align-middle relative group"
                                   :class="isCellDragged(row.id, {{ col.id }}) ? 'bg-blue-50 border-2 border-blue-400' : ''"
@@ -416,6 +434,7 @@
 
                     <!-- Inline Row Creator at the bottom (No Prompts!) -->
                     <tr class="bg-gray-50 border-t border-gray-200">
+                        <td class="p-1 border-r border-gray-200"></td>
                         {% for col in table.columns.all %}
                         <td class="p-1 border-r border-gray-200 text-sm whitespace-nowrap align-middle">
                             {% if col.name == 'S_NO' %}
@@ -515,6 +534,27 @@
             <div class="flex justify-end gap-3 mt-6">
                 <button @click="isEditColumnModalOpen = false" class="bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg text-sm px-4 py-2.5">Cancel</button>
                 <button @click="saveColumnProperties" class="bg-primary hover:bg-blue-700 text-white font-medium rounded-lg text-sm px-4 py-2.5">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- EDIT TABLE DETAILS MODAL -->
+    <div x-show="isEditTableModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 bg-opacity-50" style="display: none;" x-transition>
+        <div class="bg-white rounded-xl max-w-md w-full p-6 shadow-xl border border-gray-200" @click.away="isEditTableModalOpen = false">
+            <h3 class="text-lg font-bold text-gray-900 mb-4">Edit Table Details</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Table Name</label>
+                    <input type="text" x-model="editTableName" placeholder="Table Name" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Description</label>
+                    <textarea x-model="editTableDescription" placeholder="Table Description" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-sm" rows="3"></textarea>
+                </div>
+            </div>
+            <div class="flex justify-end gap-3 mt-6">
+                <button @click="isEditTableModalOpen = false" class="bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg text-sm px-4 py-2.5">Cancel</button>
+                <button @click="saveTableProperties" class="bg-primary hover:bg-blue-700 text-white font-medium rounded-lg text-sm px-4 py-2.5">Save Changes</button>
             </div>
         </div>
     </div>
@@ -661,6 +701,10 @@
     function spreadsheetApp(tableId) {
         return {
             tableId: tableId,
+            isEditTableModalOpen: false,
+            editTableName: '{{ table.name|escapejs }}',
+            editTableDescription: '{{ table.description|default:""|escapejs }}',
+            selectedRowIds: [],
             columns: [{% for col in table.columns.all %}{id: {{ col.id }}, name: '{{ col.name }}'}{% if not forloop.last %}, {% endif %}{% endfor %}],
             rows: [],
             editingRowId: null,
@@ -1362,6 +1406,88 @@
                     if (newTable.id) {
                         alert("Table duplicated successfully!");
                         window.location.href = `/tables/${newTable.id}/`;
+                    }
+                });
+            },
+
+            openEditTableModal() {
+                this.editTableName = '{{ table.name|escapejs }}';
+                this.editTableDescription = '{{ table.description|default:""|escapejs }}';
+                this.isEditTableModalOpen = true;
+            },
+
+            saveTableProperties() {
+                if (!this.editTableName) {
+                    alert("Table Name is required.");
+                    return;
+                }
+                fetch(`/tables/api/tables/${this.tableId}/`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({
+                        name: this.editTableName,
+                        description: this.editTableDescription
+                    })
+                })
+                .then(res => {
+                    if (res.ok) {
+                        location.reload();
+                    } else {
+                        alert("Error saving table properties.");
+                    }
+                });
+            },
+
+            get isAllSelected() {
+                return this.rows.length > 0 && this.selectedRowIds.length === this.rows.length;
+            },
+
+            toggleSelectAll(e) {
+                if (e.target.checked) {
+                    this.selectedRowIds = this.rows.map(r => r.id);
+                } else {
+                    this.selectedRowIds = [];
+                }
+            },
+
+            bulkDeleteRows(selectedOnly = true) {
+                let msg = "Are you sure you want to bulk delete ALL tasks in this table? This action cannot be undone.";
+                let payload = {};
+                if (selectedOnly) {
+                    if (this.selectedRowIds.length === 0) {
+                        alert("No tasks selected.");
+                        return;
+                    }
+                    msg = `Are you sure you want to bulk delete the ${this.selectedRowIds.length} selected task(s)? This action cannot be undone.`;
+                    payload = { row_ids: this.selectedRowIds };
+                }
+
+                if (!confirm(msg)) {
+                    return;
+                }
+
+                fetch(`/tables/api/tables/${this.tableId}/bulk-delete-rows/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify(payload)
+                })
+                .then(res => {
+                    if (res.ok) {
+                        alert("Bulk delete completed successfully!");
+                        this.selectedRowIds = [];
+                        this.fetchRows();
+                    } else {
+                        res.json().then(data => {
+                            alert(data.error || "Failed to perform bulk delete.");
+                        }).catch(() => {
+                            alert("Failed to perform bulk delete.");
+                        });
                     }
                 });
             },

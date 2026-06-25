@@ -390,3 +390,141 @@ class TablesTestCase(TestCase):
         # Verify STATUS cell in spreadsheet was updated to COMPLETED
         cell = CellValue.objects.get(row=row, column=status_col)
         self.assertEqual(cell.value, "COMPLETED")
+
+    def test_table_edit_details_and_permissions(self):
+        from tables.views import TableViewSet
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        factory = APIRequestFactory()
+
+        table = Table.objects.create(name="Original Table", description="Original Desc", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+        TableAccess.objects.create(table=table, user=self.employee, access_level="EDIT")
+
+        view = TableViewSet.as_view({'patch': 'partial_update'})
+
+        # 1. Non-admin (employee with EDIT access) cannot change table name
+        request = factory.patch(f"/tables/api/tables/{table.id}/", {"name": "Hacked Name"}, format="json")
+        force_authenticate(request, user=self.employee)
+        response = view(request, pk=table.id)
+        self.assertEqual(response.status_code, 403)
+
+        # 2. Admin can change table name and description
+        request = factory.patch(f"/tables/api/tables/{table.id}/", {"name": "New Name", "description": "New Desc"}, format="json")
+        force_authenticate(request, user=self.admin)
+        response = view(request, pk=table.id)
+        self.assertEqual(response.status_code, 200)
+        table.refresh_from_db()
+        self.assertEqual(table.name, "New Name")
+        self.assertEqual(table.description, "New Desc")
+
+    def test_column_edit_and_permissions(self):
+        from tables.views import ColumnViewSet
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        factory = APIRequestFactory()
+
+        table = Table.objects.create(name="Column Permission Table", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+        TableAccess.objects.create(table=table, user=self.employee, access_level="EDIT")
+
+        col = Column.objects.create(table=table, name="Old Col", data_type="TEXT", position=7, options="A,B")
+
+        view = ColumnViewSet.as_view({'patch': 'partial_update'})
+
+        # 1. Employee cannot update column options
+        request = factory.patch(f"/tables/api/columns/{col.id}/", {"options": "X,Y,Z"}, format="json")
+        force_authenticate(request, user=self.employee)
+        response = view(request, pk=col.id)
+        self.assertEqual(response.status_code, 403)
+
+        # 2. Admin can update column options
+        request = factory.patch(f"/tables/api/columns/{col.id}/", {"options": "X,Y,Z"}, format="json")
+        force_authenticate(request, user=self.admin)
+        response = view(request, pk=col.id)
+        self.assertEqual(response.status_code, 200)
+        col.refresh_from_db()
+        self.assertEqual(col.options, "X,Y,Z")
+
+    def test_table_duplication_structure_and_values(self):
+        from tables.views import TableViewSet
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        factory = APIRequestFactory()
+
+        table = Table.objects.create(name="Full Copy Table", created_by=self.admin, job_type="ENGINEER")
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+
+        # Custom column with options
+        custom_col = Column.objects.create(table=table, name="Custom Dropdown", data_type="DROPDOWN", options="Option1,Option2", position=7)
+
+        # Row with cell values
+        row = Row.objects.create(table=table, created_by=self.admin)
+        cell1 = CellValue.objects.create(row=row, column=custom_col, value="Option1", updated_by=self.admin)
+        
+        # Row has task
+        task = Task.objects.create(row=row, status="IN_PROGRESS", due_date="2026-07-01", priority="HIGH", assigned_by=self.admin)
+        task.assigned_to.add(self.employee)
+
+        view = TableViewSet.as_view({'post': 'duplicate_table'})
+        request = factory.post(f"/tables/api/tables/{table.id}/duplicate/")
+        force_authenticate(request, user=self.admin)
+        response = view(request, pk=table.id)
+        self.assertEqual(response.status_code, 201)
+
+        # Verify new table metadata
+        new_table_id = response.data["id"]
+        new_table = Table.objects.get(id=new_table_id)
+        self.assertEqual(new_table.name, "Copy of Full Copy Table")
+        self.assertEqual(new_table.job_type, "ENGINEER")
+
+        # Verify duplicated columns and options
+        new_custom_col = new_table.columns.get(name="Custom Dropdown")
+        self.assertEqual(new_custom_col.data_type, "DROPDOWN")
+        self.assertEqual(new_custom_col.options, "Option1,Option2")
+
+        # Verify duplicated rows and cell values
+        new_row = new_table.rows.first()
+        self.assertIsNotNone(new_row)
+        new_cell = CellValue.objects.get(row=new_row, column=new_custom_col)
+        self.assertEqual(new_cell.value, "Option1")
+
+        # Verify task is duplicated with assignees
+        new_task = new_row.task
+        self.assertEqual(new_task.status, "IN_PROGRESS")
+        self.assertEqual(new_task.priority, "HIGH")
+        self.assertEqual(new_task.due_date.strftime("%Y-%m-%d"), "2026-07-01")
+        self.assertIn(self.employee, new_task.assigned_to.all())
+
+    def test_bulk_delete_rows(self):
+        from tables.views import TableViewSet
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        factory = APIRequestFactory()
+
+        table = Table.objects.create(name="Delete Test Table", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+        TableAccess.objects.create(table=table, user=self.employee, access_level="VIEW")
+
+        row1 = Row.objects.create(table=table, created_by=self.admin)
+        row2 = Row.objects.create(table=table, created_by=self.admin)
+        row3 = Row.objects.create(table=table, created_by=self.admin)
+
+        view = TableViewSet.as_view({'post': 'bulk_delete_rows'})
+
+        # 1. Non-edit user (employee with VIEW access) cannot bulk delete
+        request = factory.post(f"/tables/api/tables/{table.id}/bulk-delete-rows/", {"row_ids": [row1.id, row2.id]}, format="json")
+        force_authenticate(request, user=self.employee)
+        response = view(request, pk=table.id)
+        self.assertEqual(response.status_code, 403)
+
+        # 2. Admin can delete selected rows (row1, row2)
+        request = factory.post(f"/tables/api/tables/{table.id}/bulk-delete-rows/", {"row_ids": [row1.id, row2.id]}, format="json")
+        force_authenticate(request, user=self.admin)
+        response = view(request, pk=table.id)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Row.objects.filter(id__in=[row1.id, row2.id]).exists())
+        self.assertTrue(Row.objects.filter(id=row3.id).exists())
+
+        # 3. Admin can delete all remaining rows in table
+        request = factory.post(f"/tables/api/tables/{table.id}/bulk-delete-rows/", format="json")
+        force_authenticate(request, user=self.admin)
+        response = view(request, pk=table.id)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Row.objects.filter(table=table).exists())

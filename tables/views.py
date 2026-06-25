@@ -56,6 +56,24 @@ class TableViewSet(viewsets.ModelViewSet):
                 )
         return Response(TableAccessSerializer(access).data, status=status.HTTP_200_OK)
 
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if not has_table_access(request.user, instance, "ADMIN"):
+            return Response({"error": "Only admins can edit this table"}, status=status.HTTP_403_FORBIDDEN)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if not has_table_access(request.user, instance, "ADMIN"):
+            return Response({"error": "Only admins can edit this table"}, status=status.HTTP_403_FORBIDDEN)
+        return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if not has_table_access(request.user, instance, "ADMIN"):
+            return Response({"error": "Only admins can delete this table"}, status=status.HTTP_403_FORBIDDEN)
+        return super().destroy(request, *args, **kwargs)
+
     @action(detail=True, methods=["post"], url_path="duplicate")
     @transaction.atomic
     def duplicate_table(self, request, pk=None):
@@ -68,19 +86,34 @@ class TableViewSet(viewsets.ModelViewSet):
             name=f"Copy of {table.name}",
             description=table.description,
             created_by=request.user,
-            department=table.department
+            department=table.department,
+            job_type=table.job_type
         )
 
+        column_mapping = {}
+
+        # Match system columns by name and copy options, position, is_mandatory, etc.
+        for old_col in table.columns.filter(is_system_column=True):
+            new_col = new_table.columns.filter(name=old_col.name).first()
+            if new_col:
+                new_col.options = old_col.options
+                new_col.position = old_col.position
+                new_col.is_mandatory = old_col.is_mandatory
+                new_col.save()
+                column_mapping[old_col.id] = new_col
+
         # Clone custom columns (excluding system columns as they are auto-created in save())
-        for col in table.columns.filter(is_system_column=False):
-            Column.objects.create(
+        for old_col in table.columns.filter(is_system_column=False):
+            new_col = Column.objects.create(
                 table=new_table,
-                name=col.name,
-                data_type=col.data_type,
-                is_mandatory=col.is_mandatory,
+                name=old_col.name,
+                data_type=old_col.data_type,
+                is_mandatory=old_col.is_mandatory,
                 is_system_column=False,
-                position=col.position
+                position=old_col.position,
+                options=old_col.options
             )
+            column_mapping[old_col.id] = new_col
 
         # Clone TableAccess
         for access in table.access_rules.all():
@@ -91,7 +124,64 @@ class TableViewSet(viewsets.ModelViewSet):
                 access_level=access.access_level
             )
 
+        # Clone Rows, CellValues and Tasks
+        for old_row in table.rows.all():
+            new_row = Row.objects.create(
+                table=new_table,
+                created_by=request.user,
+                is_archived=old_row.is_archived
+            )
+            
+            # Copy cells
+            for old_cell in old_row.cells.all():
+                new_col = column_mapping.get(old_cell.column_id)
+                if new_col:
+                    CellValue.objects.create(
+                        row=new_row,
+                        column=new_col,
+                        value=old_cell.value,
+                        updated_by=request.user
+                    )
+            
+            # Copy Task if it exists
+            if hasattr(old_row, "task"):
+                old_task = old_row.task
+                new_task = Task.objects.create(
+                    row=new_row,
+                    assigned_by=old_task.assigned_by,
+                    status=old_task.status,
+                    due_date=old_task.due_date,
+                    priority=old_task.priority,
+                    initial_mail_sent=old_task.initial_mail_sent,
+                    alert_mail_sent=old_task.alert_mail_sent,
+                    last_escalation_level=old_task.last_escalation_level,
+                    last_escalation_at=old_task.last_escalation_at
+                )
+                if old_task.assigned_to.exists():
+                    new_task.assigned_to.set(old_task.assigned_to.all())
+
         return Response(TableSerializer(new_table).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="bulk-delete-rows")
+    @transaction.atomic
+    def bulk_delete_rows(self, request, pk=None):
+        table = self.get_object_or_404(pk)
+        if not has_table_access(request.user, table, "EDIT"):
+            return Response({"error": "No edit access to this table"}, status=status.HTTP_403_FORBIDDEN)
+        
+        row_ids = request.data.get("row_ids")
+        if row_ids is not None:
+            if not isinstance(row_ids, list):
+                return Response({"error": "row_ids must be a list"}, status=status.HTTP_400_BAD_REQUEST)
+            rows = Row.objects.filter(table=table, id__in=row_ids)
+            count = rows.count()
+            rows.delete()
+            return Response({"message": f"Successfully deleted {count} rows"}, status=status.HTTP_200_OK)
+        else:
+            rows = Row.objects.filter(table=table)
+            count = rows.count()
+            rows.delete()
+            return Response({"message": f"Successfully deleted {count} rows"}, status=status.HTTP_200_OK)
 
     def _import_rows_from_csv_data(self, file_data, table, request_user):
         import csv
@@ -416,6 +506,10 @@ class ColumnViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         table_id = self.request.query_params.get("table")
         if not table_id:
+            if self.action in ["retrieve", "update", "partial_update", "destroy"]:
+                from .permissions import get_accessible_tables
+                accessible_tables = get_accessible_tables(self.request.user)
+                return Column.objects.filter(table__in=accessible_tables)
             return Column.objects.none()
         table = get_object_or_404(Table, id=table_id)
         if not has_table_access(self.request.user, table, "VIEW"):
@@ -428,6 +522,26 @@ class ColumnViewSet(viewsets.ModelViewSet):
         if not has_table_access(request.user, table, "ADMIN"):
             return Response({"error": "Only admins can add columns"}, status=status.HTTP_403_FORBIDDEN)
         return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if not has_table_access(request.user, instance.table, "ADMIN"):
+            return Response({"error": "Only admins can update columns"}, status=status.HTTP_403_FORBIDDEN)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if not has_table_access(request.user, instance.table, "ADMIN"):
+            return Response({"error": "Only admins can update columns"}, status=status.HTTP_403_FORBIDDEN)
+        return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if not has_table_access(request.user, instance.table, "ADMIN"):
+            return Response({"error": "Only admins can delete columns"}, status=status.HTTP_403_FORBIDDEN)
+        if instance.is_system_column:
+            return Response({"error": "Cannot delete system columns"}, status=status.HTTP_400_BAD_REQUEST)
+        return super().destroy(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         table = serializer.validated_data["table"]
