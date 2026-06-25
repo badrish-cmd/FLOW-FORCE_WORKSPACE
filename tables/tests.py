@@ -528,3 +528,48 @@ class TablesTestCase(TestCase):
         response = view(request, pk=table.id)
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Row.objects.filter(table=table).exists())
+
+    def test_send_manual_escalation_api(self):
+        from django.utils import timezone
+        from datetime import timedelta
+        from tasks.models import EmailLog
+        from tables.views import TableViewSet
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        factory = APIRequestFactory()
+
+        table = Table.objects.create(name="Escalation Test Table", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+        TableAccess.objects.create(table=table, user=self.employee, access_level="VIEW")
+
+        row = Row.objects.create(table=table, created_by=self.admin)
+        task = Task.objects.create(
+            row=row,
+            due_date=timezone.localdate() - timedelta(days=2),
+            priority="HIGH",
+            status="PENDING",
+            assigned_by=self.admin
+        )
+        task.assigned_to.add(self.employee)
+
+        view = TableViewSet.as_view({'post': 'send_manual_escalation'})
+
+        # 1. Non-admin user cannot trigger manual escalation
+        request = factory.post(f"/tables/api/tables/{table.id}/send-escalation/", {"row_ids": [row.id]}, format="json")
+        force_authenticate(request, user=self.employee)
+        response = view(request, pk=table.id)
+        self.assertEqual(response.status_code, 403)
+
+        # 2. Admin can trigger manual escalation
+        request = factory.post(f"/tables/api/tables/{table.id}/send-escalation/", {"row_ids": [row.id]}, format="json")
+        force_authenticate(request, user=self.admin)
+        response = view(request, pk=table.id)
+        self.assertEqual(response.status_code, 200)
+
+        # Verify EmailLog was created
+        log = EmailLog.objects.filter(task=task, email_type="OVERDUE_ESCALATION_MAIL").first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.recipient_email, self.employee.email)
+        
+        # Verify task escalation level updated
+        task.refresh_from_db()
+        self.assertEqual(task.last_escalation_level, 2)

@@ -46,12 +46,8 @@ def handle_task_save(sender, instance, created, **kwargs):
         update_task_row_mail_columns(instance)
         sync_task_assignments(instance)
     else:
-        old_status = getattr(instance, '_old_status', None)
-        if old_status != instance.status:
-            if instance.status == 'READY_FOR_REVIEW':
-                send_review_request_mail.delay(instance.id)
-            elif instance.status in ['APPROVED', 'REJECTED', 'CHANGES_REQUESTED']:
-                send_approval_status_mail.delay(instance.id)
+        # Email escalations on status changes are disabled as per request
+        pass
 
 @receiver(m2m_changed, sender=Task.assigned_to.through)
 def handle_task_assignment(sender, instance, action, **kwargs):

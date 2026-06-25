@@ -132,7 +132,7 @@ class TasksTestCase(TestCase):
 
     def test_overdue_escalation(self):
         """Create overdue tasks and verify correct escalation email routing"""
-        # Scenario A: 1 Day Overdue -> Employee only
+        # Scenario A: 1 Day Overdue -> no escalation
         task_1d = Task.objects.create(
             row=Row.objects.create(table=self.table),
             due_date=timezone.localdate() - timedelta(days=1),
@@ -141,6 +141,26 @@ class TasksTestCase(TestCase):
             assigned_by=self.admin
         )
         task_1d.assigned_to.add(self.employee)
+
+        # Scenario B: 6 Days Overdue -> Employee only
+        task_6d = Task.objects.create(
+            row=Row.objects.create(table=self.table),
+            due_date=timezone.localdate() - timedelta(days=6),
+            priority="HIGH",
+            status="PENDING",
+            assigned_by=self.admin
+        )
+        task_6d.assigned_to.add(self.employee)
+
+        # Scenario C: 7 Days Overdue -> no escalation
+        task_7d = Task.objects.create(
+            row=Row.objects.create(table=self.table),
+            due_date=timezone.localdate() - timedelta(days=7),
+            priority="HIGH",
+            status="PENDING",
+            assigned_by=self.admin
+        )
+        task_7d.assigned_to.add(self.employee)
         
         # Clear any logs created by assignment
         EmailLog.objects.all().delete()
@@ -148,29 +168,23 @@ class TasksTestCase(TestCase):
         check_overdue_escalations()
         
         # Should have sent to employee
-        logs_1d = EmailLog.objects.filter(task=task_1d, email_type="OVERDUE_ESCALATION_MAIL")
-        self.assertEqual(logs_1d.count(), 1)
-        self.assertEqual(logs_1d.first().recipient_email, self.employee.email)
+        logs_6d = EmailLog.objects.filter(task=task_6d, email_type="OVERDUE_ESCALATION_MAIL")
+        self.assertEqual(logs_6d.count(), 1)
+        self.assertEqual(logs_6d.first().recipient_email, self.employee.email)
 
-        # Scenario B: 3 Days Overdue -> Department Admin + Employee
-        task_3d = Task.objects.create(
-            row=Row.objects.create(table=self.table),
-            due_date=timezone.localdate() - timedelta(days=3),
-            priority="HIGH",
-            status="PENDING",
-            assigned_by=self.admin
-        )
-        task_3d.assigned_to.add(self.employee)
-        
-        EmailLog.objects.all().delete()
+        # Verify that 1d and 7d tasks did not get escalated
+        self.assertFalse(EmailLog.objects.filter(task=task_1d, email_type="OVERDUE_ESCALATION_MAIL").exists())
+        self.assertFalse(EmailLog.objects.filter(task=task_7d, email_type="OVERDUE_ESCALATION_MAIL").exists())
 
-        check_overdue_escalations()
-
-        logs_3d = EmailLog.objects.filter(task=task_3d, email_type="OVERDUE_ESCALATION_MAIL")
-        self.assertEqual(logs_3d.count(), 2)
-        recipients = [log.recipient_email for log in logs_3d]
-        self.assertIn(self.employee.email, recipients)
-        self.assertIn(self.dept_admin.email, recipients)
+        # Verify that the OVERDUE_ESCALATION_MAIL uses operations.flowforce@gmail.com
+        log = logs_6d.first()
+        log.status = "PENDING"
+        log.save()
+        with patch('tasks.tasks.send_mail') as mock_send:
+            send_email_log_task(log.id)
+            mock_send.assert_called_once()
+            kwargs = mock_send.call_args[1]
+            self.assertEqual(kwargs.get('from_email'), 'operations.flowforce@gmail.com')
 
     def test_email_retry_logic(self):
         """Simulate email send failure, verify exponential backoff and retry success"""
@@ -207,7 +221,7 @@ class TasksTestCase(TestCase):
             self.assertIsNotNone(log.sent_at)
 
     def test_review_request_email(self):
-        """Update task status to READY_FOR_REVIEW, verify email sent to assigned_by admin"""
+        """Update task status to READY_FOR_REVIEW, verify NO email log is created since status emails are disabled"""
         task = Task.objects.create(
             row=self.row,
             due_date=timezone.localdate(),
@@ -224,5 +238,4 @@ class TasksTestCase(TestCase):
         task.save()
 
         log = EmailLog.objects.filter(task=task, email_type="REVIEW_REQUEST_MAIL").first()
-        self.assertIsNotNone(log)
-        self.assertEqual(log.recipient_email, self.admin.email)
+        self.assertIsNone(log)

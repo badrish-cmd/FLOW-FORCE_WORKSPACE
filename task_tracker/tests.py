@@ -195,8 +195,8 @@ class TaskTrackerServiceTests(TestCase):
         task = TaskRow.objects.create(
             tracker=self.tracker,
             s_no=1,
-            date=today - timedelta(days=5),
-            due_date=today - timedelta(days=4), # 4 days overdue -> DEPARTMENT_ADMIN level
+            date=today - timedelta(days=7),
+            due_date=today - timedelta(days=6), # exactly 6 days overdue -> EMPLOYEE level
             task_name="Late Task",
             priority="HIGH",
             assigned_to=self.employee,
@@ -216,11 +216,13 @@ class TaskTrackerServiceTests(TestCase):
 
         send_overdue_escalations()
         
-        # Check that department admin received escalation notification
-        self.assertTrue(Notification.objects.filter(user=dept_admin, row=task, notif_type="ESCALATION").exists())
+        # Check that employee received escalation notification
+        self.assertTrue(Notification.objects.filter(user=self.employee, row=task, notif_type="ESCALATION").exists())
+        # Check that department admin did NOT receive it
+        self.assertFalse(Notification.objects.filter(user=dept_admin, row=task, notif_type="ESCALATION").exists())
         
         # Check EmailLog table logging
-        self.assertTrue(EmailLog.objects.filter(recipient=dept_admin.email).exists())
+        self.assertTrue(EmailLog.objects.filter(recipient=self.employee.email).exists())
 
         # Mock a failed email log to test retry command
         failed_log = EmailLog.objects.create(

@@ -359,22 +359,13 @@ def send_overdue_escalations():
     sent = 0
     for row in overdue_rows:
         days_over = (today - row.due_date).days
-        level = None
-        targets = []
-        if days_over >= 14:
-            level = "SUPER_ADMIN"
-            targets = list(EmployeeUser.objects.filter(role="SUPER_ADMIN", is_active=True))
-        elif days_over >= 7:
-            level = "ADMIN"
-            targets = list(EmployeeUser.objects.filter(role="ADMIN", is_active=True))
-        elif days_over >= 3:
-            level = "DEPARTMENT_ADMIN"
-            targets = list(EmployeeUser.objects.filter(role="DEPARTMENT_ADMIN", department=row.tracker.department, is_active=True))
-        elif days_over >= 1:
-            level = "EMPLOYEE"
-            targets = [row.assigned_to]
+        if days_over != 6:
+            continue
+            
+        level = "EMPLOYEE"
+        targets = [row.assigned_to] if row.assigned_to else []
 
-        if not level or not targets:
+        if not targets:
             continue
 
         # avoid duplicate escalation at same level
@@ -386,12 +377,12 @@ def send_overdue_escalations():
         message = (
             f"Task '{row.task_name}' is overdue by {days_over} days.\n\n"
             f"Department: {row.tracker.department}\n"
-            f"Assigned To: {row.assigned_to.full_name}\n"
+            f"Assigned To: {row.assigned_to.full_name if row.assigned_to else 'None'}\n"
             f"Due Date: {row.due_date}\n"
         )
 
         for user in targets:
-            log_and_send_email(subject=subject, message=message, recipient_list=[user.email])
+            log_and_send_email(subject=subject, message=message, recipient_list=[user.email], from_email="operations.flowforce@gmail.com")
             Notification.objects.create(user=user, row=row, notif_type="ESCALATION", payload={"level": level, "days_overdue": days_over, "task_name": row.task_name}, sent_at=timezone.now())
             sent += 1
         TaskHistory.objects.create(row=row, action="ESCALATION", field_name="overdue", old_value="", new_value=str(days_over), changed_by=None, metadata={"level": level})

@@ -183,6 +183,78 @@ class TableViewSet(viewsets.ModelViewSet):
             rows.delete()
             return Response({"message": f"Successfully deleted {count} rows"}, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["post"], url_path="send-escalation")
+    @transaction.atomic
+    def send_manual_escalation(self, request, pk=None):
+        table = self.get_object_or_404(pk)
+        # Verify access: Admin or Super Admin role globally, or table access ADMIN
+        if not (request.user.role in ["SUPER_ADMIN", "ADMIN"] or has_table_access(request.user, table, "ADMIN")):
+            return Response({"error": "Only admins can trigger escalation emails"}, status=status.HTTP_403_FORBIDDEN)
+
+        row_ids = request.data.get("row_ids")
+        if row_ids is None:
+            rows = Row.objects.filter(table=table)
+        else:
+            if not isinstance(row_ids, list):
+                return Response({"error": "row_ids must be a list"}, status=status.HTTP_400_BAD_REQUEST)
+            rows = Row.objects.filter(table=table, id__in=row_ids)
+
+        today = timezone.localdate()
+        # Find all associated tasks that are overdue (due_date < today) and not completed/approved
+        tasks = Task.objects.filter(row__in=rows, due_date__lt=today).exclude(status__in=['COMPLETED', 'APPROVED'])
+
+        from django.template.loader import render_to_string
+        from tasks.models import EmailLog
+        from tasks.tasks import send_email_log_task
+
+        sent_count = 0
+        for task in tasks:
+            days_overdue = (today - task.due_date).days
+            recipients = list(task.assigned_to.all())
+            unique_recipients = []
+            seen_emails = set()
+            for r in recipients:
+                if r.email and r.email not in seen_emails:
+                    seen_emails.add(r.email)
+                    unique_recipients.append(r)
+
+            if unique_recipients:
+                task.last_escalation_level = days_overdue
+                task.last_escalation_at = timezone.now()
+                task.save()
+
+                for recipient in unique_recipients:
+                    subject = f"ESCALATION: Overdue Task - {task.task_name} ({days_overdue} days overdue)"
+                    task_link = f"http://localhost:8000/tables/{task.row.table_id}/?open_task_id={task.id}"
+
+                    context = {
+                        'recipient_name': recipient.full_name,
+                        'days': days_overdue,
+                        'task_name': task.task_name,
+                        'due_date': str(task.due_date),
+                        'employee_name': ", ".join([u.full_name for u in task.assigned_to.all()]),
+                        'department_name': task.row.table.department.name if task.row.table.department else "Global",
+                        'status': task.status,
+                        'priority': task.priority,
+                        'task_link': task_link,
+                    }
+
+                    html_message = render_to_string('emails/overdue_escalation_mail.html', context)
+
+                    email_log = EmailLog.objects.create(
+                        recipient_email=recipient.email,
+                        subject=subject,
+                        body=html_message,
+                        task=task,
+                        email_type='OVERDUE_ESCALATION_MAIL',
+                        status='PENDING',
+                        max_retries=3,
+                    )
+                    send_email_log_task.delay(email_log.id)
+                    sent_count += 1
+
+        return Response({"message": f"Successfully sent escalation emails to {sent_count} recipients"}, status=status.HTTP_200_OK)
+
     def _import_rows_from_csv_data(self, file_data, table, request_user):
         import csv
         import io

@@ -5,6 +5,22 @@
 {% block content %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <div class="container-fluid py-6 max-w-7xl mx-auto" x-data="spreadsheetApp({{ table.id }})">
+    <!-- Global Loading Spinner Overlay -->
+    <div x-show="isLoading" 
+         x-transition:enter="transition ease-out duration-300"
+         x-transition:enter-start="opacity-0 scale-95"
+         x-transition:enter-end="opacity-100 scale-100"
+         x-transition:leave="transition ease-in duration-200"
+         x-transition:leave-start="opacity-100 scale-100"
+         x-transition:leave-end="opacity-0 scale-95"
+         class="fixed top-5 left-1/2 transform -translate-x-1/2 z-50 flex items-center gap-3 bg-white/90 backdrop-blur-md px-5 py-3 rounded-full shadow-2xl border border-gray-200/80"
+         style="display: none;">
+        <svg class="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span class="text-sm font-semibold text-gray-800 tracking-wide">Processing...</span>
+    </div>
     <!-- Header/Title section -->
     <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
         <div>
@@ -48,6 +64,9 @@
                         </button>
                         <button @click="open = false; bulkUpdate('STATUS')" class="text-gray-700 block w-full text-left px-4 py-2.5 text-sm hover:bg-gray-100 font-medium">
                             <i class="fas fa-check-double mr-2 text-emerald-500"></i> Set All Status to COMPLETED
+                        </button>
+                        <button @click="open = false; sendEscalationMail()" class="text-gray-700 block w-full text-left px-4 py-2.5 text-sm hover:bg-gray-100 font-medium">
+                            <i class="fas fa-paper-plane mr-2 text-rose-500"></i> Send Escalation Mail
                         </button>
                         <hr class="border-gray-200">
                         <button @click="open = false; bulkDeleteRows(false)" class="text-red-700 block w-full text-left px-4 py-2.5 text-sm hover:bg-red-50 font-medium">
@@ -712,6 +731,7 @@
             editingValue: '',
             autoOpenTaskId: null,
             isSavingCell: false,
+            isLoading: false,
             
             selectedPidFilter: '',
             rowEditingRowId: null,
@@ -1033,6 +1053,7 @@
             },
 
             fetchRows() {
+                this.isLoading = true;
                 fetch(`/tables/api/rows/?table=${this.tableId}`)
                     .then(res => res.json())
                     .then(data => {
@@ -1047,6 +1068,9 @@
                         if (this.showDashboard) {
                             this.renderCharts();
                         }
+                    })
+                    .finally(() => {
+                        this.isLoading = false;
                     });
             },
 
@@ -1119,6 +1143,7 @@
              },
 
              toggleCheckbox(rowId, columnId, isChecked) {
+                 this.isLoading = true;
                  fetch(`/tables/api/rows/${rowId}/edit-cell/`, {
                      method: 'POST',
                      headers: {
@@ -1135,7 +1160,11 @@
                          this.fetchRows();
                      } else {
                          alert("Error updating checkbox.");
+                         this.isLoading = false;
                      }
+                 })
+                 .catch(err => {
+                     this.isLoading = false;
                  });
              },
 
@@ -1161,6 +1190,7 @@
             saveRowEdit() {
                 if (this.rowEditingRowId === null) return;
                 const rowId = this.rowEditingRowId;
+                this.isLoading = true;
                 
                 fetch(`/tables/api/rows/${rowId}/edit-row/`, {
                     method: 'POST',
@@ -1177,7 +1207,11 @@
                         this.fetchRows();
                     } else {
                         alert("Error saving row changes.");
+                        this.isLoading = false;
                     }
+                })
+                .catch(err => {
+                    this.isLoading = false;
                 })
                 .finally(() => {
                     this.cancelRowEdit();
@@ -1187,6 +1221,7 @@
             saveCell() {
                 if (this.editingRowId === null || this.isSavingCell) return;
                 this.isSavingCell = true;
+                this.isLoading = true;
 
                 const rowId = this.editingRowId;
                 const colId = this.editingColumnId;
@@ -1206,7 +1241,12 @@
                 .then(res => {
                     if (res.ok) {
                         this.fetchRows();
+                    } else {
+                        this.isLoading = false;
                     }
+                })
+                .catch(err => {
+                    this.isLoading = false;
                 })
                 .finally(() => {
                     this.isSavingCell = false;
@@ -1229,38 +1269,41 @@
                 }
             },
 
-            endDragFill() {
-                if (!this.isDraggingFill) return;
-                const startIdx = this.rows.findIndex(r => r.id === this.dragStartRowId);
-                const endIdx = this.rows.findIndex(r => r.id === this.hoverRowId);
-                if (startIdx !== -1 && endIdx !== -1) {
-                    const minIdx = Math.min(startIdx, endIdx);
-                    const maxIdx = Math.max(startIdx, endIdx);
-                    const rowsToUpdate = this.rows.slice(minIdx, maxIdx + 1);
-
-                    const promises = rowsToUpdate.map(r => {
-                        return fetch(`/tables/api/rows/${r.id}/edit-cell/`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'X-CSRFToken': '{{ csrf_token }}'
-                            },
-                            body: JSON.stringify({
-                                column: this.dragColumnId,
-                                value: this.dragValue
-                            })
-                        });
-                    });
-
-                    Promise.all(promises).then(() => {
-                        this.fetchRows();
-                    });
-                }
-                this.isDraggingFill = false;
-                this.dragStartRowId = null;
-                this.dragColumnId = null;
-                this.dragValue = null;
-            },
+             endDragFill() {
+                 if (!this.isDraggingFill) return;
+                 const startIdx = this.rows.findIndex(r => r.id === this.dragStartRowId);
+                 const endIdx = this.rows.findIndex(r => r.id === this.hoverRowId);
+                 if (startIdx !== -1 && endIdx !== -1) {
+                     const minIdx = Math.min(startIdx, endIdx);
+                     const maxIdx = Math.max(startIdx, endIdx);
+                     const rowsToUpdate = this.rows.slice(minIdx, maxIdx + 1);
+ 
+                     this.isLoading = true;
+                     const promises = rowsToUpdate.map(r => {
+                         return fetch(`/tables/api/rows/${r.id}/edit-cell/`, {
+                             method: 'POST',
+                             headers: {
+                                 'Content-Type': 'application/json',
+                                 'X-CSRFToken': '{{ csrf_token }}'
+                             },
+                             body: JSON.stringify({
+                                 column: this.dragColumnId,
+                                 value: this.dragValue
+                             })
+                         });
+                     });
+ 
+                     Promise.all(promises).then(() => {
+                         this.fetchRows();
+                     }).catch(() => {
+                         this.isLoading = false;
+                     });
+                 }
+                 this.isDraggingFill = false;
+                 this.dragStartRowId = null;
+                 this.dragColumnId = null;
+                 this.dragValue = null;
+             },
 
             isCellDragged(rowId, columnId) {
                 if (!this.isDraggingFill || columnId !== this.dragColumnId) return false;
@@ -1282,6 +1325,7 @@
                     this.newRowCells['PID'] = this.selectedPidFilter;
                 }
 
+                this.isLoading = true;
                 fetch('/tables/api/rows/', {
                     method: 'POST',
                     headers: {
@@ -1303,12 +1347,17 @@
                         };
                     } else {
                         alert("Error saving row. Verify inputs.");
+                        this.isLoading = false;
                     }
+                })
+                .catch(err => {
+                    this.isLoading = false;
                 });
             },
 
             deleteRow(rowId) {
                 if (!confirm("Are you sure you want to delete this row?")) return;
+                this.isLoading = true;
                 fetch(`/tables/api/rows/${rowId}/`, {
                     method: 'DELETE',
                     headers: {
@@ -1324,10 +1373,12 @@
                         }).catch(() => {
                             alert("Failed to delete row (Permission Denied).");
                         });
+                        this.isLoading = false;
                     }
                 })
                 .catch(err => {
                     alert("An error occurred: " + err);
+                    this.isLoading = false;
                 });
             },
 
@@ -1395,6 +1446,7 @@
             // Duplication
             duplicateTable() {
                 if (!confirm("Duplicate this table layout?")) return;
+                this.isLoading = true;
                 fetch(`/tables/api/tables/${this.tableId}/duplicate/`, {
                     method: 'POST',
                     headers: {
@@ -1406,7 +1458,12 @@
                     if (newTable.id) {
                         alert("Table duplicated successfully!");
                         window.location.href = `/tables/${newTable.id}/`;
+                    } else {
+                        this.isLoading = false;
                     }
+                })
+                .catch(err => {
+                    this.isLoading = false;
                 });
             },
 
@@ -1421,6 +1478,7 @@
                     alert("Table Name is required.");
                     return;
                 }
+                this.isLoading = true;
                 fetch(`/tables/api/tables/${this.tableId}/`, {
                     method: 'PATCH',
                     headers: {
@@ -1437,7 +1495,11 @@
                         location.reload();
                     } else {
                         alert("Error saving table properties.");
+                        this.isLoading = false;
                     }
+                })
+                .catch(err => {
+                    this.isLoading = false;
                 });
             },
 
@@ -1469,6 +1531,7 @@
                     return;
                 }
 
+                this.isLoading = true;
                 fetch(`/tables/api/tables/${this.tableId}/bulk-delete-rows/`, {
                     method: 'POST',
                     headers: {
@@ -1488,7 +1551,11 @@
                         }).catch(() => {
                             alert("Failed to perform bulk delete.");
                         });
+                        this.isLoading = false;
                     }
+                })
+                .catch(err => {
+                    this.isLoading = false;
                 });
             },
 
@@ -1510,6 +1577,7 @@
                     return;
                 }
                 
+                this.isLoading = true;
                 fetch(`/tables/api/tables/${this.tableId}/bulk-update/`, {
                     method: 'POST',
                     headers: {
@@ -1531,7 +1599,11 @@
                         }).catch(() => {
                             alert("Failed to perform bulk update.");
                         });
+                        this.isLoading = false;
                     }
+                })
+                .catch(err => {
+                    this.isLoading = false;
                 });
             },
 
@@ -1550,6 +1622,7 @@
                     return;
                 }
                 this.isImporting = true;
+                this.isLoading = true;
                 const formData = new FormData();
                 formData.append("file", fileInput.files[0]);
 
@@ -1568,10 +1641,12 @@
                         this.fetchRows();
                     } else {
                         alert(result.data.error || "Failed to import CSV");
+                        this.isLoading = false;
                     }
                 })
                 .catch(err => {
                     alert("An error occurred: " + err);
+                    this.isLoading = false;
                 })
                 .finally(() => {
                     this.isImporting = false;
@@ -1584,6 +1659,7 @@
                     return;
                 }
                 this.isImporting = true;
+                this.isLoading = true;
 
                 fetch(`/tables/api/tables/${this.tableId}/import-google-sheet/`, {
                     method: 'POST',
@@ -1601,10 +1677,12 @@
                         this.fetchRows();
                     } else {
                         alert(result.data.error || "Failed to import Google Sheet");
+                        this.isLoading = false;
                     }
                 })
                 .catch(err => {
                     alert("An error occurred: " + err);
+                    this.isLoading = false;
                 })
                 .finally(() => {
                     this.isImporting = false;
@@ -1716,6 +1794,7 @@
             },
 
             saveColumnOrder(colIds) {
+                this.isLoading = true;
                 fetch('/tables/api/columns/reorder/', {
                     method: 'POST',
                     headers: {
@@ -1731,7 +1810,54 @@
                         location.reload();
                     } else {
                         alert("Error reordering columns.");
+                        this.isLoading = false;
                     }
+                })
+                .catch(err => {
+                    this.isLoading = false;
+                });
+            },
+
+            sendEscalationMail() {
+                let msg = "Are you sure you want to send manual escalation emails for ALL overdue tasks in this table?";
+                let payload = {};
+                if (this.selectedRowIds.length > 0) {
+                    msg = `Are you sure you want to send manual escalation emails for the ${this.selectedRowIds.length} selected row(s)?`;
+                    payload = { row_ids: this.selectedRowIds };
+                }
+
+                if (!confirm(msg)) {
+                    return;
+                }
+
+                this.isLoading = true;
+                fetch(`/tables/api/tables/${this.tableId}/send-escalation/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify(payload)
+                })
+                .then(res => {
+                    if (res.ok) {
+                        res.json().then(data => {
+                            alert(data.message || "Escalation emails queued successfully!");
+                        });
+                        this.selectedRowIds = [];
+                        this.fetchRows();
+                    } else {
+                        res.json().then(data => {
+                            alert(data.error || "Failed to send escalation emails.");
+                        }).catch(() => {
+                            alert("Failed to send escalation emails.");
+                        });
+                        this.isLoading = false;
+                    }
+                })
+                .catch(err => {
+                    alert("An error occurred: " + err);
+                    this.isLoading = false;
                 });
             }
         };

@@ -84,7 +84,7 @@ def send_email_log_task(self, email_log_id):
 
     try:
         # Send mail
-        from_email = 'operations.flowforce@gmail.com' if email_log.email_type in ["INITIAL_MAIL", "ALERT_MAIL"] else settings.DEFAULT_FROM_EMAIL
+        from_email = 'operations.flowforce@gmail.com' if email_log.email_type in ["INITIAL_MAIL", "ALERT_MAIL", "OVERDUE_ESCALATION_MAIL"] else settings.DEFAULT_FROM_EMAIL
         send_mail(
             subject=email_log.subject,
             message=email_log.body or "",  # plain text fallback
@@ -317,10 +317,7 @@ def send_review_request_mail(task_id):
     """
     Trigger REVIEW_REQUEST_MAIL to admin.
     """
-    try:
-        task = Task.objects.get(id=task_id)
-    except Task.DoesNotExist:
-        return
+    return  # Disabled as per request
 
     recipients = []
     if task.assigned_by:
@@ -367,10 +364,7 @@ def send_approval_status_mail(task_id):
     """
     Trigger APPROVAL_STATUS_MAIL to assigned employees.
     """
-    try:
-        task = Task.objects.get(id=task_id)
-    except Task.DoesNotExist:
-        return
+    return  # Disabled as per request
 
     last_comment = task.comments.order_by('-created_at').first()
     feedback = last_comment.content if last_comment else "No feedback provided."
@@ -418,20 +412,10 @@ def check_overdue_escalations():
         days_overdue = (today - task.due_date).days
         
         recipients = []
-        if days_overdue == 1:
+        if days_overdue == 6:
             recipients = list(task.assigned_to.all())
-        elif days_overdue == 3:
-            dept_admins = list(EmployeeUser.objects.filter(role="DEPARTMENT_ADMIN", department=task.row.table.department)) if task.row.table.department else []
-            recipients = dept_admins + list(task.assigned_to.all())
-        elif days_overdue == 7:
-            dept_admins = list(EmployeeUser.objects.filter(role="DEPARTMENT_ADMIN", department=task.row.table.department)) if task.row.table.department else []
-            admins = list(EmployeeUser.objects.filter(role="ADMIN"))
-            recipients = admins + dept_admins + list(task.assigned_to.all())
-        elif days_overdue >= 14:
-            super_admins = list(EmployeeUser.objects.filter(role="SUPER_ADMIN"))
-            admins = list(EmployeeUser.objects.filter(role="ADMIN"))
-            dept_admins = list(EmployeeUser.objects.filter(role="DEPARTMENT_ADMIN", department=task.row.table.department)) if task.row.table.department else []
-            recipients = super_admins + admins + dept_admins + list(task.assigned_to.all())
+        else:
+            continue
 
         unique_recipients = []
         seen_emails = set()
