@@ -282,3 +282,20 @@ class TablesTestCase(TestCase):
 
         self.assertEqual(CellValue.objects.get(row=row, column=pid_col).value, "PID-888")
         self.assertEqual(CellValue.objects.get(row=row, column=task_name_col).value, "Updated Name")
+
+    def test_grant_access_invalid_user(self):
+        table = Table.objects.create(name="Grant Test Table", created_by=self.admin)
+        self.client.force_login(self.admin)
+        
+        # Post with empty user_id
+        response = self.client.post("/tables/", {
+            "action": "grant",
+            "table_id": table.id,
+            "user_id": "",
+            "access_level": "EDIT"
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, "/tables/")
+        
+        # Verify that no TableAccess was created
+        self.assertFalse(TableAccess.objects.filter(table=table).exists())

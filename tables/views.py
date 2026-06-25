@@ -726,6 +726,9 @@ def table_list_view(request):
 
         elif action == "delete":
             table_id = request.POST.get("table_id")
+            if not table_id or not str(table_id).isdigit():
+                messages.error(request, "Invalid table selected.")
+                return redirect("tables:table_list")
             table = get_object_or_404(Table, id=table_id)
             if table.created_by == request.user or request.user.role == "SUPER_ADMIN":
                 table.delete()
@@ -738,6 +741,9 @@ def table_list_view(request):
             table_id = request.POST.get("table_id")
             user_id = request.POST.get("user_id")
             access_level = request.POST.get("access_level", "EDIT")
+            if not table_id or not str(table_id).isdigit() or not user_id or not str(user_id).isdigit():
+                messages.error(request, "Please select a valid table and employee.")
+                return redirect("tables:table_list")
             table = get_object_or_404(Table, id=table_id)
             user = get_object_or_404(EmployeeUser, id=user_id)
 
@@ -751,6 +757,9 @@ def table_list_view(request):
         elif action == "revoke":
             table_id = request.POST.get("table_id")
             user_id = request.POST.get("user_id")
+            if not table_id or not str(table_id).isdigit() or not user_id or not str(user_id).isdigit():
+                messages.error(request, "Please select a valid table and employee.")
+                return redirect("tables:table_list")
             table = get_object_or_404(Table, id=table_id)
             user = get_object_or_404(EmployeeUser, id=user_id)
 
@@ -762,6 +771,9 @@ def table_list_view(request):
             table_id = request.POST.get("table_id")
             user_id = request.POST.get("user_id")
             access_level = request.POST.get("access_level")
+            if not table_id or not str(table_id).isdigit() or not user_id or not str(user_id).isdigit():
+                messages.error(request, "Please select a valid table and employee.")
+                return redirect("tables:table_list")
             table = get_object_or_404(Table, id=table_id)
             user = get_object_or_404(EmployeeUser, id=user_id)
 
