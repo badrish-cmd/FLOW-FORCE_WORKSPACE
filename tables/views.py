@@ -190,12 +190,27 @@ class TableViewSet(viewsets.ModelViewSet):
         from django.utils import timezone
 
         lines = file_data.splitlines()
-        # The header row starts at row 12, data starts at row 13.
-        # Skip first 11 lines to get to the header row.
-        if len(lines) >= 12:
-            lines_to_parse = lines[11:]
+        
+        # 1. Dynamically locate the header row
+        header_idx = -1
+        for idx, line in enumerate(lines):
+            tokens = [t.strip().upper() for t in line.split(",")]
+            # Check if this line looks like our header row
+            # It should contain at least S_NO/S.NO/SL_NO, TASK_NAME/TASK NAME, and DUE_DATE/DUE DATE
+            has_s_no = any(t in ["S_NO", "S.NO", "S. NO.", "SL_NO", "SL.NO", "SL. NO.", "S NO", "SL NO"] for t in tokens)
+            has_task = any("TASK" in t for t in tokens)
+            has_due = any("DUE" in t for t in tokens)
+            if has_s_no and has_task and has_due:
+                header_idx = idx
+                break
+
+        if header_idx != -1:
+            lines_to_parse = lines[header_idx:]
         else:
-            lines_to_parse = lines
+            if len(lines) >= 12:
+                lines_to_parse = lines[11:]
+            else:
+                lines_to_parse = lines
 
         io_string = io.StringIO("\n".join(lines_to_parse))
         reader = csv.DictReader(io_string)
@@ -203,33 +218,64 @@ class TableViewSet(viewsets.ModelViewSet):
         if not reader.fieldnames:
             return None, "Import file is empty or invalid"
 
-        db_cols = {col.name: col for col in table.columns.all()}
-        db_col_names = set(db_cols.keys())
+        # Prepare helper to normalize names
+        def normalize_header(name):
+            if not name:
+                return ""
+            h = name.strip().upper()
+            h = h.replace(".", "_").replace(" ", "_").replace("-", "_").replace("/", "_")
+            while "__" in h:
+                h = h.replace("__", "_")
+            h = h.strip("_")
+            
+            # Map standard column name synonyms
+            if h in ["TASK_NAME", "TASKNAME", "TASK"]:
+                return "TASK_NAME"
+            if h in ["DUE_DATE", "DUEDATE"]:
+                return "DUE_DATE"
+            if h in ["INITIAL_MAIL", "INITIALMAIL"]:
+                return "INITIAL_MAIL"
+            if h in ["ALERT_MAIL", "ALERTMAIL"]:
+                return "ALERT_MAIL"
+            if h in ["S_NO", "SNO", "SL_NO", "SLNO", "SERIAL_NO", "SERIALNO", "S_NO_"]:
+                return "S_NO"
+            return h
+
+        # Map normalized DB column name -> Column object
+        normalized_db_cols = {}
+        for col in table.columns.all():
+            norm_name = normalize_header(col.name)
+            normalized_db_cols[norm_name] = col
+
+        db_col_names = set(normalized_db_cols.keys())
 
         # Normalize CSV fieldnames to match DB columns
         csv_headers = []
+        header_mapping = {}
         for name in reader.fieldnames:
             if not name:
                 continue
-            normalized = name.strip()
-            if normalized == "Task Name":
-                normalized = "TASK_NAME"
-            elif normalized == "Due Date":
-                normalized = "DUE_DATE"
-            elif normalized.upper() in db_col_names:
-                normalized = normalized.upper()
+            normalized = normalize_header(name)
             csv_headers.append(normalized)
+            header_mapping[name] = normalized
 
         # Check for column equality
         missing_in_csv = db_col_names - set(csv_headers)
         extra_in_csv = set(csv_headers) - db_col_names
 
+        # If there's a mismatch, return user-friendly error message
         if missing_in_csv or extra_in_csv:
             err_msg = "Column mismatch. Please ensure all columns are equal."
             if missing_in_csv:
-                err_msg += f" Missing in sheet: {', '.join(sorted(missing_in_csv))}."
+                missing_orig = [normalized_db_cols[norm].name for norm in missing_in_csv]
+                err_msg += f" Missing in sheet: {', '.join(sorted(missing_orig))}."
             if extra_in_csv:
-                err_msg += f" Extra in sheet: {', '.join(sorted(extra_in_csv))}."
+                # To display original extra column name
+                extra_orig = []
+                for name in reader.fieldnames:
+                    if header_mapping.get(name) in extra_in_csv:
+                        extra_orig.append(name)
+                err_msg += f" Extra in sheet: {', '.join(sorted(extra_orig))}."
             return None, err_msg
 
         created_rows = []
@@ -238,19 +284,25 @@ class TableViewSet(viewsets.ModelViewSet):
             for original_key, val in row_dict.items():
                 if not original_key:
                     continue
-                normalized_key = original_key.strip()
-                if normalized_key == "Task Name":
-                    normalized_key = "TASK_NAME"
-                elif normalized_key == "Due Date":
-                    normalized_key = "DUE_DATE"
-                elif normalized_key.upper() in db_col_names:
-                    normalized_key = normalized_key.upper()
-                normalized_row[normalized_key] = val
+                normalized_key = header_mapping.get(original_key)
+                if normalized_key:
+                    normalized_row[normalized_key] = val
 
             task_name = normalized_row.get("TASK_NAME")
             due_date_str = normalized_row.get("DUE_DATE")
-            priority = normalized_row.get("PRIORITY") or normalized_row.get("Priority") or "MEDIUM"
-            status_val = normalized_row.get("STATUS") or normalized_row.get("Status") or "PENDING"
+            
+            # Support lowercase/mixed-case options
+            priority = "MEDIUM"
+            for k, v in normalized_row.items():
+                if k == "PRIORITY" and v:
+                    priority = v
+                    break
+            
+            status_val = "PENDING"
+            for k, v in normalized_row.items():
+                if k == "STATUS" and v:
+                    status_val = v
+                    break
 
             if not task_name or not due_date_str:
                 continue
@@ -264,7 +316,7 @@ class TableViewSet(viewsets.ModelViewSet):
 
             # Auto compute S_NO
             latest_s_no = 0
-            s_no_col = db_cols.get("S_NO")
+            s_no_col = normalized_db_cols.get("S_NO")
             if s_no_col:
                 latest_cell = CellValue.objects.filter(column=s_no_col).order_by("-id").first()
                 if latest_cell and isinstance(latest_cell.value, int):
@@ -283,7 +335,7 @@ class TableViewSet(viewsets.ModelViewSet):
 
             initial_mail_val = normalized_row.get("INITIAL_MAIL", "NO")
             if initial_mail_val:
-                initial_mail_val = initial_mail_val.strip().upper()
+                initial_mail_val = str(initial_mail_val).strip().upper()
                 if initial_mail_val not in ["YES", "NO"]:
                     initial_mail_val = "NO"
             else:
@@ -291,7 +343,7 @@ class TableViewSet(viewsets.ModelViewSet):
 
             alert_mail_val = normalized_row.get("ALERT_MAIL", "NO")
             if alert_mail_val:
-                alert_mail_val = alert_mail_val.strip().upper()
+                alert_mail_val = str(alert_mail_val).strip().upper()
                 if alert_mail_val not in ["YES", "NO"]:
                     alert_mail_val = "NO"
             else:
@@ -309,20 +361,25 @@ class TableViewSet(viewsets.ModelViewSet):
             # Map remaining custom columns including status, priority, and date columns
             for col_name, val in normalized_row.items():
                 if col_name not in ["S_NO", "DATE", "DUE_DATE", "TASK_NAME", "INITIAL_MAIL", "ALERT_MAIL"]:
-                    if col_name in db_cols:
-                        cell_values[col_name] = val
+                    if col_name in db_col_names:
+                        col = normalized_db_cols[col_name]
+                        cell_values[col.name] = val
 
             for name, val in cell_values.items():
-                col = db_cols.get(name)
+                col = None
+                if name in ["S_NO", "DATE", "DUE_DATE", "TASK_NAME", "INITIAL_MAIL", "ALERT_MAIL"]:
+                    col = normalized_db_cols.get(name)
+                else:
+                    col = next((c for c in table.columns.all() if c.name == name), None)
                 if col:
                     CellValue.objects.create(row=row, column=col, value=val, updated_by=request_user)
 
             # Normalize priority and status for Task model
-            norm_priority = priority.upper().strip().replace(" ", "_")
+            norm_priority = str(priority).upper().strip().replace(" ", "_")
             if norm_priority not in [choice[0] for choice in Task.PRIORITY_CHOICES]:
                 norm_priority = "MEDIUM"
 
-            norm_status = status_val.upper().strip().replace(" ", "_")
+            norm_status = str(status_val).upper().strip().replace(" ", "_")
             if norm_status in ["COMPLETE", "COMPLETED"]:
                 norm_status = "COMPLETED"
             elif norm_status not in [choice[0] for choice in Task.STATUS_CHOICES]:
@@ -343,8 +400,13 @@ class TableViewSet(viewsets.ModelViewSet):
             user_to_assign = None
             from django.db.models import Q
             for col_name, val in cell_values.items():
-                col = db_cols.get(col_name)
-                if col and (col.data_type == "USER" or col_name.upper() in ["ASSIGNED_TO", "ASSIGNED TO", "ASSIGNEE"]):
+                col = None
+                if col_name in ["S_NO", "DATE", "DUE_DATE", "TASK_NAME", "INITIAL_MAIL", "ALERT_MAIL"]:
+                    col = normalized_db_cols.get(col_name)
+                else:
+                    col = next((c for c in table.columns.all() if c.name == col_name), None)
+
+                if col and (col.data_type == "USER" or col.name.upper() in ["ASSIGNED_TO", "ASSIGNED TO", "ASSIGNEE"]):
                     if val:
                         try:
                             if str(val).isdigit():
