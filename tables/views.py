@@ -952,8 +952,16 @@ class RowViewSet(viewsets.ModelViewSet):
             if task:
                 if column.name in ["DUE_DATE", "FOLLOW_UP_DATE"]:
                     try:
-                        task.due_date = datetime.strptime(value.split("T")[0], "%Y-%m-%d").date()
-                        task.save(update_fields=["due_date"])
+                        new_date = datetime.strptime(value.split("T")[0], "%Y-%m-%d").date()
+                        if task.due_date != new_date:
+                            task.due_date = new_date
+                            task.alert_mail_sent = False
+                            task.save(update_fields=["due_date", "alert_mail_sent"])
+                            from tasks.tasks import update_task_row_mail_columns
+                            update_task_row_mail_columns(task)
+                        else:
+                            task.due_date = new_date
+                            task.save(update_fields=["due_date"])
                     except ValueError:
                         return Response({"error": "Invalid date format"}, status=status.HTTP_400_BAD_REQUEST)
                 elif column.name == "TASK_NAME":
@@ -1063,8 +1071,16 @@ class RowViewSet(viewsets.ModelViewSet):
                 if task:
                     if column.name in ["DUE_DATE", "FOLLOW_UP_DATE"]:
                         try:
-                            task.due_date = datetime.strptime(str(value).split("T")[0], "%Y-%m-%d").date()
-                            task.save(update_fields=["due_date"])
+                            new_date = datetime.strptime(str(value).split("T")[0], "%Y-%m-%d").date()
+                            if task.due_date != new_date:
+                                task.due_date = new_date
+                                task.alert_mail_sent = False
+                                task.save(update_fields=["due_date", "alert_mail_sent"])
+                                from tasks.tasks import update_task_row_mail_columns
+                                update_task_row_mail_columns(task)
+                            else:
+                                task.due_date = new_date
+                                task.save(update_fields=["due_date"])
                         except ValueError:
                             pass
 

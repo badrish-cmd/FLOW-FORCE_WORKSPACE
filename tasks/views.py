@@ -244,6 +244,10 @@ class TaskViewSet(viewsets.ModelViewSet):
             task.alert_mail_sent = False  # Reset alert_mail_sent so alert is sent on the new date
         task.save()
         
+        # Sync ALERT_MAIL state back to the spreadsheet row to ensure cell is NO
+        from .tasks import update_task_row_mail_columns
+        update_task_row_mail_columns(task)
+        
         # Sync back to STATUS cell if such a column exists
         from tables.models import Column, CellValue
         status_col = Column.objects.filter(table=task.row.table, name__iexact="STATUS").first()
