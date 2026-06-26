@@ -294,21 +294,62 @@ def send_alert_mail(task_id):
         if employee.role in ["ADMIN", "SUPER_ADMIN"]:
             continue
 
-        if EmailLog.objects.filter(task=task, recipient_email=employee.email, email_type="ALERT_MAIL").exists():
-            continue
+        is_sales = task.row.table.job_type == "SALES"
+        
+        # If it is not a sales task, check if ALERT_MAIL has already been logged.
+        # For sales, rolling follow-ups require emails to be sent on every new follow-up date,
+        # so we check if ALERT_MAIL has already been logged *today* to avoid duplicate sending.
+        if is_sales:
+            if EmailLog.objects.filter(task=task, recipient_email=employee.email, email_type="ALERT_MAIL", created_at__date=timezone.localdate()).exists():
+                continue
+        else:
+            if EmailLog.objects.filter(task=task, recipient_email=employee.email, email_type="ALERT_MAIL").exists():
+                continue
 
-        subject = f"Task: {task.task_name} - Due Date: {task.due_date}"
-        body = f"Task Name: {task.task_name}\nDue Date: {task.due_date}"
+        if is_sales:
+            subject = f"Follow-up Reminder: {task.task_name} - Follow-up Date: {task.due_date}"
+            last_follow_up = task.follow_ups.first()
+            last_discussion = last_follow_up.discussed_points if last_follow_up else "No previous follow-ups logged."
+            last_follow_up_date = last_follow_up.follow_up_date.strftime("%B %d, %Y") if last_follow_up else "N/A"
+            
+            task_link = f"http://localhost:8000/tables/{task.row.table_id}/?open_task_id={task.id}"
+            
+            context = {
+                'employee_name': employee.full_name or employee.email,
+                'customer_name': task.task_name,
+                'follow_up_date': str(task.due_date),
+                'last_discussion': last_discussion,
+                'last_follow_up_date': last_follow_up_date,
+                'priority': task.priority,
+                'assigned_by': task.assigned_by.full_name if task.assigned_by else 'System',
+                'department': task.row.table.department.name if task.row.table.department else 'Global',
+                'task_link': task_link,
+            }
+            
+            html_message = render_to_string('emails/sales_alert_mail.html', context)
+            
+            email_log = EmailLog.objects.create(
+                recipient_email=employee.email,
+                subject=subject,
+                body=html_message,
+                task=task,
+                email_type='ALERT_MAIL',
+                status='PENDING',
+                max_retries=2,
+            )
+        else:
+            subject = f"Task: {task.task_name} - Due Date: {task.due_date}"
+            body = f"Task Name: {task.task_name}\nDue Date: {task.due_date}"
 
-        email_log = EmailLog.objects.create(
-            recipient_email=employee.email,
-            subject=subject,
-            body=body,
-            task=task,
-            email_type='ALERT_MAIL',
-            status='PENDING',
-            max_retries=2,
-        )
+            email_log = EmailLog.objects.create(
+                recipient_email=employee.email,
+                subject=subject,
+                body=body,
+                task=task,
+                email_type='ALERT_MAIL',
+                status='PENDING',
+                max_retries=2,
+            )
 
         send_email_log_task.delay(email_log.id)
 

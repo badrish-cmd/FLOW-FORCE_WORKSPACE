@@ -186,6 +186,122 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         return Response(TaskSerializer(task).data, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["post"], url_path="log-follow-up")
+    @transaction.atomic
+    def log_follow_up(self, request, pk=None):
+        task = get_object_or_404(Task, pk=pk)
+        
+        # Verify table is SALES
+        if task.row.table.job_type != "SALES":
+            return Response({"error": "This action is only supported for Sales tasks."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        discussed_points = request.data.get("discussed_points")
+        new_status = request.data.get("status")
+        next_follow_up_date_str = request.data.get("next_follow_up_date")
+        
+        if not discussed_points or not discussed_points.strip():
+            return Response({"error": "Discussed points are required."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        if not new_status:
+            return Response({"error": "Status is required."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        if new_status not in dict(Task.STATUS_CHOICES):
+            return Response({"error": "Invalid status value."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # If status is continuing (PENDING, IN_PROGRESS, READY_FOR_REVIEW), next follow-up date is mandatory
+        is_continuing = new_status in ["PENDING", "IN_PROGRESS", "READY_FOR_REVIEW"]
+        next_follow_up_date = None
+        
+        if is_continuing:
+            if not next_follow_up_date_str:
+                return Response({"error": "Next follow-up date is required when task is in progress."}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                from datetime import datetime
+                next_follow_up_date = datetime.strptime(next_follow_up_date_str.split("T")[0], "%Y-%m-%d").date()
+            except ValueError:
+                return Response({"error": "Invalid date format for next follow-up date. Use YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Save TaskFollowUp record
+        # Current follow-up date is task.due_date
+        current_follow_up_date = task.due_date
+        
+        from .models import TaskFollowUp
+        follow_up = TaskFollowUp.objects.create(
+            task=task,
+            follow_up_date=current_follow_up_date,
+            discussed_points=discussed_points,
+            next_follow_up_date=next_follow_up_date,
+            entered_by=request.user
+        )
+        
+        # Update Task Status and due_date
+        old_status = task.status
+        task.status = new_status
+        old_due_date = task.due_date
+        
+        if is_continuing and next_follow_up_date:
+            task.due_date = next_follow_up_date
+            task.alert_mail_sent = False  # Reset alert_mail_sent so alert is sent on the new date
+        task.save()
+        
+        # Sync back to STATUS cell if such a column exists
+        from tables.models import Column, CellValue
+        status_col = Column.objects.filter(table=task.row.table, name__iexact="STATUS").first()
+        if status_col:
+            CellValue.objects.update_or_create(
+                row=task.row, column=status_col,
+                defaults={"value": new_status, "updated_by": request.user}
+            )
+            
+        # Sync next follow up date to FOLLOW_UP_DATE column if continuing
+        follow_up_col = Column.objects.filter(table=task.row.table, name__iexact="FOLLOW_UP_DATE").first()
+        if follow_up_col and is_continuing and next_follow_up_date:
+            CellValue.objects.update_or_create(
+                row=task.row, column=follow_up_col,
+                defaults={"value": next_follow_up_date.isoformat(), "updated_by": request.user}
+            )
+            
+        # Sync next follow up date to DUE_DATE column just in case (as fall back)
+        due_date_col = Column.objects.filter(table=task.row.table, name__iexact="DUE_DATE").first()
+        if due_date_col and is_continuing and next_follow_up_date:
+            CellValue.objects.update_or_create(
+                row=task.row, column=due_date_col,
+                defaults={"value": next_follow_up_date.isoformat(), "updated_by": request.user}
+            )
+            
+        # Create TaskComment of the discussion points as internal reference / chat history
+        TaskComment.objects.create(
+            task=task,
+            author=request.user,
+            content=f"[Logged Follow-up] Discussion: {discussed_points}" + (f"\nNext Follow-up scheduled for: {next_follow_up_date.isoformat()}" if next_follow_up_date else "\nNo further follow-up required (closed/cancelled).")
+        )
+        
+        # Create Activity Log
+        ActivityLog.objects.create(
+            task=task,
+            action="Logged Follow-up",
+            user=request.user,
+            details={
+                "follow_up_date": current_follow_up_date.isoformat() if current_follow_up_date else None,
+                "next_follow_up_date": next_follow_up_date.isoformat() if next_follow_up_date else None,
+                "discussed_points": discussed_points,
+                "new_status": new_status
+            }
+        )
+        
+        # Trigger notification to all assigned users
+        if is_continuing and next_follow_up_date:
+            for assignee in task.assigned_to.all():
+                Notification.objects.create(
+                    user=assignee,
+                    task=task,
+                    title="Next Follow-up Scheduled",
+                    description=f"A new follow-up for Customer '{task.task_name}' has been scheduled for {next_follow_up_date.isoformat()} by {request.user.full_name}",
+                    type="SYSTEM"
+                )
+                
+        return Response(TaskSerializer(task).data, status=status.HTTP_200_OK)
+
 class TaskCommentViewSet(viewsets.ModelViewSet):
     serializer_class = TaskCommentSerializer
     permission_classes = [permissions.IsAuthenticated]

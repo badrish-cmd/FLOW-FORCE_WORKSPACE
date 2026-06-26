@@ -358,13 +358,13 @@
                                            <template x-if="'{{ col.name }}' === 'S_NO'">
                                                <span class="font-medium" x-text="getCellValue(row, '{{ col.name }}')"></span>
                                            </template>
-                                           <template x-if="'{{ col.name }}' === 'TASK_NAME'">
+                                           <template x-if="'{{ col.name }}' === 'TASK_NAME' || '{{ col.name }}' === 'CUSTOMER_NAME'">
                                                <span class="font-semibold" x-text="getCellValue(row, '{{ col.name }}')"></span>
                                            </template>
-                                           <template x-if="'{{ col.name }}' === 'DUE_DATE'">
+                                           <template x-if="'{{ col.name }}' === 'DUE_DATE' || '{{ col.name }}' === 'FOLLOW_UP_DATE'">
                                                <span :class="isOverdue(row) ? 'text-red-600 font-bold' : ''" x-text="getCellValue(row, '{{ col.name }}')"></span>
                                            </template>
-                                           <template x-if="'{{ col.name }}' !== 'S_NO' && '{{ col.name }}' !== 'TASK_NAME' && '{{ col.name }}' !== 'DUE_DATE'">
+                                           <template x-if="'{{ col.name }}' !== 'S_NO' && '{{ col.name }}' !== 'TASK_NAME' && '{{ col.name }}' !== 'CUSTOMER_NAME' && '{{ col.name }}' !== 'DUE_DATE' && '{{ col.name }}' !== 'FOLLOW_UP_DATE'">
                                                <div class="w-full">
                                                    <template x-if="'{{ col.data_type }}' === 'CHECKBOX'">
                                                        <input type="checkbox" 
@@ -458,10 +458,10 @@
                         <td class="p-1 border-r border-gray-200 text-sm whitespace-nowrap align-middle">
                             {% if col.name == 'S_NO' %}
                                 <div class="px-3 text-gray-400 font-semibold text-center">+</div>
-                            {% elif col.name == 'TASK_NAME' %}
-                                <input type="text" x-model="newRowCells.TASK_NAME" placeholder="Task Name (Required)" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
-                            {% elif col.name == 'DUE_DATE' %}
-                                <input type="date" x-model="newRowCells.DUE_DATE" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
+                            {% elif col.name == 'TASK_NAME' or col.name == 'CUSTOMER_NAME' %}
+                                <input type="text" x-model="newRowCells.{{ col.name }}" placeholder="{% if table.job_type == 'SALES' %}Customer Name (Required){% else %}Task Name (Required){% endif %}" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
+                            {% elif col.name == 'DUE_DATE' or col.name == 'FOLLOW_UP_DATE' %}
+                                <input type="date" x-model="newRowCells.{{ col.name }}" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
                             {% elif col.name == 'DATE' %}
                                 <div class="px-3 py-1 text-gray-400 text-xs italic">Auto</div>
                             {% elif col.name == 'INITIAL_MAIL' or col.name == 'ALERT_MAIL' %}
@@ -611,6 +611,22 @@
                 </div>
             </div>
 
+            <!-- Row configurations -->
+            <div class="mt-4 border-t border-gray-100 pt-4 space-y-3">
+                <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700">Row Settings</h4>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Header Row (1-indexed)</label>
+                        <input type="number" x-model="importHeaderRow" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded p-1.5 text-xs focus:ring-green-500" placeholder="Defaults to 12">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Data Start Row (1-indexed)</label>
+                        <input type="number" x-model="importDataRow" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded p-1.5 text-xs focus:ring-green-500" placeholder="Defaults to 13">
+                    </div>
+                </div>
+                <p class="text-[10px] text-gray-400">Specifying these overrides the dynamic header auto-detection and reads data exactly from these rows.</p>
+            </div>
+
             <div class="flex justify-end gap-3 mt-6">
                 <button @click="isImportModalOpen = false" :disabled="isImporting" class="bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg text-sm px-4 py-2.5 disabled:opacity-50">Cancel</button>
                 
@@ -643,11 +659,11 @@
                 <div class="space-y-4 mb-6 bg-gray-50 p-4 rounded-xl border border-gray-100">
                     <div class="grid grid-cols-2 gap-4 text-sm">
                         <div>
-                            <span class="text-gray-500 font-medium">Task Name:</span>
+                            <span class="text-gray-500 font-medium">{% if table.job_type == 'SALES' %}Customer Name:{% else %}Task Name:{% endif %}</span>
                             <div class="font-bold text-gray-900 mt-1" x-text="activeTaskName"></div>
                         </div>
                         <div>
-                            <span class="text-gray-500 font-medium">Due Date:</span>
+                            <span class="text-gray-500 font-medium">{% if table.job_type == 'SALES' %}Follow Up Date:{% else %}Due Date:{% endif %}</span>
                             <div class="font-bold mt-1" :class="isOverdue(activeRow) ? 'text-red-600' : 'text-gray-900'" x-text="activeTaskDueDate"></div>
                         </div>
                         <div>
@@ -666,6 +682,73 @@
                         </div>
                     </div>
                 </div>
+
+                {% if table.job_type == 'SALES' %}
+                <!-- Sales Follow-ups Timeline -->
+                <div class="mt-6 border-t border-gray-200 pt-4">
+                    <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 mb-3 flex items-center gap-1.5">
+                        <i class="fas fa-history text-emerald-600"></i> Follow-up History
+                    </h4>
+                    <div class="space-y-3 overflow-y-auto max-h-[160px] pr-2 mb-4">
+                        <template x-for="fu in (activeRow.task_details ? activeRow.task_details.follow_ups : [])" :key="fu.id">
+                            <div class="p-3 bg-emerald-50/50 rounded-lg border border-emerald-100/80 text-xs">
+                                <div class="flex justify-between items-center mb-1">
+                                    <span class="font-bold text-emerald-800" x-text="fu.entered_by_detail ? fu.entered_by_detail.full_name : 'System'"></span>
+                                    <span class="text-gray-400 font-semibold" x-text="fu.follow_up_date"></span>
+                                </div>
+                                <p class="text-gray-700 font-medium" x-text="fu.discussed_points"></p>
+                                <template x-if="fu.next_follow_up_date">
+                                    <div class="mt-2 text-[10px] text-emerald-700 font-bold bg-emerald-100/50 px-2 py-0.5 rounded inline-block">
+                                        Next Follow-up: <span x-text="fu.next_follow_up_date"></span>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+                        <template x-if="!activeRow.task_details || !activeRow.task_details.follow_ups || activeRow.task_details.follow_ups.length === 0">
+                            <div class="text-center py-4 text-gray-400 italic text-xs">
+                                No follow-up history logged yet.
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Record Today's Follow-up Form -->
+                <div class="mt-6 border-t border-gray-200 pt-4 bg-slate-50 p-4 rounded-xl border border-slate-100" x-show="activeRow.task_details && activeRow.task_details.status !== 'COMPLETED' && activeRow.task_details.status !== 'APPROVED'">
+                    <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 mb-3 flex items-center gap-1.5">
+                        <i class="fas fa-edit text-slate-600"></i> Record Today's Follow-up
+                    </h4>
+                    
+                    <div class="space-y-3">
+                        <div>
+                            <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Discussed Points *</label>
+                            <textarea x-model="salesDiscussedPoints" placeholder="What did you discuss today?" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs focus:ring-emerald-500 focus:border-emerald-500" rows="3"></textarea>
+                        </div>
+                        
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Next Action / Status *</label>
+                                <select x-model="salesStatus" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs">
+                                    <option value="IN_PROGRESS">Continuing (In Progress)</option>
+                                    <option value="COMPLETED">Closed (Completed)</option>
+                                    <option value="PENDING">Pending</option>
+                                    <option value="READY_FOR_REVIEW">Ready for Review</option>
+                                </select>
+                            </div>
+                            <div x-show="salesStatus !== 'COMPLETED'">
+                                <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Next Follow-up Date *</label>
+                                <input type="date" x-model="salesNextFollowUpDate" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs">
+                            </div>
+                        </div>
+
+                        <!-- Validation Error message -->
+                        <div x-show="salesError" class="text-[11px] text-red-600 font-bold" x-text="salesError"></div>
+
+                        <button @click="submitSalesFollowUp" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs py-2 transition duration-150 flex items-center justify-center gap-1.5 shadow-sm">
+                            <i class="fas fa-save"></i> Save Follow-up
+                        </button>
+                    </div>
+                </div>
+                {% endif %}
 
                 <!-- Report Issue Form -->
                 <div class="mb-6 bg-red-50 p-4 rounded-xl border border-red-100 space-y-3">
@@ -738,10 +821,19 @@
             editingRowValues: {},
 
             // Inline row input fields holder
-            newRowCells: {
+            newRowCells: ('{{ table.job_type }}' === 'SALES') ? {
+                CUSTOMER_NAME: '',
+                FOLLOW_UP_DATE: ''
+            } : {
                 TASK_NAME: '',
                 DUE_DATE: ''
             },
+
+            // Sales Follow-up log state
+            salesDiscussedPoints: '',
+            salesNextFollowUpDate: '',
+            salesStatus: 'IN_PROGRESS',
+            salesError: '',
 
             // Column Modal
             isColumnModalOpen: false,
@@ -761,6 +853,8 @@
              importTab: 'csv',
              googleSheetUrl: '',
              isImporting: false,
+             importHeaderRow: 12,
+             importDataRow: 13,
 
              // Drag and Fill State
              isDraggingFill: false,
@@ -1315,8 +1409,16 @@
             },
 
             submitInlineRow() {
-                if (!this.newRowCells.TASK_NAME || !this.newRowCells.DUE_DATE) {
-                    alert("Task Name and Due Date are mandatory fields.");
+                const isSales = '{{ table.job_type }}' === 'SALES';
+                const nameVal = isSales ? this.newRowCells.CUSTOMER_NAME : this.newRowCells.TASK_NAME;
+                const dateVal = isSales ? this.newRowCells.FOLLOW_UP_DATE : this.newRowCells.DUE_DATE;
+                
+                if (!nameVal || !dateVal) {
+                    if (isSales) {
+                        alert("Customer Name and Follow-up Date are mandatory fields.");
+                    } else {
+                        alert("Task Name and Due Date are mandatory fields.");
+                    }
                     return;
                 }
 
@@ -1341,10 +1443,17 @@
                     if (res.ok) {
                         this.fetchRows();
                         // Reset form fields
-                        this.newRowCells = {
-                            TASK_NAME: '',
-                            DUE_DATE: ''
-                        };
+                        if (isSales) {
+                            this.newRowCells = {
+                                CUSTOMER_NAME: '',
+                                FOLLOW_UP_DATE: ''
+                            };
+                        } else {
+                            this.newRowCells = {
+                                TASK_NAME: '',
+                                DUE_DATE: ''
+                            };
+                        }
                     } else {
                         alert("Error saving row. Verify inputs.");
                         this.isLoading = false;
@@ -1625,6 +1734,8 @@
                 this.isLoading = true;
                 const formData = new FormData();
                 formData.append("file", fileInput.files[0]);
+                if (this.importHeaderRow) formData.append("header_row", this.importHeaderRow);
+                if (this.importDataRow) formData.append("data_row", this.importDataRow);
 
                 fetch(`/tables/api/tables/${this.tableId}/import-csv/`, {
                     method: 'POST',
@@ -1667,7 +1778,11 @@
                         'Content-Type': 'application/json',
                         'X-CSRFToken': '{{ csrf_token }}'
                     },
-                    body: JSON.stringify({ url: this.googleSheetUrl })
+                    body: JSON.stringify({ 
+                        url: this.googleSheetUrl,
+                        header_row: this.importHeaderRow,
+                        data_row: this.importDataRow
+                    })
                 })
                 .then(res => res.json().then(data => ({ status: res.status, data })))
                 .then(result => {
@@ -1694,11 +1809,19 @@
             // Task Details & Comment Drawer
             openTaskModal(row) {
                 this.activeRow = row;
-                this.activeTaskName = this.getCellValue(row, 'TASK_NAME');
-                this.activeTaskDueDate = this.getCellValue(row, 'DUE_DATE');
+                const isSales = '{{ table.job_type }}' === 'SALES';
+                this.activeTaskName = isSales ? this.getCellValue(row, 'CUSTOMER_NAME') : this.getCellValue(row, 'TASK_NAME');
+                this.activeTaskDueDate = isSales ? this.getCellValue(row, 'FOLLOW_UP_DATE') : this.getCellValue(row, 'DUE_DATE');
                 this.activeTaskPriority = row.task_details ? row.task_details.priority : 'MEDIUM';
                 this.activeTaskStatus = row.task_details ? row.task_details.status : 'PENDING';
                 this.isTaskModalOpen = true;
+                
+                if (isSales) {
+                    this.salesDiscussedPoints = '';
+                    this.salesNextFollowUpDate = '';
+                    this.salesStatus = this.activeTaskStatus;
+                    this.salesError = '';
+                }
                 
                 this.fetchComments();
             },
@@ -1729,6 +1852,49 @@
                     if (res.ok) {
                         this.newCommentText = '';
                         this.fetchComments();
+                    }
+                });
+            },
+
+            submitSalesFollowUp() {
+                if (!this.salesDiscussedPoints || !this.salesDiscussedPoints.trim()) {
+                    this.salesError = "Discussed points are required.";
+                    return;
+                }
+                if (this.salesStatus !== 'COMPLETED' && !this.salesNextFollowUpDate) {
+                    this.salesError = "Next follow-up date is required.";
+                    return;
+                }
+                
+                this.salesError = "";
+                fetch(`/tasks/api/tasks/${this.activeRow.task_details.id}/log-follow-up/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({
+                        discussed_points: this.salesDiscussedPoints,
+                        status: this.salesStatus,
+                        next_follow_up_date: this.salesNextFollowUpDate
+                    })
+                })
+                .then(res => {
+                    if (res.ok) {
+                        this.salesDiscussedPoints = '';
+                        this.salesNextFollowUpDate = '';
+                        this.salesStatus = 'IN_PROGRESS';
+                        this.fetchRows();
+                        res.json().then(updatedTask => {
+                            this.activeRow.task_details = updatedTask;
+                            this.activeTaskStatus = updatedTask.status;
+                            this.activeTaskDueDate = updatedTask.due_date;
+                            this.comments = updatedTask.comments || [];
+                        });
+                    } else {
+                        res.json().then(data => {
+                            this.salesError = data.error || "Failed to save follow-up.";
+                        });
                     }
                 });
             },

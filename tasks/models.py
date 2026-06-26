@@ -62,7 +62,11 @@ class Task(models.Model):
 
     @property
     def task_name(self):
-        name_cell = self.row.cells.filter(column__name="TASK_NAME").first()
+        is_sales = self.row.table.job_type == "SALES"
+        col_name = "CUSTOMER_NAME" if is_sales else "TASK_NAME"
+        name_cell = self.row.cells.filter(column__name=col_name).first()
+        if not name_cell and is_sales:
+            name_cell = self.row.cells.filter(column__name="TASK_NAME").first()
         return name_cell.value if name_cell else "Unnamed Task"
 
     @property
@@ -205,3 +209,35 @@ class EmailLog(models.Model):
 
     def __str__(self):
         return f"{self.email_type} to {self.recipient_email} - {self.status}"
+
+class TaskFollowUp(models.Model):
+    task = models.ForeignKey(
+        Task,
+        on_delete=models.CASCADE,
+        related_name="follow_ups",
+        db_column="task_fk"
+    )
+    follow_up_date = models.DateField(
+        help_text="The date this follow-up was scheduled and conducted"
+    )
+    discussed_points = models.TextField(
+        help_text="Detailed points of what was discussed"
+    )
+    next_follow_up_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="The scheduled next follow-up date (if continuing)"
+    )
+    entered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="entered_follow_ups"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-follow_up_date", "-created_at"]
+
+    def __str__(self):
+        return f"Follow-up for Task {self.task_id} on {self.follow_up_date}"

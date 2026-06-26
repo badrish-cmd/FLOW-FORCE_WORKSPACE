@@ -190,9 +190,11 @@
                     <button class="btn btn-icon btn-sm position-relative" data-bs-toggle="offcanvas" data-bs-target="#notificationsPanel" title="Notifications" style="display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px;">
                         <i class="fas fa-bell" style="font-size: 1.15rem;"></i>
                         {% if task_notifications_unread %}
-                            <span class="position-absolute bg-danger rounded-circle" style="top: 4px; right: 4px; width: 8px; height: 8px; border: 1.5px solid #fff;" title="{{ task_notifications_unread }} new notification(s)"></span>
+                            <span class="position-absolute bg-success text-white rounded-circle d-flex align-items-center justify-content-center font-bold" style="top: -4px; right: -4px; min-width: 16px; height: 16px; border: 1.5px solid #fff; padding: 0 4px; font-size: 9px; line-height: 1;" title="{{ task_notifications_unread }} new notification(s)">
+                                {{ task_notifications_unread }}
+                            </span>
                         {% else %}
-                            <span class="position-absolute bg-success rounded-circle" style="top: 4px; right: 4px; width: 8px; height: 8px; border: 1.5px solid #fff;"></span>
+                            <span class="position-absolute bg-danger rounded-circle" style="top: 4px; right: 4px; width: 8px; height: 8px; border: 1.5px solid #fff;"></span>
                         {% endif %}
                     </button>
                     {% endblock %}

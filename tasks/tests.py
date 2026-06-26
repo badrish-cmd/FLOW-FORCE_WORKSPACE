@@ -239,3 +239,186 @@ class TasksTestCase(TestCase):
 
         log = EmailLog.objects.filter(task=task, email_type="REVIEW_REQUEST_MAIL").first()
         self.assertIsNone(log)
+
+    def test_sales_system_columns(self):
+        """Verify that a SALES table creates S_NO, DATE, FOLLOW_UP_DATE, and CUSTOMER_NAME system columns."""
+        sales_table = Table.objects.create(
+            name="Sales Leads Table",
+            created_by=self.admin,
+            department=self.dept,
+            job_type="SALES"
+        )
+        col_names = list(sales_table.columns.values_list("name", flat=True))
+        self.assertIn("FOLLOW_UP_DATE", col_names)
+        self.assertIn("CUSTOMER_NAME", col_names)
+        self.assertNotIn("DUE_DATE", col_names)
+        self.assertNotIn("TASK_NAME", col_names)
+
+    def test_log_follow_up_validation_and_api(self):
+        """Test follow-up API validation rules, TaskFollowUp creation, and cell value syncing."""
+        sales_table = Table.objects.create(
+            name="Sales Leads Table",
+            created_by=self.admin,
+            department=self.dept,
+            job_type="SALES"
+        )
+        
+        # Set up cell values for CUSTOMER_NAME and FOLLOW_UP_DATE
+        row = Row.objects.create(table=sales_table, created_by=self.employee)
+        col_cust = Column.objects.get(table=sales_table, name="CUSTOMER_NAME")
+        col_fu = Column.objects.get(table=sales_table, name="FOLLOW_UP_DATE")
+        col_status = Column.objects.get(table=sales_table, name="STATUS") if Column.objects.filter(table=sales_table, name="STATUS").exists() else Column.objects.create(table=sales_table, name="STATUS", data_type="TEXT")
+        
+        CellValue.objects.create(row=row, column=col_cust, value="ACME Corp")
+        CellValue.objects.create(row=row, column=col_fu, value="2026-06-26")
+        CellValue.objects.create(row=row, column=col_status, value="PENDING")
+        
+        task = Task.objects.create(
+            row=row,
+            due_date="2026-06-26",
+            priority="HIGH",
+            status="PENDING",
+            assigned_by=self.admin
+        )
+        task.assigned_to.add(self.employee)
+
+        # 1. Validation fails: Continuing follow-up without next date
+        from django.urls import reverse
+        from rest_framework.test import APIClient
+        client = APIClient()
+        client.force_authenticate(user=self.employee)
+        
+        url = f"/tasks/api/tasks/{task.id}/log-follow-up/"
+        response = client.post(url, {
+            "discussed_points": "Called lead, interested.",
+            "status": "IN_PROGRESS"
+        }, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Next follow-up date is required", response.json().get("error"))
+
+        # 2. Validation succeeds: Continuing follow-up with next date
+        next_date = (timezone.localdate() + timedelta(days=5)).isoformat()
+        response = client.post(url, {
+            "discussed_points": "Called lead, interested.",
+            "status": "IN_PROGRESS",
+            "next_follow_up_date": next_date
+        }, format="json")
+        self.assertEqual(response.status_code, 200)
+        
+        # Verify TaskFollowUp log is saved
+        from tasks.models import TaskFollowUp
+        follow_up = TaskFollowUp.objects.filter(task=task).first()
+        self.assertIsNotNone(follow_up)
+        self.assertEqual(follow_up.discussed_points, "Called lead, interested.")
+        self.assertEqual(follow_up.next_follow_up_date.isoformat(), next_date)
+        
+        # Verify Task due_date is updated
+        task.refresh_from_db()
+        self.assertEqual(task.due_date.isoformat(), next_date)
+        self.assertEqual(task.status, "IN_PROGRESS")
+        
+        # Verify row cell FOLLOW_UP_DATE and STATUS values are updated
+        fu_cell = CellValue.objects.get(row=row, column=col_fu)
+        status_cell = CellValue.objects.get(row=row, column=col_status)
+        self.assertEqual(fu_cell.value, next_date)
+        self.assertEqual(status_cell.value, "IN_PROGRESS")
+        
+        # Verify push notification is created
+        notif = Notification.objects.filter(user=self.employee, task=task, title="Next Follow-up Scheduled").first()
+        self.assertIsNotNone(notif)
+
+        # 3. Validation succeeds: Closed/Completed follow-up without next date
+        response = client.post(url, {
+            "discussed_points": "Deal signed, closing lead.",
+            "status": "COMPLETED"
+        }, format="json")
+        self.assertEqual(response.status_code, 200)
+        
+        task.refresh_from_db()
+        self.assertEqual(task.status, "COMPLETED")
+
+    def test_sales_daily_alert(self):
+        """Verify daily alert email content rendering specifically for Sales tasks."""
+        sales_table = Table.objects.create(
+            name="Sales Leads Table",
+            created_by=self.admin,
+            department=self.dept,
+            job_type="SALES"
+        )
+        row = Row.objects.create(table=sales_table, created_by=self.employee)
+        col_cust = Column.objects.get(table=sales_table, name="CUSTOMER_NAME")
+        col_fu = Column.objects.get(table=sales_table, name="FOLLOW_UP_DATE")
+        
+        CellValue.objects.create(row=row, column=col_cust, value="Globex Corp")
+        CellValue.objects.create(row=row, column=col_fu, value=timezone.localdate().isoformat())
+        
+        task = Task.objects.create(
+            row=row,
+            due_date=timezone.localdate(),
+            priority="HIGH",
+            status="PENDING",
+            assigned_by=self.admin
+        )
+        task.assigned_to.add(self.employee)
+        
+        from tasks.models import TaskFollowUp
+        TaskFollowUp.objects.create(
+            task=task,
+            follow_up_date=timezone.localdate() - timedelta(days=2),
+            discussed_points="Negotiating final contract terms.",
+            entered_by=self.admin
+        )
+        
+        EmailLog.objects.all().delete()
+        task.alert_mail_sent = False
+        task.save()
+        
+        # Run daily alert task
+        send_daily_alert_mails()
+        
+        # Verify EmailLog exists and contains HTML template values
+        log = EmailLog.objects.filter(task=task, email_type="ALERT_MAIL", recipient_email=self.employee.email).first()
+        self.assertIsNotNone(log)
+        self.assertIn("Negotiating final contract terms.", log.body)
+        self.assertIn("Globex Corp", log.body)
+
+    def test_import_csv_with_row_config(self):
+        """Verify that importing a CSV with custom header and data start row parses correctly."""
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from rest_framework.test import APIClient
+        client = APIClient()
+        client.force_authenticate(user=self.admin)
+
+        # CSV where headers are at row 2, and data starts at row 3 (mixed metadata on row 1)
+        csv_content = (
+            "Metadata: Sales Leads Import Report\n"
+            "S_NO,DATE,FOLLOW_UP_DATE,CUSTOMER_NAME,INITIAL_MAIL,ALERT_MAIL,STATUS,PRIORITY\n"
+            "1,2026-06-26,2026-07-05,Cyberdyne Inc,NO,NO,PENDING,HIGH\n"
+        )
+        csv_file = SimpleUploadedFile("leads.csv", csv_content.encode("utf-8"), content_type="text/csv")
+        
+        sales_table = Table.objects.create(
+            name="Sales Leads Table",
+            created_by=self.admin,
+            department=self.dept,
+            job_type="SALES"
+        )
+        Column.objects.create(table=sales_table, name="STATUS", data_type="TEXT")
+        Column.objects.create(table=sales_table, name="PRIORITY", data_type="TEXT")
+
+        url = f"/tables/api/tables/{sales_table.id}/import-csv/"
+        response = client.post(url, {
+            "file": csv_file,
+            "header_row": 2,
+            "data_row": 3
+        }, format="multipart")
+
+        self.assertEqual(response.status_code, 201)
+        self.assertIn("Successfully imported 1 rows", response.json().get("message"))
+
+        # Verify created task details
+        task = Task.objects.filter(row__table=sales_table).first()
+        self.assertIsNotNone(task)
+        self.assertEqual(task.task_name, "Cyberdyne Inc")
+        self.assertEqual(task.due_date.isoformat(), "2026-07-05")
+        self.assertEqual(task.priority, "HIGH")

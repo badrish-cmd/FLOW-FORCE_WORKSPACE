@@ -255,7 +255,7 @@ class TableViewSet(viewsets.ModelViewSet):
 
         return Response({"message": f"Successfully sent escalation emails to {sent_count} recipients"}, status=status.HTTP_200_OK)
 
-    def _import_rows_from_csv_data(self, file_data, table, request_user):
+    def _import_rows_from_csv_data(self, file_data, table, request_user, header_row=None, data_row=None):
         import csv
         import io
         from django.utils.dateparse import parse_date
@@ -265,24 +265,38 @@ class TableViewSet(viewsets.ModelViewSet):
         
         # 1. Dynamically locate the header row
         header_idx = -1
-        for idx, line in enumerate(lines):
-            tokens = [t.strip().upper() for t in line.split(",")]
-            # Check if this line looks like our header row
-            # It should contain at least S_NO/S.NO/SL_NO, TASK_NAME/TASK NAME, and DUE_DATE/DUE DATE
-            has_s_no = any(t in ["S_NO", "S.NO", "S. NO.", "SL_NO", "SL.NO", "SL. NO.", "S NO", "SL NO"] for t in tokens)
-            has_task = any("TASK" in t for t in tokens)
-            has_due = any("DUE" in t for t in tokens)
-            if has_s_no and has_task and has_due:
-                header_idx = idx
-                break
-
-        if header_idx != -1:
-            lines_to_parse = lines[header_idx:]
+        is_sales = table.job_type == "SALES"
+        
+        if header_row is not None and data_row is not None:
+            try:
+                header_line = lines[int(header_row) - 1]
+                data_lines = lines[int(data_row) - 1:]
+                lines_to_parse = [header_line] + data_lines
+            except IndexError:
+                return None, f"Specified header row ({header_row}) or data row ({data_row}) is out of bounds."
         else:
-            if len(lines) >= 12:
-                lines_to_parse = lines[11:]
+            for idx, line in enumerate(lines):
+                tokens = [t.strip().upper() for t in line.split(",")]
+                # Check if this line looks like our header row
+                # It should contain S_NO and task name / customer name and due date / follow up date
+                has_s_no = any(t in ["S_NO", "S.NO", "S. NO.", "SL_NO", "SL.NO", "SL. NO.", "S NO", "SL NO"] for t in tokens)
+                if is_sales:
+                    has_task = any("CUSTOMER" in t or "CLIENT" in t or "TASK" in t for t in tokens)
+                    has_due = any("FOLLOW" in t or "UP" in t or "DUE" in t for t in tokens)
+                else:
+                    has_task = any("TASK" in t for t in tokens)
+                    has_due = any("DUE" in t for t in tokens)
+                if has_s_no and has_task and has_due:
+                    header_idx = idx
+                    break
+
+            if header_idx != -1:
+                lines_to_parse = lines[header_idx:]
             else:
-                lines_to_parse = lines
+                if len(lines) >= 12:
+                    lines_to_parse = lines[11:]
+                else:
+                    lines_to_parse = lines
 
         io_string = io.StringIO("\n".join(lines_to_parse))
         reader = csv.DictReader(io_string)
@@ -301,10 +315,10 @@ class TableViewSet(viewsets.ModelViewSet):
             h = h.strip("_")
             
             # Map standard column name synonyms
-            if h in ["TASK_NAME", "TASKNAME", "TASK"]:
-                return "TASK_NAME"
-            if h in ["DUE_DATE", "DUEDATE"]:
-                return "DUE_DATE"
+            if h in ["TASK_NAME", "TASKNAME", "TASK", "CUSTOMER_NAME", "CUSTOMERNAME", "CUSTOMER", "CLIENT_NAME", "CLIENTNAME", "CLIENT"]:
+                return "CUSTOMER_NAME" if is_sales else "TASK_NAME"
+            if h in ["DUE_DATE", "DUEDATE", "FOLLOW_UP_DATE", "FOLLOWUPDATE", "FOLLOW_UP"]:
+                return "FOLLOW_UP_DATE" if is_sales else "DUE_DATE"
             if h in ["INITIAL_MAIL", "INITIALMAIL"]:
                 return "INITIAL_MAIL"
             if h in ["ALERT_MAIL", "ALERTMAIL"]:
@@ -360,8 +374,12 @@ class TableViewSet(viewsets.ModelViewSet):
                 if normalized_key:
                     normalized_row[normalized_key] = val
 
-            task_name = normalized_row.get("TASK_NAME")
-            due_date_str = normalized_row.get("DUE_DATE")
+            if is_sales:
+                task_name = normalized_row.get("CUSTOMER_NAME")
+                due_date_str = normalized_row.get("FOLLOW_UP_DATE")
+            else:
+                task_name = normalized_row.get("TASK_NAME")
+                due_date_str = normalized_row.get("DUE_DATE")
             
             # Support lowercase/mixed-case options
             priority = "MEDIUM"
@@ -421,25 +439,36 @@ class TableViewSet(viewsets.ModelViewSet):
             else:
                 alert_mail_val = "NO"
 
-            cell_values = {
-                "S_NO": s_no,
-                "DATE": date_val,
-                "DUE_DATE": due_date.isoformat(),
-                "TASK_NAME": task_name,
-                "INITIAL_MAIL": initial_mail_val,
-                "ALERT_MAIL": alert_mail_val
-            }
+            system_field_names = ["S_NO", "DATE", "FOLLOW_UP_DATE", "CUSTOMER_NAME", "INITIAL_MAIL", "ALERT_MAIL"] if is_sales else ["S_NO", "DATE", "DUE_DATE", "TASK_NAME", "INITIAL_MAIL", "ALERT_MAIL"]
+            if is_sales:
+                cell_values = {
+                    "S_NO": s_no,
+                    "DATE": date_val,
+                    "FOLLOW_UP_DATE": due_date.isoformat(),
+                    "CUSTOMER_NAME": task_name,
+                    "INITIAL_MAIL": initial_mail_val,
+                    "ALERT_MAIL": alert_mail_val
+                }
+            else:
+                cell_values = {
+                    "S_NO": s_no,
+                    "DATE": date_val,
+                    "DUE_DATE": due_date.isoformat(),
+                    "TASK_NAME": task_name,
+                    "INITIAL_MAIL": initial_mail_val,
+                    "ALERT_MAIL": alert_mail_val
+                }
 
             # Map remaining custom columns including status, priority, and date columns
             for col_name, val in normalized_row.items():
-                if col_name not in ["S_NO", "DATE", "DUE_DATE", "TASK_NAME", "INITIAL_MAIL", "ALERT_MAIL"]:
+                if col_name not in system_field_names:
                     if col_name in db_col_names:
                         col = normalized_db_cols[col_name]
                         cell_values[col.name] = val
 
             for name, val in cell_values.items():
                 col = None
-                if name in ["S_NO", "DATE", "DUE_DATE", "TASK_NAME", "INITIAL_MAIL", "ALERT_MAIL"]:
+                if name in system_field_names:
                     col = normalized_db_cols.get(name)
                 else:
                     col = next((c for c in table.columns.all() if c.name == name), None)
@@ -473,7 +502,7 @@ class TableViewSet(viewsets.ModelViewSet):
             from django.db.models import Q
             for col_name, val in cell_values.items():
                 col = None
-                if col_name in ["S_NO", "DATE", "DUE_DATE", "TASK_NAME", "INITIAL_MAIL", "ALERT_MAIL"]:
+                if col_name in system_field_names:
                     col = normalized_db_cols.get(col_name)
                 else:
                     col = next((c for c in table.columns.all() if c.name == col_name), None)
@@ -517,7 +546,17 @@ class TableViewSet(viewsets.ModelViewSet):
         except Exception:
             return Response({"error": "Failed to decode CSV file. Make sure it is encoded in UTF-8."}, status=status.HTTP_400_BAD_REQUEST)
 
-        created_rows, err = self._import_rows_from_csv_data(file_data, table, request.user)
+        header_row = request.data.get("header_row") or request.POST.get("header_row")
+        data_row = request.data.get("data_row") or request.POST.get("data_row")
+        try:
+            header_row = int(header_row) if header_row else None
+            data_row = int(data_row) if data_row else None
+        except ValueError:
+            return Response({"error": "header_row and data_row must be integers"}, status=status.HTTP_400_BAD_REQUEST)
+
+        created_rows, err = self._import_rows_from_csv_data(
+            file_data, table, request.user, header_row=header_row, data_row=data_row
+        )
         if err:
             return Response({"error": err}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -557,7 +596,17 @@ class TableViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({"error": f"Error fetching Google Sheet: {str(e)}. Ensure the spreadsheet is public or shared 'Anyone with the link can view'."}, status=status.HTTP_400_BAD_REQUEST)
 
-        created_rows, err = self._import_rows_from_csv_data(content, table, request.user)
+        header_row = request.data.get("header_row")
+        data_row = request.data.get("data_row")
+        try:
+            header_row = int(header_row) if header_row else None
+            data_row = int(data_row) if data_row else None
+        except ValueError:
+            return Response({"error": "header_row and data_row must be integers"}, status=status.HTTP_400_BAD_REQUEST)
+
+        created_rows, err = self._import_rows_from_csv_data(
+            content, table, request.user, header_row=header_row, data_row=data_row
+        )
         if err:
             return Response({"error": err}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -740,20 +789,31 @@ class RowViewSet(viewsets.ModelViewSet):
 
         cells_data = request.data.get("cells", {})
         
-        # Verify DUE_DATE and TASK_NAME are present
-        due_date_str = cells_data.get("DUE_DATE")
-        task_name = cells_data.get("TASK_NAME")
+        is_sales = table.job_type == "SALES"
+        
+        # Verify DUE_DATE/FOLLOW_UP_DATE and TASK_NAME/CUSTOMER_NAME are present
+        if is_sales:
+            due_date_str = cells_data.get("FOLLOW_UP_DATE")
+            task_name = cells_data.get("CUSTOMER_NAME")
+            date_field_name = "FOLLOW_UP_DATE"
+            name_field_name = "CUSTOMER_NAME"
+        else:
+            due_date_str = cells_data.get("DUE_DATE")
+            task_name = cells_data.get("TASK_NAME")
+            date_field_name = "DUE_DATE"
+            name_field_name = "TASK_NAME"
+
         priority = cells_data.get("priority", "MEDIUM")
 
         if not due_date_str:
-            return Response({"error": "DUE_DATE is mandatory"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": f"{date_field_name} is mandatory"}, status=status.HTTP_400_BAD_REQUEST)
         if not task_name:
-            return Response({"error": "TASK_NAME is mandatory"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": f"{name_field_name} is mandatory"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             due_date = datetime.strptime(due_date_str.split("T")[0], "%Y-%m-%d").date()
         except ValueError:
-            return Response({"error": "Invalid DUE_DATE format. Use YYYY-MM-DD"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": f"Invalid {date_field_name} format. Use YYYY-MM-DD"}, status=status.HTTP_400_BAD_REQUEST)
 
         # 1. Create Row
         row = Row.objects.create(table=table, created_by=request.user)
@@ -771,14 +831,24 @@ class RowViewSet(viewsets.ModelViewSet):
         s_no = latest_s_no + 1
 
         # Save CellValues
-        cell_values = {
-            "S_NO": s_no,
-            "DATE": timezone.localdate().isoformat(),
-            "DUE_DATE": due_date.isoformat(),
-            "TASK_NAME": task_name,
-            "INITIAL_MAIL": "NO",
-            "ALERT_MAIL": "NO"
-        }
+        if is_sales:
+            cell_values = {
+                "S_NO": s_no,
+                "DATE": timezone.localdate().isoformat(),
+                "FOLLOW_UP_DATE": due_date.isoformat(),
+                "CUSTOMER_NAME": task_name,
+                "INITIAL_MAIL": "NO",
+                "ALERT_MAIL": "NO"
+            }
+        else:
+            cell_values = {
+                "S_NO": s_no,
+                "DATE": timezone.localdate().isoformat(),
+                "DUE_DATE": due_date.isoformat(),
+                "TASK_NAME": task_name,
+                "INITIAL_MAIL": "NO",
+                "ALERT_MAIL": "NO"
+            }
 
         # Merge custom columns input
         for key, val in cells_data.items():
@@ -880,7 +950,7 @@ class RowViewSet(viewsets.ModelViewSet):
         if column.is_system_column:
             task = getattr(row, "task", None)
             if task:
-                if column.name == "DUE_DATE":
+                if column.name in ["DUE_DATE", "FOLLOW_UP_DATE"]:
                     try:
                         task.due_date = datetime.strptime(value.split("T")[0], "%Y-%m-%d").date()
                         task.save(update_fields=["due_date"])
@@ -991,7 +1061,7 @@ class RowViewSet(viewsets.ModelViewSet):
             if column.is_system_column:
                 task = getattr(row, "task", None)
                 if task:
-                    if column.name == "DUE_DATE":
+                    if column.name in ["DUE_DATE", "FOLLOW_UP_DATE"]:
                         try:
                             task.due_date = datetime.strptime(str(value).split("T")[0], "%Y-%m-%d").date()
                             task.save(update_fields=["due_date"])

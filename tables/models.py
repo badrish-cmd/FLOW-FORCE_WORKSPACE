@@ -37,15 +37,25 @@ class Table(models.Model):
         is_new = self.pk is None
         super().save(*args, **kwargs)
         if is_new:
-            # Create system columns: S_NO, DATE, DUE_DATE, TASK_NAME, INITIAL_MAIL, ALERT_MAIL
-            system_cols = [
-                ("S_NO", "NUMBER", 1),
-                ("DATE", "DATE", 2),
-                ("DUE_DATE", "DATE", 3),
-                ("TASK_NAME", "TEXT", 4),
-                ("INITIAL_MAIL", "TEXT", 5),
-                ("ALERT_MAIL", "TEXT", 6),
-            ]
+            # Create system columns dynamically based on job_type
+            if self.job_type == "SALES":
+                system_cols = [
+                    ("S_NO", "NUMBER", 1),
+                    ("DATE", "DATE", 2),
+                    ("FOLLOW_UP_DATE", "DATE", 3),
+                    ("CUSTOMER_NAME", "TEXT", 4),
+                    ("INITIAL_MAIL", "TEXT", 5),
+                    ("ALERT_MAIL", "TEXT", 6),
+                ]
+            else:
+                system_cols = [
+                    ("S_NO", "NUMBER", 1),
+                    ("DATE", "DATE", 2),
+                    ("DUE_DATE", "DATE", 3),
+                    ("TASK_NAME", "TEXT", 4),
+                    ("INITIAL_MAIL", "TEXT", 5),
+                    ("ALERT_MAIL", "TEXT", 6),
+                ]
             for name, dtype, pos in system_cols:
                 Column.objects.create(
                     table=self,
