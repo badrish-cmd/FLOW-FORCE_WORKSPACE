@@ -20,7 +20,7 @@ class TableViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return get_accessible_tables(self.request.user)
+        return get_accessible_tables(self.request.user).prefetch_related('columns')
 
     def perform_create(self, serializer):
         # Automatically assign creator and department if admin/department admin
@@ -765,12 +765,12 @@ class RowViewSet(viewsets.ModelViewSet):
             if self.action in ["retrieve", "update", "partial_update", "destroy"]:
                 from .permissions import get_accessible_tables
                 accessible_tables = get_accessible_tables(self.request.user)
-                return Row.objects.filter(table__in=accessible_tables, is_archived=False)
+                return Row.objects.filter(table__in=accessible_tables, is_archived=False).select_related('created_by', 'task').prefetch_related('cells', 'cells__column')
             return Row.objects.none()
         table = get_object_or_404(Table, id=table_id)
         if not has_table_access(self.request.user, table, "VIEW"):
             return Row.objects.none()
-        return Row.objects.filter(table=table, is_archived=False)
+        return Row.objects.filter(table=table, is_archived=False).select_related('created_by', 'task').prefetch_related('cells', 'cells__column')
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()

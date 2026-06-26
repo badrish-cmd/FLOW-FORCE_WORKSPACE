@@ -8,12 +8,12 @@ def global_context(request):
         return {}
 
     # Get from tasks app
-    tasks_unread = TasksNotification.objects.filter(user=request.user, is_read=False)
-    tasks_read = TasksNotification.objects.filter(user=request.user, is_read=True)
+    tasks_unread = TasksNotification.objects.filter(user=request.user, is_read=False).select_related('task')
+    tasks_read = TasksNotification.objects.filter(user=request.user, is_read=True).select_related('task')
 
     # Get from task_tracker app
-    tracker_unread = TrackerNotification.objects.filter(user=request.user, read=False)
-    tracker_read = TrackerNotification.objects.filter(user=request.user, read=True)
+    tracker_unread = TrackerNotification.objects.filter(user=request.user, read=False).select_related('row', 'row__tracker')
+    tracker_read = TrackerNotification.objects.filter(user=request.user, read=True).select_related('row', 'row__tracker')
 
     unread_list = []
     for n in tasks_unread:
@@ -86,7 +86,7 @@ def global_context(request):
     read_list.sort(key=lambda x: x["created_at"], reverse=True)
 
     unread_count = len(unread_list)
-    sidebar_tables = get_accessible_tables(request.user)
+    sidebar_tables = get_accessible_tables(request.user).select_related('department')
 
     return {
         "task_notifications_unread": unread_count,

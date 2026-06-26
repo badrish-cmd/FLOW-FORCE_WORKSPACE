@@ -311,6 +311,19 @@
                     </tr>
                 </thead>
                 <tbody class="bg-white divide-y divide-gray-200">
+                    <!-- Skeleton Loader rows when isLoading and rows are empty -->
+                    <template x-if="isLoading && rows.length === 0">
+                        {% for i in "12345" %}
+                        <tr>
+                            <td class="p-4 text-center border-r border-gray-200"><div class="skeleton h-4 w-4 mx-auto rounded"></div></td>
+                            {% for col in table.columns.all %}
+                            <td class="p-4 border-r border-gray-200"><div class="skeleton h-4 w-5/6 rounded"></div></td>
+                            {% endfor %}
+                            <td class="p-4"><div class="skeleton h-4 w-12 rounded"></div></td>
+                        </tr>
+                        {% endfor %}
+                    </template>
+
                     <!-- Standard rows -->
                     <template x-for="(row, rowIndex) in filteredRows()" :key="row.id">
                         <tr :class="{'line-through text-gray-400 bg-gray-50 opacity-75': isRowCompleted(row)}" class="hover:bg-gray-50 transition duration-100" @mouseenter="onRowHover(row.id)">
