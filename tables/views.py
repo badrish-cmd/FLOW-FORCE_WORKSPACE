@@ -255,10 +255,45 @@ class TableViewSet(viewsets.ModelViewSet):
 
         return Response({"message": f"Successfully sent escalation emails to {sent_count} recipients"}, status=status.HTTP_200_OK)
 
+    def safe_parse_date(self, val):
+        if not val:
+            return None
+        import datetime as dt_mod
+        if isinstance(val, (datetime, dt_mod.date)):
+            return val if isinstance(val, dt_mod.date) else val.date()
+
+        val_str = str(val).strip()
+        if not val_str:
+            return None
+        if val_str.isdigit():
+            return None
+        try:
+            float(val_str)
+            return None
+        except ValueError:
+            pass
+
+        # Try Django's parse_date first
+        from django.utils.dateparse import parse_date
+        try:
+            d = parse_date(val_str)
+            if d:
+                return d
+        except Exception:
+            pass
+
+        # Try dateutil parser
+        from dateutil import parser as du_parser
+        try:
+            return du_parser.parse(val_str).date()
+        except Exception:
+            pass
+
+        return None
+
     def _import_rows_from_csv_data(self, file_data, table, request_user, header_row=None, data_row=None):
         import csv
         import io
-        from django.utils.dateparse import parse_date
         from django.utils import timezone
 
         lines = file_data.splitlines()
@@ -397,7 +432,7 @@ class TableViewSet(viewsets.ModelViewSet):
             if not task_name or not due_date_str:
                 continue
 
-            due_date = parse_date(due_date_str)
+            due_date = self.safe_parse_date(due_date_str)
             if not due_date:
                 continue
 
@@ -417,7 +452,7 @@ class TableViewSet(viewsets.ModelViewSet):
             csv_date_str = normalized_row.get("DATE")
             date_val = None
             if csv_date_str:
-                parsed_d = parse_date(csv_date_str)
+                parsed_d = self.safe_parse_date(csv_date_str)
                 if parsed_d:
                     date_val = parsed_d.isoformat()
             if not date_val:

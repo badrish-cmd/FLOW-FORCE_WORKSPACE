@@ -114,6 +114,42 @@ class TablesTestCase(TestCase):
         self.assertIsNotNone(task)
         self.assertEqual(task.task_name, "Imported Task Name")
 
+    def test_import_csv_with_different_date_formats(self):
+        from tables.views import TableViewSet
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        factory = APIRequestFactory()
+
+        table = Table.objects.create(name="Import Date Test Table", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+
+        csv_lines = [
+            "Metadata line 1", "Metadata line 2", "Metadata line 3", "Metadata line 4",
+            "Metadata line 5", "Metadata line 6", "Metadata line 7", "Metadata line 8",
+            "Metadata line 9", "Metadata line 10", "Metadata line 11",
+            "S_NO,DATE,DUE_DATE,TASK_NAME,INITIAL_MAIL,ALERT_MAIL",
+            "1,22/06/2026,30/06/2026,Imported Task Name DD-MM-YYYY,NO,NO",
+            "2,06/22/2026,06/30/2026,Imported Task Name MM-DD-YYYY,NO,NO"
+        ]
+        csv_data = "\n".join(csv_lines)
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        csv_file = SimpleUploadedFile("tasks.csv", csv_data.encode("utf-8"), content_type="text/csv")
+
+        view = TableViewSet.as_view({'post': 'import_csv'})
+        request = factory.post(f"/tables/api/tables/{table.id}/import-csv/", {"file": csv_file}, format="multipart")
+        force_authenticate(request, user=self.admin)
+
+        response = view(request, pk=table.id)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(Row.objects.filter(table=table).count(), 2)
+
+        # Check if Tasks were created and parsed correctly
+        tasks = list(Task.objects.filter(row__table=table).order_by('id'))
+        self.assertEqual(len(tasks), 2)
+        import datetime
+        self.assertEqual(tasks[0].due_date, datetime.date(2026, 6, 30))
+        self.assertEqual(tasks[1].due_date, datetime.date(2026, 6, 30))
+
     def test_import_csv_column_mismatch_error(self):
         from tables.views import TableViewSet
         from rest_framework.test import APIRequestFactory, force_authenticate
