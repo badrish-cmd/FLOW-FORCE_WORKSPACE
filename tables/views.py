@@ -724,7 +724,7 @@ class ColumnViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         table_id = self.request.query_params.get("table")
         if not table_id:
-            if self.action in ["retrieve", "update", "partial_update", "destroy"]:
+            if self.action in ["retrieve", "update", "partial_update", "destroy", "clear_values", "delete_rows"]:
                 from .permissions import get_accessible_tables
                 accessible_tables = get_accessible_tables(self.request.user)
                 return Column.objects.filter(table__in=accessible_tables)
