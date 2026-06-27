@@ -42,7 +42,7 @@
             
             <div class="content">
                 <p class="greeting">Dear {{ employee_name }},</p>
-                <p class="intro">You have <strong>{{ task_count }}</strong> tasks due today. Please log discussions and update them with new follow-up dates in the workspace:</p>
+                <p class="intro">{{ email_intro|safe }}</p>
                 
                 <div class="section-title">━━━━ TASKS DUE TODAY ━━━━</div>
                 <table class="tasks-table">

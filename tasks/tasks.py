@@ -301,13 +301,25 @@ def send_daily_alert_mails():
         if not tasks_to_alert:
             continue
 
-        # 1. Create a single consolidated in-app notification
-        Notification.objects.create(
-            user=employee,
-            title=f"You have {len(tasks_to_alert)} tasks due today",
-            description=f"Log discussions and update follow-up dates for your {len(tasks_to_alert)} due task(s).",
-            type="DUE_TODAY"
-        )
+        # 1. Create in-app notifications separated by task type
+        sales_tasks = [t for t in tasks_to_alert if t.row.table.job_type == "SALES"]
+        other_tasks = [t for t in tasks_to_alert if t.row.table.job_type != "SALES"]
+
+        if sales_tasks:
+            Notification.objects.create(
+                user=employee,
+                title=f"Sales Follow-ups Due Today",
+                description=f"You have {len(sales_tasks)} sales follow-up task(s) due today. Kindly enter new follow up.",
+                type="DUE_TODAY"
+            )
+
+        if other_tasks:
+            Notification.objects.create(
+                user=employee,
+                title=f"Tasks Due Today",
+                description=f"You have {len(other_tasks)} tasks due today. Kindly check on them and update.",
+                type="DUE_TODAY"
+            )
 
         # 2. Build consolidated email log details
         task_items = []
@@ -342,11 +354,20 @@ def send_daily_alert_mails():
                     defaults={"value": "YES"}
                 )
 
+        # Build dynamic intro text for consolidated email
+        if sales_tasks and not other_tasks:
+            email_intro = f"You have <strong>{len(sales_tasks)}</strong> sales task(s) due today. Kindly log discussions and enter new follow up in the workspace."
+        elif other_tasks and not sales_tasks:
+            email_intro = f"You have <strong>{len(other_tasks)}</strong> tasks due today. Kindly check on them and update."
+        else:
+            email_intro = f"You have <strong>{len(tasks_to_alert)}</strong> task(s) due today (<strong>{len(sales_tasks)}</strong> sales and <strong>{len(other_tasks)}</strong> other). Kindly check them and update in the workspace."
+
         subject = f"Daily Alert Summary: {len(tasks_to_alert)} Task(s) Due Today"
         context = {
             'employee_name': employee.full_name or employee.email,
             'task_count': len(tasks_to_alert),
-            'task_items': task_items
+            'task_items': task_items,
+            'email_intro': email_intro
         }
         html_message = render_to_string('emails/consolidated_alert_mail.html', context)
 
