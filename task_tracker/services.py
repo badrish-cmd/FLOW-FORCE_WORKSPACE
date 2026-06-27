@@ -459,9 +459,9 @@ def get_dashboard_stats_for_user(user) -> dict:
         "pending_tasks": qs.filter(status="PENDING").count(),
         "in_progress": qs.filter(status="IN_PROGRESS").count(),
         "ready_for_review": qs.filter(status="READY_FOR_REVIEW").count(),
-        "completed_tasks": qs.filter(status="APPROVED").count(),
-        "overdue_tasks": qs.filter(due_date__lt=today).exclude(status="APPROVED").count(),
-        "due_today": qs.filter(due_date=today).exclude(status="APPROVED").count(),
+        "completed_tasks": qs.filter(status__in=["COMPLETED", "APPROVED"]).count(),
+        "overdue_tasks": qs.filter(due_date__lt=today).exclude(status__in=["COMPLETED", "APPROVED"]).count(),
+        "due_today": qs.filter(due_date=today).exclude(status__in=["COMPLETED", "APPROVED"]).count(),
     }
 
 

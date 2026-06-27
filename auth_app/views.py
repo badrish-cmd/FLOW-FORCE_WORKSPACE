@@ -179,16 +179,10 @@ def super_admin_dashboard(request):
 
         return role_redirect
 
-    task_stats = get_dashboard_stats_for_user(request.user)
-
     from tables.models import Table
     context = {
         "total_employees": EmployeeUser.objects.count(),
-        "pending_approvals": EmployeeUser.objects.filter(
-            status="PENDING"
-        ).count(),
         "total_tables": Table.objects.filter(is_active=True).count(),
-        "task_stats": task_stats,
     }
 
     return render(
@@ -210,15 +204,10 @@ def admin_dashboard(request):
 
         return role_redirect
 
-    task_stats = get_dashboard_stats_for_user(request.user)
-
-    department_users = EmployeeUser.objects.filter(
-        department=request.user.department
-    )
-
+    from tables.models import Table
     context = {
-        "employees": department_users.count(),
-        "task_stats": task_stats,
+        "total_employees": EmployeeUser.objects.count(),
+        "total_tables": Table.objects.filter(is_active=True).count(),
     }
 
     return render(
@@ -240,15 +229,10 @@ def department_dashboard(request):
 
         return role_redirect
 
-    task_stats = get_dashboard_stats_for_user(request.user)
-
-    team_members = EmployeeUser.objects.filter(
-        department=request.user.department
-    )
-
+    from tables.models import Table
     context = {
-        "team_members": team_members.count(),
-        "task_stats": task_stats,
+        "total_employees": EmployeeUser.objects.count(),
+        "total_tables": Table.objects.filter(is_active=True).count(),
     }
 
     return render(
@@ -270,8 +254,10 @@ def employee_dashboard(request):
 
         return role_redirect
 
+    from tables.models import Table
     context = {
-        "task_stats": get_dashboard_stats_for_user(request.user),
+        "total_employees": EmployeeUser.objects.count(),
+        "total_tables": Table.objects.filter(is_active=True).count(),
     }
 
     return render(

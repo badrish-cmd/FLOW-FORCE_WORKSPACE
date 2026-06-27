@@ -10,64 +10,24 @@
     </div>
 
     <!-- Metrics Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-6 gap-6 mb-8">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
         <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm flex items-center gap-4">
             <div class="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
                 <i class="fas fa-users text-lg"></i>
             </div>
             <div>
-                <span class="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Team Size</span>
-                <strong class="block text-xl font-bold text-gray-900 mt-0.5">{{ team_members }}</strong>
+                <span class="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Total Employees</span>
+                <strong class="block text-xl font-bold text-gray-900 mt-0.5">{{ total_employees }}</strong>
             </div>
         </div>
 
         <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm flex items-center gap-4">
-            <div class="w-10 h-10 rounded-lg bg-purple-50 flex items-center justify-center text-purple-600">
-                <i class="fas fa-list-check text-lg"></i>
+            <div class="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600">
+                <i class="fas fa-table text-lg"></i>
             </div>
             <div>
-                <span class="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Total Tasks</span>
-                <strong class="block text-xl font-bold text-gray-900 mt-0.5">{{ task_stats.total_tasks }}</strong>
-            </div>
-        </div>
-
-        <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm flex items-center gap-4">
-            <div class="w-10 h-10 rounded-lg bg-yellow-50 flex items-center justify-center text-yellow-600">
-                <i class="fas fa-clock text-lg"></i>
-            </div>
-            <div>
-                <span class="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Pending</span>
-                <strong class="block text-xl font-bold text-gray-900 mt-0.5">{{ task_stats.pending_tasks }}</strong>
-            </div>
-        </div>
-
-        <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm flex items-center gap-4">
-            <div class="w-10 h-10 rounded-lg bg-orange-50 flex items-center justify-center text-orange-600">
-                <i class="fas fa-calendar-day text-lg"></i>
-            </div>
-            <div>
-                <span class="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Due Today</span>
-                <strong class="block text-xl font-bold text-gray-900 mt-0.5">{{ task_stats.due_today }}</strong>
-            </div>
-        </div>
-
-        <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm flex items-center gap-4">
-            <div class="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center text-red-600">
-                <i class="fas fa-triangle-exclamation text-lg"></i>
-            </div>
-            <div>
-                <span class="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Overdue</span>
-                <strong class="block text-xl font-bold text-gray-900 mt-0.5">{{ task_stats.overdue_tasks }}</strong>
-            </div>
-        </div>
-
-        <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm flex items-center gap-4">
-            <div class="w-10 h-10 rounded-lg bg-green-50 flex items-center justify-center text-green-600">
-                <i class="fas fa-circle-check text-lg"></i>
-            </div>
-            <div>
-                <span class="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Completed</span>
-                <strong class="block text-xl font-bold text-gray-900 mt-0.5">{{ task_stats.completed_tasks }}</strong>
+                <span class="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Tables</span>
+                <strong class="block text-xl font-bold text-gray-900 mt-0.5">{{ total_tables|default:"0" }}</strong>
             </div>
         </div>
     </div>

@@ -1258,7 +1258,10 @@
                 if (!row || !row.task_details) return false;
                 const status = row.task_details.status;
                 if (status === 'COMPLETED' || status === 'APPROVED') return false;
-                const dueDateVal = this.getCellValue(row, 'DUE_DATE');
+                
+                const isSales = '{{ table.job_type }}' === 'SALES';
+                const dateCol = isSales ? 'FOLLOW_UP_DATE' : 'DUE_DATE';
+                const dueDateVal = this.getCellValue(row, dateCol);
                 if (!dueDateVal) return false;
                 
                 const today = new Date();
