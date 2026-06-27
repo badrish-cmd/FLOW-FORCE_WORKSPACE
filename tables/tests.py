@@ -609,3 +609,74 @@ class TablesTestCase(TestCase):
         # Verify task escalation level updated
         task.refresh_from_db()
         self.assertEqual(task.last_escalation_level, 2)
+
+    def test_column_unique_name_validation(self):
+        from tables.serializers import ColumnSerializer
+        table = Table.objects.create(name="Col Unique Table", created_by=self.admin)
+        Column.objects.create(table=table, name="CustomCol1", data_type="TEXT")
+
+        # Serializer should raise validation error if creating column with duplicate name
+        serializer = ColumnSerializer(data={"table": table.id, "name": "CustomCol1", "data_type": "TEXT"})
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("name", serializer.errors)
+
+        # Serializer should pass if name is unique
+        serializer2 = ColumnSerializer(data={"table": table.id, "name": "CustomCol2", "data_type": "TEXT"})
+        self.assertTrue(serializer2.is_valid())
+
+    def test_clear_column_values_api(self):
+        from tables.views import ColumnViewSet
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        factory = APIRequestFactory()
+
+        table = Table.objects.create(name="Clear Test Table", created_by=self.admin)
+        col = Column.objects.create(table=table, name="CustomCol", data_type="TEXT")
+        row = Row.objects.create(table=table, created_by=self.admin)
+        cell = CellValue.objects.create(row=row, column=col, value="Target Value")
+
+        view = ColumnViewSet.as_view({'post': 'clear_values'})
+
+        # 1. Non-admin cannot clear values
+        request = factory.post(f"/tables/api/columns/{col.id}/clear-values/")
+        force_authenticate(request, user=self.employee)
+        response = view(request, pk=col.id)
+        self.assertEqual(response.status_code, 403)
+
+        # 2. Admin can clear values
+        request = factory.post(f"/tables/api/columns/{col.id}/clear-values/")
+        force_authenticate(request, user=self.admin)
+        response = view(request, pk=col.id)
+        self.assertEqual(response.status_code, 200)
+
+        cell.refresh_from_db()
+        self.assertNone(cell.value)
+
+    def test_delete_rows_by_column_api(self):
+        from tables.views import ColumnViewSet
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        factory = APIRequestFactory()
+
+        table = Table.objects.create(name="Delete Rows Test Table", created_by=self.admin)
+        col = Column.objects.create(table=table, name="CustomCol", data_type="TEXT")
+        row1 = Row.objects.create(table=table, created_by=self.admin)
+        row2 = Row.objects.create(table=table, created_by=self.admin)
+        
+        CellValue.objects.create(row=row1, column=col, value="Row 1 Value")
+        # row2 has no value
+
+        view = ColumnViewSet.as_view({'post': 'delete_rows'})
+
+        # 1. Non-admin cannot bulk delete rows by column
+        request = factory.post(f"/tables/api/columns/{col.id}/delete-rows/")
+        force_authenticate(request, user=self.employee)
+        response = view(request, pk=col.id)
+        self.assertEqual(response.status_code, 403)
+
+        # 2. Admin can bulk delete rows by column (should delete row1, keep row2)
+        request = factory.post(f"/tables/api/columns/{col.id}/delete-rows/")
+        force_authenticate(request, user=self.admin)
+        response = view(request, pk=col.id)
+        self.assertEqual(response.status_code, 200)
+
+        self.assertFalse(Row.objects.filter(id=row1.id).exists())
+        self.assertTrue(Row.objects.filter(id=row2.id).exists())

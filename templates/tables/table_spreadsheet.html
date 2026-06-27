@@ -293,7 +293,7 @@
                                 </div>
                                 <div class="flex items-center gap-1 ml-2">
                                     {% if user.role in 'SUPER_ADMIN,ADMIN,DEPARTMENT_ADMIN' %}
-                                    <button @click.stop="openEditColumnModal({{ col.id }}, '{{ col.name }}', '{{ col.data_type }}', '{{ col.options|default:""|escapejs }}')" class="text-blue-500 hover:text-blue-700 focus:outline-none mr-1" title="Edit Column">
+                                    <button @click.stop="openEditColumnModal({{ col.id }}, '{{ col.name }}', '{{ col.data_type }}', '{{ col.options|default:""|escapejs }}', {{ col.is_system_column|yesno:'true,false' }})" class="text-blue-500 hover:text-blue-700 focus:outline-none mr-1" title="Edit Column">
                                         <i class="fas fa-cog text-[9px]"></i>
                                     </button>
                                     <button @click.stop="moveColumnLeft({{ col.id }})" class="text-gray-400 hover:text-gray-600 focus:outline-none" title="Move Left">
@@ -544,11 +544,14 @@
             <div class="space-y-4">
                 <div>
                     <label class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Column Name</label>
-                    <input type="text" x-model="editColumnName" placeholder="Column Name" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-sm">
+                    <input type="text" x-model="editColumnName" :disabled="editColumnIsSystem" placeholder="Column Name" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                    <template x-if="editColumnIsSystem">
+                        <span class="text-[10px] text-amber-600 font-medium mt-1 block"><i class="fas fa-exclamation-triangle"></i> System columns cannot be renamed.</span>
+                    </template>
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Data Type</label>
-                    <select x-model="editColumnType" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-sm">
+                    <select x-model="editColumnType" :disabled="editColumnIsSystem" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
                         <option value="TEXT">Text</option>
                         <option value="NUMBER">Number</option>
                         <option value="DATE">Date</option>
@@ -563,7 +566,26 @@
                     <textarea x-model="editColumnOptions" placeholder="e.g. Option A, Option B, Option C" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-sm" rows="3"></textarea>
                 </div>
             </div>
-            <div class="flex justify-end gap-3 mt-6">
+
+            <!-- Bulk Clear/Delete Column Actions (Hidden for system columns) -->
+            <template x-if="!editColumnIsSystem">
+                <div class="mt-6 border-t border-gray-200 pt-4 flex flex-col gap-2">
+                    <p class="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Column Actions</p>
+                    <div class="flex flex-wrap gap-2">
+                        <button @click="clearColumnValues" class="bg-amber-50 hover:bg-amber-100 text-amber-700 font-semibold rounded-lg text-xs px-3 py-2 transition duration-150 flex items-center gap-1 border border-amber-200">
+                            <i class="fas fa-eraser text-amber-500"></i> Clear All Data
+                        </button>
+                        <button @click="deleteRowsByColumn" class="bg-orange-50 hover:bg-orange-100 text-orange-700 font-semibold rounded-lg text-xs px-3 py-2 transition duration-150 flex items-center gap-1 border border-orange-200">
+                            <i class="fas fa-trash text-orange-500"></i> Delete Rows with Data
+                        </button>
+                        <button @click="deleteColumn" class="bg-red-50 hover:bg-red-100 text-red-700 font-bold rounded-lg text-xs px-3 py-2 transition duration-150 flex items-center gap-1 border border-red-200 ml-auto">
+                            <i class="fas fa-trash-alt text-red-500"></i> Delete Column
+                        </button>
+                    </div>
+                </div>
+            </template>
+
+            <div class="flex justify-end gap-3 mt-6 border-t border-gray-100 pt-4">
                 <button @click="isEditColumnModalOpen = false" class="bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg text-sm px-4 py-2.5">Cancel</button>
                 <button @click="saveColumnProperties" class="bg-primary hover:bg-blue-700 text-white font-medium rounded-lg text-sm px-4 py-2.5">Save Changes</button>
             </div>
@@ -860,6 +882,8 @@
             editColumnName: '',
             editColumnType: 'TEXT',
             editColumnOptions: '',
+            editColumnIsSystem: false,
+
 
              // Import Modal State
              isImportModalOpen: false,
@@ -1164,6 +1188,15 @@
                 fetch(`/tables/api/rows/?table=${this.tableId}`)
                     .then(res => res.json())
                     .then(data => {
+                        // Optimize: pre-map cells to a cells_dict lookup to avoid O(C) loops during render
+                        data.forEach(row => {
+                            row.cells_dict = {};
+                            if (row.cells) {
+                                row.cells.forEach(c => {
+                                    row.cells_dict[c.column_name] = c.value;
+                                });
+                            }
+                        });
                         this.rows = data;
                         if (this.autoOpenTaskId) {
                             const matchingRow = this.rows.find(r => r.task_details && r.task_details.id === this.autoOpenTaskId);
@@ -1238,6 +1271,9 @@
             },
 
             getCellValue(row, columnName) {
+                if (row.cells_dict && columnName in row.cells_dict) {
+                    return row.cells_dict[columnName];
+                }
                 const cell = row.cells.find(c => c.column_name === columnName);
                 return cell ? cell.value : '';
             },
@@ -1534,11 +1570,12 @@
                 });
             },
 
-            openEditColumnModal(columnId, columnName, columnType, columnOptions) {
+            openEditColumnModal(columnId, columnName, columnType, columnOptions, isSystem = false) {
                 this.editColumnId = columnId;
                 this.editColumnName = columnName;
                 this.editColumnType = columnType;
                 this.editColumnOptions = columnOptions || '';
+                this.editColumnIsSystem = isSystem;
                 this.isEditColumnModalOpen = true;
             },
 
@@ -1560,8 +1597,87 @@
                     if (res.ok) {
                         location.reload();
                     } else {
-                        alert("Error saving column properties.");
+                        res.json().then(data => {
+                            alert(data.name ? data.name[0] : "Error saving column properties.");
+                        }).catch(() => {
+                            alert("Error saving column properties.");
+                        });
                     }
+                });
+            },
+
+            clearColumnValues() {
+                if (!this.editColumnId) return;
+                if (!confirm(`Are you sure you want to clear all values in column "${this.editColumnName}"? This action cannot be undone.`)) return;
+                this.isLoading = true;
+                fetch(`/tables/api/columns/${this.editColumnId}/clear-values/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    }
+                })
+                .then(res => {
+                    if (res.ok) {
+                        this.isEditColumnModalOpen = false;
+                        this.fetchRows();
+                        alert("Column data cleared successfully!");
+                    } else {
+                        res.json().then(data => alert(data.error || "Error clearing column values."));
+                        this.isLoading = false;
+                    }
+                })
+                .catch(err => {
+                    this.isLoading = false;
+                });
+            },
+
+            deleteRowsByColumn() {
+                if (!this.editColumnId) return;
+                if (!confirm(`Are you sure you want to delete all rows that have data in column "${this.editColumnName}"? This action cannot be undone.`)) return;
+                this.isLoading = true;
+                fetch(`/tables/api/columns/${this.editColumnId}/delete-rows/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    }
+                })
+                .then(res => {
+                    if (res.ok) {
+                        this.isEditColumnModalOpen = false;
+                        this.fetchRows();
+                        alert("Rows deleted successfully!");
+                    } else {
+                        res.json().then(data => alert(data.error || "Error deleting rows."));
+                        this.isLoading = false;
+                    }
+                })
+                .catch(err => {
+                    this.isLoading = false;
+                });
+            },
+
+            deleteColumn() {
+                if (!this.editColumnId) return;
+                if (!confirm(`Are you sure you want to delete the column "${this.editColumnName}"? This will delete the column and all of its values. This action cannot be undone.`)) return;
+                this.isLoading = true;
+                fetch(`/tables/api/columns/${this.editColumnId}/`, {
+                    method: 'DELETE',
+                    headers: {
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    }
+                })
+                .then(res => {
+                    if (res.ok) {
+                        location.reload();
+                    } else {
+                        alert("Error deleting column.");
+                        this.isLoading = false;
+                    }
+                })
+                .catch(err => {
+                    this.isLoading = false;
                 });
             },
 

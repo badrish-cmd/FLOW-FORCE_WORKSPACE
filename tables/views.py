@@ -745,12 +745,22 @@ class ColumnViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         if not has_table_access(request.user, instance.table, "ADMIN"):
             return Response({"error": "Only admins can update columns"}, status=status.HTTP_403_FORBIDDEN)
+        if instance.is_system_column:
+            if request.data.get("name") and request.data.get("name") != instance.name:
+                return Response({"error": "Cannot rename system columns"}, status=status.HTTP_400_BAD_REQUEST)
+            if request.data.get("data_type") and request.data.get("data_type") != instance.data_type:
+                return Response({"error": "Cannot change data type of system columns"}, status=status.HTTP_400_BAD_REQUEST)
         return super().update(request, *args, **kwargs)
 
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
         if not has_table_access(request.user, instance.table, "ADMIN"):
             return Response({"error": "Only admins can update columns"}, status=status.HTTP_403_FORBIDDEN)
+        if instance.is_system_column:
+            if request.data.get("name") and request.data.get("name") != instance.name:
+                return Response({"error": "Cannot rename system columns"}, status=status.HTTP_400_BAD_REQUEST)
+            if request.data.get("data_type") and request.data.get("data_type") != instance.data_type:
+                return Response({"error": "Cannot change data type of system columns"}, status=status.HTTP_400_BAD_REQUEST)
         return super().partial_update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
@@ -760,6 +770,39 @@ class ColumnViewSet(viewsets.ModelViewSet):
         if instance.is_system_column:
             return Response({"error": "Cannot delete system columns"}, status=status.HTTP_400_BAD_REQUEST)
         return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=["post"], url_path="clear-values")
+    @transaction.atomic
+    def clear_values(self, request, pk=None):
+        column = self.get_object()
+        if not has_table_access(request.user, column.table, "EDIT"):
+            return Response({"error": "No edit access to this table"}, status=status.HTTP_403_FORBIDDEN)
+        if column.is_system_column:
+            return Response({"error": "Cannot clear system columns"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        CellValue.objects.filter(column=column).update(value=None)
+        return Response({"message": f"Successfully cleared all values in column {column.name}"}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="delete-rows")
+    @transaction.atomic
+    def delete_rows(self, request, pk=None):
+        column = self.get_object()
+        if not has_table_access(request.user, column.table, "EDIT"):
+            return Response({"error": "No edit access to this table"}, status=status.HTTP_403_FORBIDDEN)
+        if column.is_system_column:
+            return Response({"error": "Cannot delete rows using system column filter"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        from django.db.models import Q
+        rows = Row.objects.filter(
+            table=column.table,
+            cells__column=column
+        ).exclude(
+            Q(cells__value__isnull=True) | Q(cells__value="")
+        )
+        count = rows.count()
+        rows.delete()
+        return Response({"message": f"Successfully deleted {count} rows containing values in column {column.name}"}, status=status.HTTP_200_OK)
+
 
     def perform_create(self, serializer):
         table = serializer.validated_data["table"]
@@ -800,12 +843,12 @@ class RowViewSet(viewsets.ModelViewSet):
             if self.action in ["retrieve", "update", "partial_update", "destroy"]:
                 from .permissions import get_accessible_tables
                 accessible_tables = get_accessible_tables(self.request.user)
-                return Row.objects.filter(table__in=accessible_tables, is_archived=False).select_related('created_by', 'task').prefetch_related('cells', 'cells__column')
+                return Row.objects.filter(table__in=accessible_tables, is_archived=False).select_related('created_by', 'task', 'task__assigned_by').prefetch_related('cells', 'cells__column', 'task__assigned_to')
             return Row.objects.none()
         table = get_object_or_404(Table, id=table_id)
         if not has_table_access(self.request.user, table, "VIEW"):
             return Row.objects.none()
-        return Row.objects.filter(table=table, is_archived=False).select_related('created_by', 'task').prefetch_related('cells', 'cells__column')
+        return Row.objects.filter(table=table, is_archived=False).select_related('created_by', 'task', 'task__assigned_by').prefetch_related('cells', 'cells__column', 'task__assigned_to')
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()

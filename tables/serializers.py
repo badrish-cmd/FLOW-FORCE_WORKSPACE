@@ -19,6 +19,17 @@ class ColumnSerializer(serializers.ModelSerializer):
         fields = ["id", "table", "name", "data_type", "is_mandatory", "is_system_column", "position", "options"]
         read_only_fields = ["is_system_column"]
 
+    def validate(self, attrs):
+        table = attrs.get('table') or (self.instance.table if self.instance else None)
+        name = attrs.get('name')
+        if name and table:
+            qs = Column.objects.filter(table=table, name__iexact=name.strip())
+            if self.instance:
+                qs = qs.exclude(id=self.instance.id)
+            if qs.exists():
+                raise serializers.ValidationError({"name": "A column with this name already exists in this table."})
+        return attrs
+
 class CellValueSerializer(serializers.ModelSerializer):
     column_name = serializers.CharField(source="column.name", read_only=True)
     column_type = serializers.CharField(source="column.data_type", read_only=True)
