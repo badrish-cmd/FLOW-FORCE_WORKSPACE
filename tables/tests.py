@@ -650,7 +650,7 @@ class TablesTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
 
         cell.refresh_from_db()
-        self.assertNone(cell.value)
+        self.assertIsNone(cell.value)
 
     def test_delete_rows_by_column_api(self):
         from tables.views import ColumnViewSet
