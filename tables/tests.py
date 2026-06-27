@@ -630,6 +630,7 @@ class TablesTestCase(TestCase):
         factory = APIRequestFactory()
 
         table = Table.objects.create(name="Clear Test Table", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.employee, access_level="VIEW")
         col = Column.objects.create(table=table, name="CustomCol", data_type="TEXT")
         row = Row.objects.create(table=table, created_by=self.admin)
         cell = CellValue.objects.create(row=row, column=col, value="Target Value")
@@ -657,6 +658,7 @@ class TablesTestCase(TestCase):
         factory = APIRequestFactory()
 
         table = Table.objects.create(name="Delete Rows Test Table", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.employee, access_level="VIEW")
         col = Column.objects.create(table=table, name="CustomCol", data_type="TEXT")
         row1 = Row.objects.create(table=table, created_by=self.admin)
         row2 = Row.objects.create(table=table, created_by=self.admin)
