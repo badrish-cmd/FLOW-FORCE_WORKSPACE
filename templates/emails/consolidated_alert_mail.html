@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1f2937; background-color: #f3f4f6; margin: 0; padding: 0; }
+        .wrapper { width: 100%; background-color: #f3f4f6; padding: 40px 0; }
+        .container { max-width: 650px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); }
+        .header { background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: #ffffff; padding: 32px 24px; text-align: center; }
+        .header h1 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.025em; }
+        .content { padding: 32px 24px; }
+        .greeting { font-size: 18px; font-weight: 600; color: #111827; margin-top: 0; margin-bottom: 16px; }
+        .intro { font-size: 15px; color: #4b5563; margin-bottom: 24px; }
+        .section-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #4b5563; margin-bottom: 12px; border-bottom: 2px solid #e5e7eb; padding-bottom: 6px; }
+        .tasks-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 14px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+        .tasks-table th { background-color: #f3f4f6; padding: 12px 14px; text-align: left; font-weight: 600; color: #374151; border-bottom: 2px solid #e5e7eb; }
+        .tasks-table td { padding: 12px 14px; border-bottom: 1px solid #e5e7eb; color: #4b5563; }
+        .tasks-table tr:last-child td { border-bottom: none; }
+        .task-name { font-weight: 600; color: #111827; }
+        .badge { display: inline-block; padding: 2px 8px; font-size: 11px; font-weight: 600; border-radius: 9999px; text-transform: uppercase; }
+        .badge-high { background-color: #fee2e2; color: #991b1b; }
+        .badge-medium { background-color: #fef3c7; color: #92400e; }
+        .badge-low { background-color: #ecfdf5; color: #065f46; }
+        .link-btn { display: inline-block; padding: 5px 10px; background-color: #3b82f6; color: #ffffff !important; text-decoration: none; border-radius: 4px; font-weight: 600; font-size: 12px; }
+        .link-btn:hover { background-color: #1d4ed8; }
+        .cta-container { text-align: center; margin: 32px 0; }
+        .button { background-color: #1d4ed8; color: #ffffff !important; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; display: inline-block; transition: background-color 0.2s ease; box-shadow: 0 4px 6px -1px rgba(29, 78, 216, 0.2); }
+        .button:hover { background-color: #1e40af; }
+        .outro { font-size: 15px; color: #4b5563; margin-bottom: 24px; }
+        .footer { text-align: center; padding: 24px; border-top: 1px solid #e5e7eb; background-color: #fafafa; }
+        .footer-logo { font-size: 16px; font-weight: 700; color: #374151; margin-bottom: 6px; }
+        .footer-text { font-size: 12px; color: #9ca3af; margin: 0; }
+    </style>
+</head>
+<body>
+    <div class="wrapper">
+        <div class="container">
+            <div class="header">
+                <h1>Daily Alert Summary</h1>
+            </div>
+            
+            <div class="content">
+                <p class="greeting">Dear {{ employee_name }},</p>
+                <p class="intro">You have <strong>{{ task_count }}</strong> tasks due today. Please log discussions and update them with new follow-up dates in the workspace:</p>
+                
+                <div class="section-title">━━━━ TASKS DUE TODAY ━━━━</div>
+                <table class="tasks-table">
+                    <thead>
+                        <tr>
+                            <th>Task / Customer</th>
+                            <th>Table</th>
+                            <th>Priority</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in task_items %}
+                        <tr>
+                            <td class="task-name">
+                                {{ item.name }}
+                                {% if item.last_discussion %}
+                                <div style="font-size: 12px; color: #6b7280; font-weight: normal; margin-top: 4px;">
+                                    <strong>Last Discussion:</strong> {{ item.last_discussion }}
+                                </div>
+                                {% endif %}
+                            </td>
+                            <td>{{ item.table_name }}</td>
+                            <td>
+                                <span class="badge {% if item.priority == 'HIGH' %}badge-high{% elif item.priority == 'MEDIUM' %}badge-medium{% else %}badge-low{% endif %}">
+                                    {{ item.priority }}
+                                </span>
+                            </td>
+                            <td>
+                                <a href="{{ item.link }}" class="link-btn">Update</a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                
+                <p class="outro">Please click "Update" next to each task to enter your discussed points and set the new follow-up date.</p>
+            </div>
+            
+            <div class="footer">
+                <div class="footer-logo">Flow-Force Workspace</div>
+                <p class="footer-text">This is an automated consolidated notification. Please do not reply directly to this email.</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

@@ -258,12 +258,111 @@ def send_initial_mail(task_id):
 @shared_task
 def send_daily_alert_mails():
     """
-    Find tasks due today and trigger alert emails.
+    Find active tasks due today, group by assignee, and send a single consolidated
+    email and in-app notification summary to each employee.
     """
     today = timezone.localdate()
-    tasks = Task.objects.filter(due_date=today).exclude(status__in=['COMPLETED', 'APPROVED'])
+    tasks = Task.objects.filter(
+        due_date=today
+    ).exclude(
+        status__in=['COMPLETED', 'APPROVED']
+    ).select_related('row', 'row__table', 'assigned_by').prefetch_related('assigned_to')
+
+    # Group tasks by assigned employee
+    employee_tasks = {}
     for task in tasks:
-        send_alert_mail.delay(task.id)
+        for employee in task.assigned_to.all():
+            # Skip alerts for admin users by default
+            if employee.role in ["ADMIN", "SUPER_ADMIN"]:
+                continue
+            if employee not in employee_tasks:
+                employee_tasks[employee] = []
+            employee_tasks[employee].append(task)
+
+    for employee, tasks_list in employee_tasks.items():
+        tasks_to_alert = []
+        for task in tasks_list:
+            # Check if alert_mail_sent is already True
+            if task.alert_mail_sent:
+                continue
+
+            # Double check with spreadsheet CellValue directly
+            alert_mail_col = Column.objects.filter(table=task.row.table, name__iexact="ALERT_MAIL").first()
+            if alert_mail_col:
+                alert_cell = CellValue.objects.filter(row=task.row, column=alert_mail_col).first()
+                if alert_cell and str(alert_cell.value).upper() == "YES":
+                    # Keep DB status in sync
+                    task.alert_mail_sent = True
+                    task.save(update_fields=['alert_mail_sent'])
+                    continue
+
+            tasks_to_alert.append(task)
+
+        if not tasks_to_alert:
+            continue
+
+        # 1. Create a single consolidated in-app notification
+        Notification.objects.create(
+            user=employee,
+            title=f"You have {len(tasks_to_alert)} tasks due today",
+            description=f"Log discussions and update follow-up dates for your {len(tasks_to_alert)} due task(s).",
+            type="DUE_TODAY"
+        )
+
+        # 2. Build consolidated email log details
+        task_items = []
+        for task in tasks_to_alert:
+            is_sales = task.row.table.job_type == "SALES"
+            task_link = f"http://localhost:8000/tables/{task.row.table_id}/?open_task_id={task.id}"
+            
+            # Fetch last follow-up discussion points for sales tasks
+            last_discussion = None
+            if is_sales:
+                last_follow_up = task.follow_ups.first()
+                last_discussion = last_follow_up.discussed_points if last_follow_up else "No previous follow-ups logged."
+
+            task_items.append({
+                'name': task.task_name,
+                'table_name': task.row.table.name,
+                'priority': task.priority,
+                'link': task_link,
+                'last_discussion': last_discussion
+            })
+
+            # Update the task status to alert_mail_sent = True in DB
+            task.alert_mail_sent = True
+            task.save(update_fields=['alert_mail_sent'])
+            
+            # Sync back to the row cell value
+            alert_mail_col = Column.objects.filter(table=task.row.table, name__iexact="ALERT_MAIL").first()
+            if alert_mail_col:
+                CellValue.objects.update_or_create(
+                    row=task.row,
+                    column=alert_mail_col,
+                    defaults={"value": "YES"}
+                )
+
+        subject = f"Daily Alert Summary: {len(tasks_to_alert)} Task(s) Due Today"
+        context = {
+            'employee_name': employee.full_name or employee.email,
+            'task_count': len(tasks_to_alert),
+            'task_items': task_items
+        }
+        html_message = render_to_string('emails/consolidated_alert_mail.html', context)
+
+        # Create consolidated EmailLog
+        email_log = EmailLog.objects.create(
+            recipient_email=employee.email,
+            subject=subject,
+            body=html_message,
+            task=tasks_to_alert[0], # Link to first task in log
+            email_type='ALERT_MAIL',
+            status='PENDING',
+            max_retries=2,
+        )
+
+        # Trigger Celery task asynchronously
+        send_email_log_task.delay(email_log.id)
 
 @shared_task
 def send_alert_mail(task_id):
