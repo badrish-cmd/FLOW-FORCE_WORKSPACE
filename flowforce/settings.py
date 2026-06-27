@@ -228,7 +228,7 @@ DEFAULT_FROM_EMAIL = f'Flow-Force Workspace <{EMAIL_HOST_USER}>'
 # CELERY SETTINGS
 from celery.schedules import crontab
 
-CELERY_TASK_ALWAYS_EAGER = True
+CELERY_TASK_ALWAYS_EAGER = os.getenv('CELERY_TASK_ALWAYS_EAGER', 'False') == 'True'
 CELERY_BROKER_URL = 'redis://localhost:6379/0'
 CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
 CELERY_ACCEPT_CONTENT = ['json']
@@ -248,3 +248,18 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': crontab(minute=0),  # Every hour
     },
 }
+
+# --------------------------------------------------
+# SQLITE WAL MODE CONCURRENCY OPTIMIZATION
+# --------------------------------------------------
+from django.db.backends.signals import connection_created
+from django.dispatch import receiver
+
+@receiver(connection_created)
+def configure_sqlite(sender, connection, **kwargs):
+    if connection.vendor == 'sqlite':
+        cursor = connection.cursor()
+        cursor.execute('PRAGMA journal_mode=WAL;')
+        cursor.execute('PRAGMA synchronous=NORMAL;')
+        cursor.execute('PRAGMA busy_timeout=10000;')  # 10s busy timeout
+

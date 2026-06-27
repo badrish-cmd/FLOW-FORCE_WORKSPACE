@@ -7,13 +7,17 @@ def global_context(request):
     if not request.user.is_authenticated:
         return {}
 
-    # Get from tasks app
-    tasks_unread = TasksNotification.objects.filter(user=request.user, is_read=False).select_related('task')
-    tasks_read = TasksNotification.objects.filter(user=request.user, is_read=True).select_related('task')
+    # Fast count queries for badges
+    tasks_unread_count = TasksNotification.objects.filter(user=request.user, is_read=False).count()
+    tracker_unread_count = TrackerNotification.objects.filter(user=request.user, read=False).count()
+    unread_count = tasks_unread_count + tracker_unread_count
 
-    # Get from task_tracker app
-    tracker_unread = TrackerNotification.objects.filter(user=request.user, read=False).select_related('row', 'row__tracker')
-    tracker_read = TrackerNotification.objects.filter(user=request.user, read=True).select_related('row', 'row__tracker')
+    # Limit lists to 15 items in database query to prevent loading entire history into memory
+    tasks_unread = TasksNotification.objects.filter(user=request.user, is_read=False).select_related('task').order_by('-created_at')[:15]
+    tasks_read = TasksNotification.objects.filter(user=request.user, is_read=True).select_related('task').order_by('-created_at')[:15]
+
+    tracker_unread = TrackerNotification.objects.filter(user=request.user, read=False).select_related('row', 'row__tracker').order_by('-sent_at')[:15]
+    tracker_read = TrackerNotification.objects.filter(user=request.user, read=True).select_related('row', 'row__tracker').order_by('-sent_at')[:15]
 
     unread_list = []
     for n in tasks_unread:
@@ -85,7 +89,6 @@ def global_context(request):
     unread_list.sort(key=lambda x: x["created_at"], reverse=True)
     read_list.sort(key=lambda x: x["created_at"], reverse=True)
 
-    unread_count = len(unread_list)
     sidebar_tables = get_accessible_tables(request.user).select_related('department')
 
     return {
@@ -94,3 +97,4 @@ def global_context(request):
         "read_notifications": read_list[:15],
         "sidebar_trackers": sidebar_tables,
     }
+

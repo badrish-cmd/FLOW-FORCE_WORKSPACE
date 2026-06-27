@@ -578,6 +578,12 @@ def save_task_filter(user, tracker, name, query_params):
 
 
 def log_and_send_email(subject, message, recipient_list, from_email=None):
+    from .tasks import send_async_email_task
+    send_async_email_task.delay(subject, message, recipient_list, from_email)
+    return True
+
+
+def log_and_send_email_sync(subject, message, recipient_list, from_email=None):
     from .models import EmailLog
     from django.conf import settings
     
@@ -608,3 +614,4 @@ def log_and_send_email(subject, message, recipient_list, from_email=None):
                 error_message=str(e)
             )
     return success
+
