@@ -228,7 +228,8 @@ DEFAULT_FROM_EMAIL = f'Flow-Force Workspace <{EMAIL_HOST_USER}>'
 # CELERY SETTINGS
 from celery.schedules import crontab
 
-CELERY_TASK_ALWAYS_EAGER = os.getenv('CELERY_TASK_ALWAYS_EAGER', 'False') == 'True'
+import sys
+CELERY_TASK_ALWAYS_EAGER = os.getenv('CELERY_TASK_ALWAYS_EAGER', 'False') == 'True' or 'test' in sys.argv
 CELERY_BROKER_URL = 'redis://localhost:6379/0'
 CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
 CELERY_ACCEPT_CONTENT = ['json']
