@@ -749,7 +749,8 @@ class ColumnViewSet(viewsets.ModelViewSet):
             if request.data.get("name") and request.data.get("name") != instance.name:
                 return Response({"error": "Cannot rename system columns"}, status=status.HTTP_400_BAD_REQUEST)
             if request.data.get("data_type") and request.data.get("data_type") != instance.data_type:
-                return Response({"error": "Cannot change data type of system columns"}, status=status.HTTP_400_BAD_REQUEST)
+                if instance.name not in ("TASK_NAME", "CUSTOMER_NAME"):
+                    return Response({"error": "Cannot change data type of system columns"}, status=status.HTTP_400_BAD_REQUEST)
         return super().update(request, *args, **kwargs)
 
     def partial_update(self, request, *args, **kwargs):
@@ -760,7 +761,8 @@ class ColumnViewSet(viewsets.ModelViewSet):
             if request.data.get("name") and request.data.get("name") != instance.name:
                 return Response({"error": "Cannot rename system columns"}, status=status.HTTP_400_BAD_REQUEST)
             if request.data.get("data_type") and request.data.get("data_type") != instance.data_type:
-                return Response({"error": "Cannot change data type of system columns"}, status=status.HTTP_400_BAD_REQUEST)
+                if instance.name not in ("TASK_NAME", "CUSTOMER_NAME"):
+                    return Response({"error": "Cannot change data type of system columns"}, status=status.HTTP_400_BAD_REQUEST)
         return super().partial_update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
