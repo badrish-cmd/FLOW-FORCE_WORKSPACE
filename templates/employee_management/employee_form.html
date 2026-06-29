@@ -81,6 +81,19 @@
                                 {% if form.email.help_text %}
                                     <small class="form-text text-muted">{{ form.email.help_text|safe }}</small>
                                 {% endif %}
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">{{ form.department.label }}</label>
+                                {{ form.department }}
+                                {% if form.department.errors %}
+                                    <div class="alert alert-danger alert-sm mt-1 p-2 small">
+                                        {% for error in form.department.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                                {% if form.department.help_text %}
+                                    <small class="form-text text-muted">{{ form.department.help_text|safe }}</small>
+                                {% endif %}
                             </div>
 
                         </div>

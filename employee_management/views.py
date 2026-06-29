@@ -38,7 +38,7 @@ from .services import EmployeeService, EmployeeExportService
 
 def get_visible_employees(user):
     """Get employees visible to the current user based on their role."""
-    employees = EmployeeUser.objects.all()
+    employees = EmployeeUser.objects.all().select_related("department")
 
     if user.role == "DEPARTMENT_ADMIN":
         return employees.filter(department=user.department)
@@ -262,7 +262,7 @@ def employee_detail(request, employee_id):
     login_logs = EmployeeLoginHistory.objects.filter(employee=employee)
     
     # 3. Task Action Logs
-    task_logs = TaskActivityLog.objects.filter(user=employee)
+    task_logs = TaskActivityLog.objects.filter(user=employee).select_related("task", "task__row", "task__row__table")
     
     # Date filter
     selected_date_str = request.GET.get("date", "").strip()
@@ -629,7 +629,7 @@ def approval_center(request):
     # Get pending approvals
     pending_approvals = EmployeeApprovalQueue.objects.filter(
         is_approved=False
-    ).order_by("-submitted_at")
+    ).select_related("employee").order_by("-submitted_at")
 
     # Filter by department for DEPARTMENT_ADMIN
     if request.user.role == "DEPARTMENT_ADMIN":
@@ -905,7 +905,7 @@ def global_activity_logs(request):
         messages.error(request, "You do not have permission to view global activity logs.")
         return redirect("employee_list")
 
-    activity_logs = EmployeeActivityLog.objects.all().order_by("-created_at")
+    activity_logs = EmployeeActivityLog.objects.all().select_related("employee", "performed_by").order_by("-created_at")
 
     # Filters
     employee_id = request.GET.get("employee", "").strip()
@@ -924,24 +924,35 @@ def global_activity_logs(request):
     except (PageNotAnInteger, EmptyPage):
         logs_page = paginator.page(1)
 
-    # Get list of employees for the dropdown filter
-    employees = EmployeeUser.objects.all().order_by("full_name")
-
-    # Calculate employee-wise latest activity summary
+    # Get list of employees for the dropdown filter and optimize query
     from tasks.models import ActivityLog as TaskActivityLog
     from employee_management.models import EmployeeLoginHistory
+    from django.db.models import OuterRef, Subquery
 
-    employees_activity = []
-    for emp in employees:
-        last_login = EmployeeLoginHistory.objects.filter(employee=emp).order_by("-login_at").first()
-        last_task = TaskActivityLog.objects.filter(user=emp).order_by("-timestamp").first()
-        
-        employees_activity.append({
+    # Subquery to get last login time
+    last_login_sub = EmployeeLoginHistory.objects.filter(employee=OuterRef('pk')).order_by('-login_at').values('login_at')[:1]
+    
+    # Subqueries to get last task time and action
+    last_task_time_sub = TaskActivityLog.objects.filter(user=OuterRef('pk')).order_by('-timestamp').values('timestamp')[:1]
+    last_task_action_sub = TaskActivityLog.objects.filter(user=OuterRef('pk')).order_by('-timestamp').values('action')[:1]
+
+    # Annotate employees with these values in ONE query!
+    employees = EmployeeUser.objects.annotate(
+        last_login_time=Subquery(last_login_sub),
+        last_task_time=Subquery(last_task_time_sub),
+        last_task_action=Subquery(last_task_action_sub)
+    ).order_by("full_name")
+
+    # Populate employees_activity summary list
+    employees_activity = [
+        {
             "employee": emp,
-            "last_login": last_login.login_at if last_login else None,
-            "last_task_time": last_task.timestamp if last_task else None,
-            "last_task_action": last_task.action if last_task else None,
-        })
+            "last_login": emp.last_login_time,
+            "last_task_time": emp.last_task_time,
+            "last_task_action": emp.last_task_action,
+        }
+        for emp in employees
+    ]
 
     context = {
         "activity_logs": logs_page,

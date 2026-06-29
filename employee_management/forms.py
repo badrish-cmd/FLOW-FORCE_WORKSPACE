@@ -21,6 +21,7 @@ class EmployeeForm(forms.ModelForm):
         fields = (
             "full_name",
             "email",
+            "department",
             "role",
             "status",
             "is_active",
@@ -28,6 +29,7 @@ class EmployeeForm(forms.ModelForm):
         widgets = {
             "full_name": forms.TextInput(attrs={"class": "form-control"}),
             "email": forms.EmailInput(attrs={"class": "form-control"}),
+            "department": forms.Select(attrs={"class": "form-select"}),
             "role": forms.Select(attrs={"class": "form-select"}),
             "status": forms.Select(attrs={"class": "form-select"}),
             "is_active": forms.CheckboxInput(attrs={"class": "form-check-input"}),
