@@ -518,12 +518,11 @@ def register_view(request):
             "confirm_password"
         )
 
-        if not email.endswith(
-            "@flow-force.com"
-        ):
+        email_lower = email.lower().strip() if email else ""
+        if not (email_lower.endswith("@flow-force.com") or email_lower.endswith("@flowforceengineering.com")):
             messages.error(
                 request,
-                "Only @flow-force.com emails are allowed."
+                "Only @flow-force.com or @flowforceengineering.com emails are allowed."
             )
 
             return redirect(

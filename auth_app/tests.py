@@ -42,3 +42,36 @@ class LoginSessionTests(TestCase):
         self.assertEqual(response.status_code, 302)
         # Session should be empty or deleted
         self.assertNotIn('_auth_user_id', self.client.session)
+
+class RegistrationTests(TestCase):
+    def test_registration_allowed_domains(self):
+        # Test registering flow-force.com domain
+        response1 = self.client.post(reverse("register"), {
+            "email": "new.user@flow-force.com",
+            "password": "testpassword123",
+            "confirm_password": "testpassword123",
+            "full_name": "New User 1"
+        })
+        self.assertEqual(response1.status_code, 302)
+        self.assertTrue(EmployeeUser.objects.filter(email="new.user@flow-force.com").exists())
+
+        # Test registering flowforceengineering.com domain
+        response2 = self.client.post(reverse("register"), {
+            "email": "new.eng@flowforceengineering.com",
+            "password": "testpassword123",
+            "confirm_password": "testpassword123",
+            "full_name": "New User 2"
+        })
+        self.assertEqual(response2.status_code, 302)
+        self.assertTrue(EmployeeUser.objects.filter(email="new.eng@flowforceengineering.com").exists())
+
+        # Test registering unallowed domain (e.g. gmail.com)
+        response3 = self.client.post(reverse("register"), {
+            "email": "hacker@gmail.com",
+            "password": "testpassword123",
+            "confirm_password": "testpassword123",
+            "full_name": "Hacker"
+        })
+        # It should redirect back to register with error
+        self.assertEqual(response3.status_code, 302)
+        self.assertFalse(EmployeeUser.objects.filter(email="hacker@gmail.com").exists())

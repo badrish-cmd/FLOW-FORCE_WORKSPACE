@@ -53,15 +53,15 @@ document.addEventListener("DOMContentLoaded", () => {
             "submit",
             function(e){
 
+                const emailVal = email.value.toLowerCase().trim();
                 if(
-                    !email.value.endsWith(
-                        "@flow-force.com"
-                    )
+                    !emailVal.endsWith("@flow-force.com") &&
+                    !emailVal.endsWith("@flowforceengineering.com")
                 ){
                     e.preventDefault();
 
                     alert(
-                        "Only @flow-force.com emails are allowed."
+                        "Only @flow-force.com or @flowforceengineering.com emails are allowed."
                     );
 
                     return;
