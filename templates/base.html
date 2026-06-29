@@ -114,12 +114,6 @@
                     <div class="nav-section">
                         <div class="nav-label">ADMIN</div>
                         <ul class="nav-menu">
-                            <li>
-                                <a href="{% url 'approval_center' %}" class="nav-link {% if request.resolver_match.view_name == 'approval_center' %}active{% endif %}">
-                                    <i class="fas fa-check-circle"></i>
-                                    <span>Approvals</span>
-                                </a>
-                            </li>
                             {% if user.role in 'SUPER_ADMIN,ADMIN' %}
                             <li>
                                 <a href="{% url 'global_activity_logs' %}" class="nav-link {% if request.resolver_match.view_name == 'global_activity_logs' %}active{% endif %}">

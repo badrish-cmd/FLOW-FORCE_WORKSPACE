@@ -120,53 +120,54 @@ class EmployeeService:
         """
         
         changes = {}
+        original = EmployeeUser.objects.get(pk=employee.pk)
         
-        if full_name is not None and full_name != employee.full_name:
+        if full_name is not None and full_name != original.full_name:
             changes["full_name"] = {
-                "old": employee.full_name,
+                "old": original.full_name,
                 "new": full_name
             }
             employee.full_name = full_name
         
-        if email is not None and email != employee.email:
+        if email is not None and email.lower().strip() != original.email:
             email = email.lower().strip()
             if EmployeeUser.objects.filter(email=email).exclude(pk=employee.pk).exists():
                 raise ValueError("Email already in use")
             changes["email"] = {
-                "old": employee.email,
+                "old": original.email,
                 "new": email
             }
             employee.email = email
         
-        if department is not None and department != employee.department:
+        if department is not None and department != original.department:
             changes["department"] = {
-                "old": employee.department,
+                "old": original.department,
                 "new": department
             }
             employee.department = department
         
-        if role is not None and role != employee.role:
+        if role is not None and role != original.role:
             changes["role"] = {
-                "old": employee.role,
+                "old": original.role,
                 "new": role
             }
             changes["is_staff"] = {
-                "old": employee.is_staff,
+                "old": original.is_staff,
                 "new": role in ["SUPER_ADMIN", "ADMIN"]
             }
             employee.role = role
             employee.is_staff = role in ["SUPER_ADMIN", "ADMIN"]
         
-        if status is not None and status != employee.status:
+        if status is not None and status != original.status:
             changes["status"] = {
-                "old": employee.status,
+                "old": original.status,
                 "new": status
             }
             employee.status = status
         
-        if is_active is not None and is_active != employee.is_active:
+        if is_active is not None and is_active != original.is_active:
             changes["is_active"] = {
-                "old": employee.is_active,
+                "old": original.is_active,
                 "new": is_active
             }
             employee.is_active = is_active
