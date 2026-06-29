@@ -312,6 +312,10 @@ class TasksTestCase(TestCase):
         self.assertEqual(follow_up.discussed_points, "Called lead, interested.")
         self.assertEqual(follow_up.next_follow_up_date.isoformat(), next_date)
         
+        # Verify comment is created for sales follow-up under old date
+        from tasks.models import TaskComment
+        self.assertTrue(TaskComment.objects.filter(task=task, content__startswith="enter new follow up under the old follow up").exists())
+        
         # Verify Task due_date is updated
         task.refresh_from_db()
         self.assertEqual(task.due_date.isoformat(), next_date)

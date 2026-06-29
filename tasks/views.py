@@ -279,6 +279,14 @@ class TaskViewSet(viewsets.ModelViewSet):
             author=request.user,
             content=f"[Logged Follow-up] Discussion: {discussed_points}" + (f"\nNext Follow-up scheduled for: {next_follow_up_date.isoformat()}" if next_follow_up_date else "\nNo further follow-up required (closed/cancelled).")
         )
+
+        # Create additional comment for sales follow-up
+        old_date_str = current_follow_up_date.strftime("%Y-%m-%d") if current_follow_up_date else "N/A"
+        TaskComment.objects.create(
+            task=task,
+            author=request.user,
+            content=f"enter new follow up under the old follow up date: {old_date_str}"
+        )
         
         # Create Activity Log
         ActivityLog.objects.create(
