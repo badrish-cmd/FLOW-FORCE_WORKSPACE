@@ -845,154 +845,104 @@
 
     <!-- TASK DETAIL & COMMENTS DRAWER/MODAL -->
     <div x-show="isTaskModalOpen" class="fixed inset-0 z-50 flex items-center justify-end bg-slate-900 bg-opacity-40 backdrop-blur-sm" style="display: none;" x-transition>
-        <div class="bg-white w-full max-w-lg h-full p-6 shadow-2xl flex flex-col justify-between border-l border-gray-200 animate-slide-in" @click.away="isTaskModalOpen = false" x-transition:enter="transition ease-out duration-300 transform" x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0" x-transition:leave="transition ease-in duration-200 transform" x-transition:leave-start="translate-x-0" x-transition:leave-end="translate-x-full">
+        <div class="bg-white w-full max-w-md h-full p-5 shadow-2xl flex flex-col justify-between border-l border-gray-200 animate-slide-in" @click.away="isTaskModalOpen = false" x-transition:enter="transition ease-out duration-300 transform" x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0" x-transition:leave="transition ease-in duration-200 transform" x-transition:leave-start="translate-x-0" x-transition:leave-end="translate-x-full">
             <div class="flex flex-col h-full overflow-hidden">
-                <!-- Header -->
-                <div class="flex items-center justify-between bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white px-6 py-4 -mx-6 -mt-6 mb-4 border-b border-indigo-900/40">
-                    <div class="flex items-center gap-3">
-                        <div class="bg-indigo-500/20 text-indigo-400 p-2.5 rounded-xl border border-indigo-500/30 shadow-inner">
-                            <i class="fas fa-tasks text-lg"></i>
-                        </div>
+                
+                <!-- Drawer Header -->
+                <div class="flex items-center justify-between border-b border-gray-200 pb-3 mb-3">
+                    <div class="flex items-center gap-2">
+                        <span class="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg text-sm"><i class="fas fa-tasks"></i></span>
                         <div>
-                            <h3 class="text-sm font-bold tracking-wide">Task Workspace</h3>
-                            <p class="text-[9px] text-slate-400 font-semibold uppercase mt-0.5 tracking-widest flex items-center gap-1.5">
-                                <span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                                Detail Panel
+                            <h3 class="text-sm font-bold text-slate-800" x-text="activeTaskName">Task Workspace</h3>
+                            <p class="text-[9px] text-slate-400 font-semibold uppercase tracking-wider flex items-center gap-1">
+                                <span>Due:</span>
+                                <span class="font-bold" x-text="activeTaskDueDate"></span>
                             </p>
                         </div>
                     </div>
-                    <button @click="isTaskModalOpen = false" class="text-slate-400 hover:text-white transition-all duration-150 p-2 hover:bg-slate-800/80 rounded-xl border border-slate-700/30 hover:border-slate-600/50">
-                        <i class="fas fa-times text-sm"></i>
+                    <button @click="isTaskModalOpen = false" class="text-slate-400 hover:text-slate-600 p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
+                        <i class="fas fa-times text-xs"></i>
                     </button>
                 </div>
 
                 <!-- Tabs Navigation -->
-                <div class="flex border-b border-gray-200 mb-4 bg-gray-50 p-1 rounded-xl">
+                <div class="flex border-b border-gray-200 mb-3 bg-gray-50 p-1 rounded-lg">
                     <button @click="activeDrawerTab = 'properties'" 
                             :class="activeDrawerTab === 'properties' ? 'bg-white text-slate-800 shadow-sm border border-gray-200/50' : 'text-gray-500 hover:text-slate-800'"
-                            class="flex-1 py-2 text-xs font-bold rounded-lg transition-all duration-150 flex items-center justify-center gap-1.5 focus:outline-none">
-                        <i class="fas fa-info-circle text-emerald-600"></i> Follow-ups & Info
+                            class="flex-1 py-1.5 text-xs font-bold rounded-md transition-all duration-150 flex items-center justify-center gap-1 focus:outline-none">
+                        <i class="fas fa-history text-emerald-600"></i> Follow-ups
                     </button>
                     <button @click="activeDrawerTab = 'chat'" 
                             :class="activeDrawerTab === 'chat' ? 'bg-white text-slate-800 shadow-sm border border-gray-200/50' : 'text-gray-500 hover:text-slate-800'"
-                            class="flex-1 py-2 text-xs font-bold rounded-lg transition-all duration-150 flex items-center justify-center gap-1.5 focus:outline-none">
-                        <i class="fas fa-comments text-indigo-600"></i> Chat & Notes (<span x-text="comments.length"></span>)
+                            class="flex-1 py-1.5 text-xs font-bold rounded-md transition-all duration-150 flex items-center justify-center gap-1 focus:outline-none">
+                        <i class="fas fa-comments text-indigo-600"></i> Notes & Chat (<span x-text="comments.length"></span>)
                     </button>
                 </div>
 
-                <!-- Scrollable Body content -->
-                <div class="flex-grow overflow-y-auto pr-1 scrollbar-thin space-y-4">
+                <!-- TAB 1: PROPERTIES & TIMELINE -->
+                <div x-show="activeDrawerTab === 'properties'" class="flex flex-col h-full overflow-hidden">
                     
-                    <!-- TAB 1: PROPERTIES & TIMELINE -->
-                    <div x-show="activeDrawerTab === 'properties'" class="space-y-4">
+                    <!-- Scrollable Content: Properties & Timeline -->
+                    <div class="flex-grow overflow-y-auto pr-1 scrollbar-thin space-y-4">
                         
-                        <!-- Task Properties Grid -->
-                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                            <div class="grid grid-cols-2 gap-4 text-xs">
-                                <div>
-                                    <span class="text-slate-500 font-bold uppercase tracking-wider text-[10px]">{% if table.job_type == 'SALES' %}Customer Name{% else %}Task Name{% endif %}</span>
-                                    <div class="font-extrabold text-slate-800 mt-1 text-sm" x-text="activeTaskName"></div>
+                        <!-- Task Metadata Bar -->
+                        <div class="grid grid-cols-3 gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-100 text-[11px] font-medium text-slate-600">
+                            <div>
+                                <span class="text-[9px] uppercase font-bold text-slate-400">Status</span>
+                                <select x-model="activeTaskStatus" @change="updateTaskStatus" class="w-full bg-white border border-gray-300 rounded p-1 text-[10px] font-bold text-slate-700 focus:outline-none mt-0.5">
+                                    <option value="PENDING">Pending</option>
+                                    <option value="IN_PROGRESS">In Progress</option>
+                                    <option value="READY_FOR_REVIEW">Review</option>
+                                    <option value="APPROVED">Approved</option>
+                                    <option value="COMPLETED">Completed</option>
+                                </select>
+                            </div>
+                            <div>
+                                <span class="text-[9px] uppercase font-bold text-slate-400">Priority</span>
+                                <div class="mt-1">
+                                    <span class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase"
+                                          :class="{
+                                             'bg-red-100 text-red-700': activeTaskPriority === 'URGENT',
+                                             'bg-orange-100 text-orange-700': activeTaskPriority === 'HIGH',
+                                             'bg-blue-100 text-blue-700': activeTaskPriority === 'MEDIUM',
+                                             'bg-green-100 text-green-700': activeTaskPriority === 'LOW'
+                                          }"
+                                          x-text="activeTaskPriority"></span>
                                 </div>
-                                <div>
-                                    <span class="text-slate-500 font-bold uppercase tracking-wider text-[10px]">{% if table.job_type == 'SALES' %}Follow Up Date{% else %}Due Date{% endif %}</span>
-                                    <div class="font-extrabold mt-1 text-sm flex items-center gap-1" :class="isOverdue(activeRow) ? 'text-red-600' : 'text-slate-800'">
-                                        <i class="far fa-calendar-alt"></i> <span x-text="activeTaskDueDate"></span>
-                                    </div>
-                                </div>
-                                <div>
-                                    <span class="text-slate-500 font-bold uppercase tracking-wider text-[10px]">Status</span>
-                                    <select x-model="activeTaskStatus" @change="updateTaskStatus" class="w-full mt-1 bg-white border border-gray-300 rounded-lg p-1.5 text-xs font-semibold text-slate-700 focus:ring-1 focus:ring-primary">
-                                        <option value="PENDING">Pending</option>
-                                        <option value="IN_PROGRESS">In Progress</option>
-                                        <option value="READY_FOR_REVIEW">Ready for Review</option>
-                                        <option value="APPROVED">Approved</option>
-                                        <option value="COMPLETED">Completed</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <span class="text-slate-500 font-bold uppercase tracking-wider text-[10px]">Priority</span>
-                                    <div class="mt-1.5">
-                                        <span class="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase"
-                                              :class="{
-                                                 'bg-red-100 text-red-700': activeTaskPriority === 'URGENT',
-                                                 'bg-orange-100 text-orange-700': activeTaskPriority === 'HIGH',
-                                                 'bg-blue-100 text-blue-700': activeTaskPriority === 'MEDIUM',
-                                                 'bg-green-100 text-green-700': activeTaskPriority === 'LOW'
-                                              }"
-                                              x-text="activeTaskPriority"></span>
-                                    </div>
+                            </div>
+                            <div>
+                                <span class="text-[9px] uppercase font-bold text-slate-400">Overdue Status</span>
+                                <div class="mt-1 font-bold text-[10px]" :class="isOverdue(activeRow) ? 'text-red-600' : 'text-slate-500'">
+                                    <span x-text="isOverdue(activeRow) ? '🔴 Overdue' : '🟢 On Track'"></span>
                                 </div>
                             </div>
                         </div>
 
+                        <!-- Follow-up Timeline -->
                         {% if table.job_type == 'SALES' or table.job_type == 'LIST_PID' %}
-                        <!-- Record Today's Follow-up Form -->
-                        <div class="bg-gradient-to-br from-emerald-50 to-teal-50/30 p-4 rounded-xl border border-emerald-100 space-y-3" x-show="activeRow.task_details && activeRow.task_details.status !== 'COMPLETED' && activeRow.task_details.status !== 'APPROVED'">
-                            <h4 class="text-xs font-bold uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
-                                <i class="fas fa-edit"></i> Record Today's Follow-up
-                            </h4>
+                        <div class="pt-1">
+                            <h4 class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-3">Logs & History</h4>
                             
-                            <div class="space-y-3">
-                                <div>
-                                    <label class="block text-[9px] font-extrabold text-emerald-700 uppercase mb-1">Discussed Points *</label>
-                                    <textarea x-model="salesDiscussedPoints" placeholder="What did you discuss today?" class="w-full bg-white border border-emerald-200/80 rounded-lg p-2 text-xs focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500" rows="2.5"></textarea>
-                                </div>
-                                
-                                <div class="grid grid-cols-2 gap-3">
-                                    <div>
-                                        <label class="block text-[9px] font-extrabold text-emerald-700 uppercase mb-1">Next Action / Status *</label>
-                                        <select x-model="salesStatus" class="w-full bg-white border border-emerald-200/80 rounded-lg p-1.5 text-xs font-semibold text-slate-700 focus:ring-1 focus:ring-emerald-500">
-                                            <option value="IN_PROGRESS">Continuing (In Progress)</option>
-                                            <option value="COMPLETED">Closed (Completed)</option>
-                                            <option value="PENDING">Pending</option>
-                                            <option value="READY_FOR_REVIEW">Ready for Review</option>
-                                        </select>
-                                    </div>
-                                    <div x-show="salesStatus !== 'COMPLETED'">
-                                        <label class="block text-[9px] font-extrabold text-emerald-700 uppercase mb-1">Next Follow-up Date *</label>
-                                        <input type="date" x-model="salesNextFollowUpDate" class="w-full bg-white border border-emerald-200/80 rounded-lg p-1.5 text-xs font-semibold text-slate-700 focus:ring-1 focus:ring-emerald-500">
-                                    </div>
-                                </div>
-
-                                <!-- Validation Error message -->
-                                <div x-show="salesError" class="text-[11px] text-red-600 font-bold" x-text="salesError"></div>
-
-                                <button @click="submitSalesFollowUp" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs py-2 transition duration-150 flex items-center justify-center gap-1.5 shadow-sm">
-                                    <i class="fas fa-save"></i> Save Follow-up
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- Sales Follow-ups Timeline -->
-                        <div class="pt-2">
-                            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 mb-4 flex items-center gap-1.5">
-                                <i class="fas fa-history text-slate-600"></i> Follow-up History
-                            </h4>
-                            
-                            <!-- Vertical Timeline -->
-                            <div class="relative pl-6 border-l-2 border-slate-200 space-y-5 ml-3">
+                            <div class="relative pl-4 border-l border-slate-200 space-y-3.5 ml-2.5">
                                 <template x-for="fu in (activeRow.task_details ? activeRow.task_details.follow_ups : [])" :key="fu.id">
                                     <div class="relative">
-                                        <!-- Node bullet -->
-                                        <span class="absolute -left-[31px] top-0 bg-emerald-600 border-4 border-white h-4.5 w-4.5 rounded-full shadow"></span>
-                                        
-                                        <!-- Timeline Card -->
-                                        <div class="bg-slate-50 hover:bg-slate-100/70 p-3.5 rounded-xl border border-slate-200/60 shadow-sm transition duration-150 text-xs animate-fade-in">
-                                            <div class="flex justify-between items-center mb-1.5">
-                                                <span class="font-extrabold text-slate-700 flex items-center gap-1" x-text="fu.entered_by_detail ? fu.entered_by_detail.full_name : 'System'"></span>
-                                                <span class="text-[10px] text-slate-400 font-bold" x-text="fu.follow_up_date"></span>
+                                        <span class="absolute -left-[20.5px] top-1 bg-emerald-500 border-2 border-white h-2.5 w-2.5 rounded-full"></span>
+                                        <div class="text-[11px] animate-fade-in">
+                                            <div class="flex justify-between items-center text-slate-500 mb-0.5 font-medium">
+                                                <span class="font-bold text-slate-700" x-text="fu.entered_by_detail ? fu.entered_by_detail.full_name : 'System'"></span>
+                                                <span class="text-[9px]" x-text="fu.follow_up_date"></span>
                                             </div>
-                                            <p class="text-slate-600 leading-relaxed font-medium" x-text="fu.discussed_points"></p>
+                                            <p class="text-slate-600 leading-normal" x-text="fu.discussed_points"></p>
                                             <template x-if="fu.next_follow_up_date">
-                                                <div class="mt-2 text-[9px] text-emerald-700 font-extrabold bg-emerald-100/50 px-2 py-0.5 rounded-md inline-block">
+                                                <span class="text-[9px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded inline-block mt-1">
                                                     Next Follow-up: <span x-text="fu.next_follow_up_date"></span>
-                                                </div>
+                                                </span>
                                             </template>
                                         </div>
                                     </div>
                                 </template>
                                 <template x-if="!activeRow.task_details || !activeRow.task_details.follow_ups || activeRow.task_details.follow_ups.length === 0">
-                                    <div class="text-center py-4 text-gray-400 italic text-xs -ml-6">
+                                    <div class="text-center py-4 text-slate-400 italic text-[11px] -ml-4">
                                         No follow-up history logged yet.
                                     </div>
                                 </template>
@@ -1000,102 +950,136 @@
                         </div>
                         {% endif %}
 
-                        <!-- Report Issue Form -->
-                        <div class="bg-rose-50 p-4 rounded-xl border border-rose-100 space-y-3">
-                            <h4 class="text-xs font-bold uppercase tracking-wider text-rose-800 flex items-center gap-1.5">
-                                <i class="fas fa-exclamation-circle text-rose-600"></i> Flag / Report Issue to Employee
-                            </h4>
-                            <div>
-                                <label class="block text-[9px] font-bold text-rose-700 uppercase mb-1">Select Recipient</label>
-                                <select x-model="flagRecipientId" class="w-full bg-white border border-rose-200 rounded-lg p-1.5 text-xs font-semibold text-slate-700">
-                                    <option value="">-- Select Recipient --</option>
-                                    <template x-for="emp in recipients" :key="emp.id">
-                                        <option :value="emp.id" x-text="`${emp.full_name || emp.email} (${emp.role})`"></option>
-                                    </template>
-                                </select>
+                        <!-- Report Issue (Collapsible) -->
+                        <details class="group bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs">
+                            <summary class="font-bold text-slate-700 cursor-pointer focus:outline-none flex items-center justify-between select-none">
+                                <span class="flex items-center gap-1.5"><i class="fas fa-exclamation-triangle text-rose-500 text-[10px]"></i> Flag / Report Issue</span>
+                                <i class="fas fa-chevron-down text-[8px] transition-transform group-open:rotate-180"></i>
+                            </summary>
+                            <div class="mt-2 space-y-2 border-t border-slate-200/60 pt-2">
+                                <div>
+                                    <label class="block text-[9px] font-bold text-slate-500 uppercase mb-0.5">Select Recipient</label>
+                                    <select x-model="flagRecipientId" class="w-full bg-white border border-gray-300 rounded p-1 text-[10px]">
+                                        <option value="">-- Select Recipient --</option>
+                                        <template x-for="emp in recipients" :key="emp.id">
+                                            <option :value="emp.id" x-text="`${emp.full_name || emp.email} (${emp.role})`"></option>
+                                        </template>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-[9px] font-bold text-slate-500 uppercase mb-0.5">Issue Description</label>
+                                    <textarea x-model="flagDescription" placeholder="Enter description..." class="w-full bg-white border border-gray-300 rounded p-1 text-[10px]" rows="2"></textarea>
+                                </div>
+                                <button @click="submitFlagIssue" class="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold rounded text-[10px] py-1 transition-colors">
+                                    Flag Issue
+                                </button>
                             </div>
-                            <div>
-                                <label class="block text-[9px] font-bold text-rose-700 uppercase mb-1">Issue Description</label>
-                                <textarea x-model="flagDescription" placeholder="Enter description of the issue..." class="w-full bg-white border border-rose-200 rounded-lg p-2 text-xs focus:ring-rose-500 focus:border-rose-500" rows="2"></textarea>
-                            </div>
-                            <button @click="submitFlagIssue" class="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg text-xs py-2 transition duration-150 shadow-sm flex items-center justify-center gap-1.5">
-                                <i class="fas fa-flag"></i> Flag Issue
-                            </button>
-                        </div>
+                        </details>
                     </div>
 
-                    <!-- TAB 2: INTERNAL NOTES & DISCUSSION (CHAT) -->
-                    <div x-show="activeDrawerTab === 'chat'" class="flex flex-col h-full overflow-hidden">
-                        <div class="space-y-4 flex flex-col h-full">
-                            
-                            <!-- Chat Box -->
-                            <div class="space-y-3.5 overflow-y-auto max-h-[420px] pr-2 mb-4 scrollbar-thin flex flex-col pt-1">
-                                <template x-for="comment in comments" :key="comment.id">
-                                    <div class="flex items-start gap-2.5" 
-                                         :class="comment.author_detail.email === '{{ user.email }}' ? 'justify-end' : 'justify-start'">
-                                         
-                                         <!-- Left Avatar for other users -->
-                                         <template x-if="comment.author_detail.email !== '{{ user.email }}'">
-                                             <div class="w-8 h-8 rounded-full bg-indigo-100 border border-indigo-200 flex items-center justify-center text-indigo-700 font-extrabold text-[10px]"
-                                                  x-text="comment.author_detail.full_name ? comment.author_detail.full_name.split(' ').map(n => n[0]).join('').toUpperCase() : 'U'">
-                                             </div>
-                                         </template>
-
-                                         <!-- Message bubble -->
-                                         <div class="max-w-[75%] transition-all hover:scale-[1.01] duration-150 flex flex-col"
-                                              :class="comment.author_detail.email === '{{ user.email }}' ? 'items-end' : 'items-start'">
-                                              
-                                             <!-- Sender name & date -->
-                                             <div class="flex items-center gap-1.5 text-[9px] text-slate-400 font-semibold mb-0.5 px-1">
-                                                 <span class="font-bold text-slate-600" x-text="comment.author_detail.full_name"></span>
-                                                 <span>•</span>
-                                                 <span x-text="new Date(comment.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})"></span>
-                                             </div>
-
-                                             <!-- Bubble body -->
-                                             <div class="p-3.5 rounded-2xl text-xs leading-relaxed font-medium shadow-sm"
-                                                  :class="comment.author_detail.email === '{{ user.email }}' 
-                                                     ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-tr-none shadow-md' 
-                                                     : 'bg-slate-100 text-slate-700 border border-slate-200/60 rounded-tl-none'">
-                                                 <p x-text="comment.content" style="white-space: pre-wrap;"></p>
-                                             </div>
-                                         </div>
-
-                                         <!-- Right Avatar for current user -->
-                                         <template x-if="comment.author_detail.email === '{{ user.email }}'">
-                                             <div class="w-8 h-8 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center text-white font-extrabold text-[10px]"
-                                                  x-text="comment.author_detail.full_name ? comment.author_detail.full_name.split(' ').map(n => n[0]).join('').toUpperCase() : 'ME'">
-                                             </div>
-                                         </template>
-                                    </div>
-                                </template>
-                                
-                                <template x-if="comments.length === 0">
-                                    <div class="text-center py-12 text-slate-400 italic text-xs flex flex-col items-center justify-center gap-2">
-                                        <i class="far fa-comments text-3xl text-slate-300 animate-bounce"></i>
-                                        <span>No discussion logged yet. Start the conversation!</span>
-                                    </div>
-                                </template>
+                    <!-- Record Today's Follow-up Form (Sticky Bottom Drawer Composer) -->
+                    {% if table.job_type == 'SALES' or table.job_type == 'LIST_PID' %}
+                    <div class="border-t border-gray-150 pt-3 bg-white mt-auto animate-fade-in" x-show="activeRow.task_details && activeRow.task_details.status !== 'COMPLETED' && activeRow.task_details.status !== 'APPROVED'">
+                        <div class="bg-emerald-50/40 border border-emerald-100 rounded-lg p-2.5 space-y-2.5">
+                            <div class="flex items-center justify-between text-[10px] font-bold text-emerald-800">
+                                <span class="flex items-center gap-1"><i class="fas fa-pen-nib"></i> Record New Log</span>
                             </div>
-
-                            <!-- Comment Input -->
-                            <div class="border-t border-gray-150 pt-4 bg-white mt-auto">
-                                <div class="relative bg-slate-50 border border-gray-300 rounded-xl p-2 focus-within:ring-1 focus-within:ring-indigo-500 focus-within:border-indigo-500">
-                                    <textarea x-model="newCommentText" placeholder="Type a note or message here..." class="w-full bg-transparent border-0 text-slate-900 p-1.5 text-xs focus:ring-0 focus:outline-none" rows="2.5"></textarea>
-                                    <div class="flex justify-between items-center border-t border-gray-200/60 pt-2 px-1">
-                                        <span class="text-[10px] text-slate-400 font-semibold"><i class="fas fa-lock text-indigo-400"></i> Internal notes only</span>
-                                        <button @click="postComment" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-[11px] px-3.5 py-1.5 transition duration-150 ease-in-out flex items-center gap-1 shadow-sm">
-                                            <i class="fas fa-paper-plane text-[10px]"></i> Send
-                                        </button>
+                            
+                            <div class="space-y-2">
+                                <textarea x-model="salesDiscussedPoints" placeholder="What did you discuss today? *" class="w-full bg-white border border-emerald-200/80 rounded p-1.5 text-xs focus:ring-0 focus:outline-none" rows="2"></textarea>
+                                
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label class="block text-[8px] font-bold text-emerald-700 uppercase mb-0.5">Next Action *</label>
+                                        <select x-model="salesStatus" class="w-full bg-white border border-emerald-200/80 rounded p-1 text-[10px] font-semibold text-slate-700">
+                                            <option value="IN_PROGRESS">Continuing (In Progress)</option>
+                                            <option value="COMPLETED">Closed (Completed)</option>
+                                            <option value="PENDING">Pending</option>
+                                            <option value="READY_FOR_REVIEW">Ready for Review</option>
+                                        </select>
                                     </div>
+                                    <div x-show="salesStatus !== 'COMPLETED'">
+                                        <label class="block text-[8px] font-bold text-emerald-700 uppercase mb-0.5">Next Follow-up *</label>
+                                        <input type="date" x-model="salesNextFollowUpDate" class="w-full bg-white border border-emerald-200/80 rounded p-1 text-[10px] font-semibold text-slate-700">
+                                    </div>
+                                </div>
+
+                                <div x-show="salesError" class="text-[10px] text-red-600 font-bold" x-text="salesError"></div>
+
+                                <button @click="submitSalesFollowUp" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded text-[11px] py-1.5 transition-colors flex items-center justify-center gap-1 shadow-sm">
+                                    <i class="fas fa-check text-[9px]"></i> Save Log
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- TAB 2: INTERNAL NOTES & DISCUSSION (CHAT) -->
+                <div x-show="activeDrawerTab === 'chat'" class="flex flex-col h-full overflow-hidden">
+                    <div class="flex flex-col h-full overflow-hidden">
+                        
+                        <!-- Chat Box -->
+                        <div class="flex-grow overflow-y-auto pr-1 mb-3 scrollbar-thin space-y-3 flex flex-col pt-1">
+                            <template x-for="comment in comments" :key="comment.id">
+                                <div class="flex items-start gap-2 animate-fade-in" 
+                                     :class="comment.author_detail.email === '{{ user.email }}' ? 'justify-end' : 'justify-start'">
+                                     
+                                     <!-- Left Avatar -->
+                                     <template x-if="comment.author_detail.email !== '{{ user.email }}'">
+                                         <div class="w-6.5 h-6.5 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 font-extrabold text-[9px]"
+                                              x-text="comment.author_detail.full_name ? comment.author_detail.full_name.split(' ').map(n => n[0]).join('').toUpperCase() : 'U'">
+                                         </div>
+                                     </template>
+
+                                     <!-- Bubble -->
+                                     <div class="max-w-[80%] flex flex-col"
+                                          :class="comment.author_detail.email === '{{ user.email }}' ? 'items-end' : 'items-start'">
+                                         <div class="flex items-center gap-1 text-[8px] text-slate-400 font-bold mb-0.5 px-0.5">
+                                             <span class="text-slate-600" x-text="comment.author_detail.full_name"></span>
+                                             <span>•</span>
+                                             <span x-text="new Date(comment.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})"></span>
+                                         </div>
+                                         <div class="px-3 py-2 rounded-xl text-[11px] font-medium leading-normal shadow-sm"
+                                              :class="comment.author_detail.email === '{{ user.email }}' 
+                                                 ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-tr-none' 
+                                                 : 'bg-slate-100 text-slate-700 border border-slate-200/60 rounded-tl-none'">
+                                             <p x-text="comment.content" style="white-space: pre-wrap;"></p>
+                                         </div>
+                                     </div>
+
+                                     <!-- Right Avatar -->
+                                     <template x-if="comment.author_detail.email === '{{ user.email }}'">
+                                         <div class="w-6.5 h-6.5 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center text-white font-extrabold text-[9px]"
+                                              x-text="comment.author_detail.full_name ? comment.author_detail.full_name.split(' ').map(n => n[0]).join('').toUpperCase() : 'ME'">
+                                         </div>
+                                     </template>
+                                </div>
+                            </template>
+                            
+                            <template x-if="comments.length === 0">
+                                <div class="text-center py-12 text-slate-400 italic text-[11px] flex flex-col items-center justify-center gap-1">
+                                    <i class="far fa-comments text-2xl text-slate-300"></i>
+                                    <span>No notes logged yet.</span>
+                                </div>
+                            </template>
+                        </div>
+
+                        <!-- Chat Composer -->
+                        <div class="border-t border-gray-150 pt-3 bg-white mt-auto">
+                            <div class="relative bg-slate-50 border border-gray-300 rounded-lg p-1.5 focus-within:ring-1 focus-within:ring-indigo-500 focus-within:border-indigo-500">
+                                <textarea x-model="newCommentText" placeholder="Type a note here..." class="w-full bg-transparent border-0 text-slate-900 p-1 text-xs focus:ring-0 focus:outline-none" rows="2"></textarea>
+                                <div class="flex justify-between items-center border-t border-gray-200/60 pt-1.5 px-0.5">
+                                    <span class="text-[9px] text-slate-400 font-semibold"><i class="fas fa-lock text-indigo-400"></i> Internal notes</span>
+                                    <button @click="postComment" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded text-[10px] px-3 py-1 transition-colors flex items-center gap-1 shadow-sm">
+                                        <i class="fas fa-paper-plane text-[8px]"></i> Send
+                                    </button>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
-    </div>
         </div>
     </div>
 </div>
