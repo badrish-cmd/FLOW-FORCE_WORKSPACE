@@ -206,6 +206,7 @@ class TableViewSet(viewsets.ModelViewSet):
         from django.template.loader import render_to_string
         from tasks.models import EmailLog
         from tasks.tasks import send_email_log_task
+        from django.conf import settings
 
         sent_count = 0
         for task in tasks:
@@ -225,7 +226,8 @@ class TableViewSet(viewsets.ModelViewSet):
 
                 for recipient in unique_recipients:
                     subject = f"ESCALATION: Overdue Task - {task.task_name} ({days_overdue} days overdue)"
-                    task_link = f"http://localhost:8000/tables/{task.row.table_id}/?open_task_id={task.id}"
+                    site_url = getattr(settings, 'SITE_URL', 'https://flowforceworkspace.cloud')
+                    task_link = f"{site_url}/tables/{task.row.table_id}/?open_task_id={task.id}"
 
                     context = {
                         'recipient_name': recipient.full_name,

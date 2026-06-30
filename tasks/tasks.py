@@ -325,7 +325,8 @@ def send_daily_alert_mails():
         task_items = []
         for task in tasks_to_alert:
             is_sales = task.row.table.job_type in ["SALES", "LIST_PID"]
-            task_link = f"http://localhost:8000/tables/{task.row.table_id}/?open_task_id={task.id}"
+            site_url = getattr(settings, 'SITE_URL', 'https://flowforceworkspace.cloud')
+            task_link = f"{site_url}/tables/{task.row.table_id}/?open_task_id={task.id}"
             
             # Fetch last follow-up discussion points for sales tasks
             last_discussion = None
@@ -432,7 +433,8 @@ def send_alert_mail(task_id):
             last_discussion = last_follow_up.discussed_points if last_follow_up else "No previous follow-ups logged."
             last_follow_up_date = last_follow_up.follow_up_date.strftime("%B %d, %Y") if last_follow_up else "N/A"
             
-            task_link = f"http://localhost:8000/tables/{task.row.table_id}/?open_task_id={task.id}"
+            site_url = getattr(settings, 'SITE_URL', 'https://flowforceworkspace.cloud')
+            task_link = f"{site_url}/tables/{task.row.table_id}/?open_task_id={task.id}"
             
             context = {
                 'employee_name': employee.full_name or employee.email,
@@ -494,7 +496,8 @@ def send_review_request_mail(task_id):
             continue
 
         subject = f"Task Review Requested: {task.task_name}"
-        task_link = f"http://localhost:8000/tables/{task.row.table_id}/?open_task_id={task.id}"
+        site_url = getattr(settings, 'SITE_URL', 'https://flowforceworkspace.cloud')
+        task_link = f"{site_url}/tables/{task.row.table_id}/?open_task_id={task.id}"
         employee_name = ", ".join([u.full_name for u in task.assigned_to.all()])
 
         context = {
@@ -537,7 +540,8 @@ def send_approval_status_mail(task_id):
             'CHANGES_REQUESTED': f"Changes Requested: {task.task_name}",
         }
         subject = subject_map.get(task.status, f"Task Status Updated: {task.task_name}")
-        task_link = f"http://localhost:8000/tables/{task.row.table_id}/?open_task_id={task.id}"
+        site_url = getattr(settings, 'SITE_URL', 'https://flowforceworkspace.cloud')
+        task_link = f"{site_url}/tables/{task.row.table_id}/?open_task_id={task.id}"
 
         context = {
             'employee_name': employee.full_name,
@@ -592,7 +596,8 @@ def check_overdue_escalations():
 
             for recipient in unique_recipients:
                 subject = f"ESCALATION: Overdue Task - {task.task_name} ({days_overdue} days overdue)"
-                task_link = f"http://localhost:8000/tables/{task.row.table_id}/?open_task_id={task.id}"
+                site_url = getattr(settings, 'SITE_URL', 'https://flowforceworkspace.cloud')
+                task_link = f"{site_url}/tables/{task.row.table_id}/?open_task_id={task.id}"
 
                 context = {
                     'recipient_name': recipient.full_name,

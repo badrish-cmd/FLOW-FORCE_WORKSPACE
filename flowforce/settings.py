@@ -187,13 +187,14 @@ MEDIA_ROOT = os.path.join(
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # --------------------------------------------------
-# CSRF
-# --------------------------------------------------
-
 CSRF_TRUSTED_ORIGINS = [
     'http://localhost:8000',
     'http://127.0.0.1:8000',
+    'https://flowforceworkspace.cloud',
+    'https://www.flowforceworkspace.cloud',
 ]
+
+SITE_URL = os.getenv('SITE_URL', 'https://flowforceworkspace.cloud')
 
 # --------------------------------------------------
 # LOGIN SETTINGS
