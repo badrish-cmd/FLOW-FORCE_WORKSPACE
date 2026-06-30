@@ -682,3 +682,57 @@ class TablesTestCase(TestCase):
 
         self.assertFalse(Row.objects.filter(id=row1.id).exists())
         self.assertTrue(Row.objects.filter(id=row2.id).exists())
+
+    def test_list_pid_table_behavior(self):
+        from tables.views import RowViewSet
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        factory = APIRequestFactory()
+
+        table = Table.objects.create(name="LIST_PID table", job_type="LIST_PID", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+        TableAccess.objects.create(table=table, user=self.employee, access_level="EDIT")
+
+        col_names = [col.name for col in table.columns.all()]
+        self.assertIn("S_NO", col_names)
+        self.assertIn("ENQUIRY_NO", col_names)
+        self.assertIn("PID", col_names)
+        self.assertIn("DUE_DATE_FLOW_FORCE", col_names)
+        self.assertIn("INITIAL_MAIL", col_names)
+        self.assertIn("ALERT_MAIL", col_names)
+
+        # Test Row Creation via API
+        view = RowViewSet.as_view({'post': 'create'})
+        request = factory.post("/tables/api/rows/", {
+            "table": table.id,
+            "cells": {
+                "ENQUIRY_NO": "ENQ-1234",
+                "PID": "PID-5678",
+                "DUE_DATE_FLOW_FORCE": "2026-07-20",
+                "QTY": "15"
+            }
+        }, format="json")
+        force_authenticate(request, user=self.employee)
+        response = view(request)
+        self.assertEqual(response.status_code, 201)
+
+        row_id = response.data["id"]
+        row = Row.objects.get(id=row_id)
+
+        # Check CellValues
+        self.assertEqual(CellValue.objects.get(row=row, column__name="ENQUIRY_NO").value, "ENQ-1234")
+        self.assertEqual(CellValue.objects.get(row=row, column__name="DUE_DATE_FLOW_FORCE").value, "2026-07-20")
+        self.assertEqual(CellValue.objects.get(row=row, column__name="QTY").value, "15")
+
+        # Check Task
+        task = getattr(row, "task", None)
+        self.assertIsNotNone(task)
+        self.assertEqual(task.task_name, "ENQ-1234")
+        import datetime
+        self.assertEqual(task.due_date, datetime.date(2026, 7, 20))
+
+        # Check Permissions - System columns should be EDITABLE for LIST_PID
+        from tables.permissions import get_column_access_level
+        s_no_col = table.columns.get(name="S_NO")
+        initial_mail_col = table.columns.get(name="INITIAL_MAIL")
+        self.assertEqual(get_column_access_level(self.employee, s_no_col), "EDITABLE")
+        self.assertEqual(get_column_access_level(self.employee, initial_mail_col), "EDITABLE")

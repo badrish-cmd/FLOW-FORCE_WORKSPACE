@@ -870,6 +870,7 @@ class RowViewSet(viewsets.ModelViewSet):
         cells_data = request.data.get("cells", {})
         
         is_sales = table.job_type == "SALES"
+        is_list_pid = table.job_type == "LIST_PID"
         
         # Verify DUE_DATE/FOLLOW_UP_DATE and TASK_NAME/CUSTOMER_NAME are present
         if is_sales:
@@ -877,6 +878,11 @@ class RowViewSet(viewsets.ModelViewSet):
             task_name = cells_data.get("CUSTOMER_NAME")
             date_field_name = "FOLLOW_UP_DATE"
             name_field_name = "CUSTOMER_NAME"
+        elif is_list_pid:
+            due_date_str = cells_data.get("DUE_DATE_FLOW_FORCE") or cells_data.get("DUE_DATE_CUSTOMER")
+            task_name = cells_data.get("ENQUIRY_NO") or cells_data.get("PID") or "Unnamed"
+            date_field_name = "DUE_DATE_FLOW_FORCE"
+            name_field_name = "ENQUIRY_NO"
         else:
             due_date_str = cells_data.get("DUE_DATE")
             task_name = cells_data.get("TASK_NAME")
@@ -917,6 +923,15 @@ class RowViewSet(viewsets.ModelViewSet):
                 "DATE": timezone.localdate().isoformat(),
                 "FOLLOW_UP_DATE": due_date.isoformat(),
                 "CUSTOMER_NAME": task_name,
+                "INITIAL_MAIL": "NO",
+                "ALERT_MAIL": "NO"
+            }
+        elif is_list_pid:
+            cell_values = {
+                "S_NO": s_no,
+                "DATE": timezone.localdate().isoformat(),
+                "ENQUIRY_NO": task_name,
+                "DUE_DATE_FLOW_FORCE": due_date.isoformat(),
                 "INITIAL_MAIL": "NO",
                 "ALERT_MAIL": "NO"
             }
@@ -1012,13 +1027,14 @@ class RowViewSet(viewsets.ModelViewSet):
         column = get_object_or_404(Column, id=column_id, table=table)
 
         # Enforce column level permissions
-        if is_assigned:
-            if column.name == "S_NO" or column.name in ["INITIAL_MAIL", "ALERT_MAIL"]:
-                return Response({"error": f"Column {column.name} is read-only for assignees"}, status=status.HTTP_403_FORBIDDEN)
-        else:
-            perm = get_column_access_level(request.user, column)
-            if perm != "EDITABLE":
-                return Response({"error": f"Column {column.name} is read-only or hidden for you"}, status=status.HTTP_403_FORBIDDEN)
+        if table.job_type != "LIST_PID":
+            if is_assigned:
+                if column.name == "S_NO" or column.name in ["INITIAL_MAIL", "ALERT_MAIL"]:
+                    return Response({"error": f"Column {column.name} is read-only for assignees"}, status=status.HTTP_403_FORBIDDEN)
+            else:
+                perm = get_column_access_level(request.user, column)
+                if perm != "EDITABLE":
+                    return Response({"error": f"Column {column.name} is read-only or hidden for you"}, status=status.HTTP_403_FORBIDDEN)
 
         # Update CellValue
         cell, created = CellValue.objects.update_or_create(
@@ -1030,7 +1046,7 @@ class RowViewSet(viewsets.ModelViewSet):
         if column.is_system_column:
             task = getattr(row, "task", None)
             if task:
-                if column.name in ["DUE_DATE", "FOLLOW_UP_DATE"]:
+                if column.name in ["DUE_DATE", "FOLLOW_UP_DATE", "DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]:
                     try:
                         new_date = datetime.strptime(value.split("T")[0], "%Y-%m-%d").date()
                         if task.due_date != new_date:
@@ -1044,7 +1060,7 @@ class RowViewSet(viewsets.ModelViewSet):
                             task.save(update_fields=["due_date"])
                     except ValueError:
                         return Response({"error": "Invalid date format"}, status=status.HTTP_400_BAD_REQUEST)
-                elif column.name == "TASK_NAME":
+                elif column.name in ["TASK_NAME", "CUSTOMER_NAME", "ENQUIRY_NO"]:
                     # Activity log detail update
                     pass
 
@@ -1130,13 +1146,14 @@ class RowViewSet(viewsets.ModelViewSet):
                 continue
 
             # Enforce column level permissions
-            if is_assigned:
-                if column.name == "S_NO" or column.name in ["INITIAL_MAIL", "ALERT_MAIL"]:
-                    continue
-            else:
-                perm = get_column_access_level(request.user, column)
-                if perm != "EDITABLE":
-                    continue
+            if table.job_type != "LIST_PID":
+                if is_assigned:
+                    if column.name == "S_NO" or column.name in ["INITIAL_MAIL", "ALERT_MAIL"]:
+                        continue
+                else:
+                    perm = get_column_access_level(request.user, column)
+                    if perm != "EDITABLE":
+                        continue
 
             # Update CellValue
             CellValue.objects.update_or_create(
@@ -1149,7 +1166,7 @@ class RowViewSet(viewsets.ModelViewSet):
             if column.is_system_column:
                 task = getattr(row, "task", None)
                 if task:
-                    if column.name in ["DUE_DATE", "FOLLOW_UP_DATE"]:
+                    if column.name in ["DUE_DATE", "FOLLOW_UP_DATE", "DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]:
                         try:
                             new_date = datetime.strptime(str(value).split("T")[0], "%Y-%m-%d").date()
                             if task.due_date != new_date:

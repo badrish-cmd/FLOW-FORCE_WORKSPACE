@@ -62,10 +62,17 @@ class Task(models.Model):
 
     @property
     def task_name(self):
-        is_sales = self.row.table.job_type == "SALES"
-        col_name = "CUSTOMER_NAME" if is_sales else "TASK_NAME"
+        job_type = self.row.table.job_type
+        if job_type == "SALES":
+            col_name = "CUSTOMER_NAME"
+        elif job_type == "LIST_PID":
+            col_name = "ENQUIRY_NO"
+        else:
+            col_name = "TASK_NAME"
         name_cell = self.row.cells.filter(column__name=col_name).first()
-        if not name_cell and is_sales:
+        if not name_cell and job_type == "LIST_PID":
+            name_cell = self.row.cells.filter(column__name="PID").first()
+        if not name_cell and job_type == "SALES":
             name_cell = self.row.cells.filter(column__name="TASK_NAME").first()
         return name_cell.value if name_cell else "Unnamed Task"
 

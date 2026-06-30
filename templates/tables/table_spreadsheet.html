@@ -112,7 +112,70 @@
 
     <!-- Dashboard Section -->
     <div x-show="showDashboard" x-transition class="bg-gray-100 p-6 rounded-xl border border-gray-200 shadow-inner mb-6 space-y-6">
-        {% if table.job_type == 'SALES' %}
+        {% if table.job_type == 'LIST_PID' %}
+        <!-- LIST_PID Dashboard Content -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Row 1: PID Status Summary -->
+            <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col justify-between">
+                <h3 class="text-xs font-bold text-center text-gray-500 uppercase tracking-wider mb-4 flex items-center justify-center gap-1.5">
+                    <i class="fas fa-chart-pie text-primary"></i> Status Breakdown
+                </h3>
+                <div class="relative h-64 w-full">
+                    <canvas id="listPidStatusChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Row 2: Enquiries by Project / PID -->
+            <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col justify-between">
+                <h3 class="text-xs font-bold text-center text-gray-500 uppercase tracking-wider mb-4 flex items-center justify-center gap-1.5">
+                    <i class="fas fa-project-diagram text-purple-600"></i> Top Projects by Enquiry
+                </h3>
+                <div class="relative h-64 w-full">
+                    <canvas id="listPidProjectChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Row 3: Metrics Card & Status Summary -->
+            <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col justify-between space-y-4">
+                <h3 class="text-xs font-bold text-center text-gray-500 uppercase tracking-wider mb-2 flex items-center justify-center gap-1.5">
+                    <i class="fas fa-chart-line text-teal-600"></i> Analysis & Metrics
+                </h3>
+                
+                <!-- Stats Grid -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-slate-50 p-3 rounded-lg border border-gray-150 text-center shadow-sm">
+                        <div class="text-[10px] uppercase font-bold text-gray-400">Total Qty</div>
+                        <div class="text-xl font-extrabold text-slate-800" x-text="getListPidTotalQty()"></div>
+                    </div>
+                    <div class="bg-slate-50 p-3 rounded-lg border border-gray-150 text-center shadow-sm">
+                        <div class="text-[10px] uppercase font-bold text-gray-400">Total Enquiries</div>
+                        <div class="text-xl font-extrabold text-slate-800" x-text="filteredRows().length"></div>
+                    </div>
+                </div>
+
+                <!-- Overdue and Due Today Stats -->
+                <div class="border border-gray-200 rounded-lg overflow-hidden text-xs w-full shadow-sm">
+                    <div class="grid grid-cols-2 bg-slate-800 text-white font-bold py-2 px-3 border-b border-gray-200">
+                        <div class="border-r border-gray-700 text-center">Due Today</div>
+                        <div class="text-center" x-text="getTasksDueTodayCount()"></div>
+                    </div>
+                    <div class="grid grid-cols-2 bg-teal-600 text-white font-bold py-2 px-3">
+                        <div class="border-r border-teal-500 text-center">Overdue Tasks</div>
+                        <div class="text-center" x-text="getOverdueTasksCount()"></div>
+                    </div>
+                </div>
+
+                <!-- Completion Stats -->
+                <div class="space-y-2 pt-2">
+                    <div class="text-center text-xs font-bold text-gray-600" x-text="`${getListPidCompletionStats().completed} Completed/Approved out of ${getListPidCompletionStats().total}`"></div>
+                    <div class="w-full border border-green-500 rounded-lg p-0.5 bg-gray-50 flex items-center justify-center relative h-7 overflow-hidden">
+                        <div class="absolute left-0 top-0 bottom-0 bg-green-100 transition-all duration-300" :style="`width: ${getListPidCompletionStats().percent}%`"></div>
+                        <span class="relative font-bold text-green-800 text-xs z-10" x-text="`${getListPidCompletionStats().percent}% Completed`"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% elif table.job_type == 'SALES' %}
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <!-- TASKS BY PRIORITY Chart Card -->
             <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col">
@@ -275,26 +338,82 @@
 
 
 
-    <!-- Project ID (PID) Filter Bar for Engineer Tables -->
-    {% if table.job_type == 'ENGINEER' %}
-    <div class="mb-6 bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex flex-wrap items-center gap-4">
-        <div class="flex items-center gap-2">
-            <span class="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                <i class="fas fa-filter text-primary"></i> Filter by Project ID (PID)
-            </span>
+    <!-- Unified Filter Bar -->
+    <div class="mb-6 bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex flex-wrap items-center justify-between gap-4">
+        <div class="flex flex-wrap items-center gap-4">
+            <div class="flex items-center gap-2">
+                <span class="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                    <i class="fas fa-filter text-primary"></i> Filters
+                </span>
+            </div>
+
+            <!-- PID Filter (only if PID column exists or job_type is ENGINEER / LIST_PID) -->
+            {% if table.job_type == 'ENGINEER' or table.job_type == 'LIST_PID' %}
+            <div class="flex items-center gap-2">
+                <label class="text-xs font-semibold text-gray-500">Project ID (PID):</label>
+                <select x-model="selectedPidFilter" 
+                        @change="if (showDashboard) renderCharts();" 
+                        class="bg-gray-50 border border-gray-300 text-gray-700 rounded-lg py-1.5 px-3 text-xs focus:ring-primary focus:border-primary font-medium">
+                    <option value="">-- All Projects --</option>
+                    <template x-for="pid in getUniquePids()" :key="pid">
+                        <option :value="pid" x-text="pid"></option>
+                    </template>
+                </select>
+            </div>
+            {% endif %}
+
+            <!-- Year Filter -->
+            <div class="flex items-center gap-2">
+                <label class="text-xs font-semibold text-gray-500">Year:</label>
+                <select x-model="selectedYearFilter" 
+                        @change="if (showDashboard) renderCharts();" 
+                        class="bg-gray-50 border border-gray-300 text-gray-700 rounded-lg py-1.5 px-3 text-xs focus:ring-primary focus:border-primary font-medium">
+                    <option value="">-- All Years --</option>
+                    <template x-for="year in getUniqueYears()" :key="year">
+                        <option :value="year" x-text="year"></option>
+                    </template>
+                </select>
+            </div>
+
+            <!-- Month Filter -->
+            <div class="flex items-center gap-2">
+                <label class="text-xs font-semibold text-gray-500">Month:</label>
+                <select x-model="selectedMonthFilter" 
+                        @change="if (showDashboard) renderCharts();" 
+                        class="bg-gray-50 border border-gray-300 text-gray-700 rounded-lg py-1.5 px-3 text-xs focus:ring-primary focus:border-primary font-medium">
+                    <option value="">-- All Months --</option>
+                    <option value="1">January</option>
+                    <option value="2">February</option>
+                    <option value="3">March</option>
+                    <option value="4">April</option>
+                    <option value="5">May</option>
+                    <option value="6">June</option>
+                    <option value="7">July</option>
+                    <option value="8">August</option>
+                    <option value="9">September</option>
+                    <option value="10">October</option>
+                    <option value="11">November</option>
+                    <option value="12">December</option>
+                </select>
+            </div>
+
+            <!-- Due Date Filter -->
+            <div class="flex items-center gap-2">
+                <label class="text-xs font-semibold text-gray-500">Due Status:</label>
+                <select x-model="selectedDueFilter" 
+                        @change="if (showDashboard) renderCharts();" 
+                        class="bg-gray-50 border border-gray-300 text-gray-700 rounded-lg py-1.5 px-3 text-xs focus:ring-primary focus:border-primary font-medium">
+                    <option value="">-- All Due Dates --</option>
+                    <option value="today">Due Today</option>
+                    <option value="this_week">Due This Week</option>
+                </select>
+            </div>
         </div>
-        <div class="flex items-center gap-2">
-            <select x-model="selectedPidFilter" 
-                    @change="if (chartInstance && showDashboard) renderCharts();" 
-                    class="bg-gray-50 border border-gray-300 text-gray-700 rounded-lg py-1.5 px-3 text-xs focus:ring-primary focus:border-primary font-medium">
-                <option value="">-- All Projects / General --</option>
-                <template x-for="pid in getUniquePids()" :key="pid">
-                    <option :value="pid" x-text="pid"></option>
-                </template>
-            </select>
-        </div>
+
+        <button @click="resetFilters" class="text-xs text-red-500 hover:text-red-700 font-semibold flex items-center gap-1">
+            <i class="fas fa-undo-alt"></i> Reset Filters
+        </button>
     </div>
-    {% endif %}
 
     <!-- Main Table Container -->
     <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -492,18 +611,18 @@
                         <td class="p-1 border-r border-gray-200 text-sm whitespace-nowrap align-middle">
                             {% if col.name == 'S_NO' %}
                                 <div class="px-3 text-gray-400 font-semibold text-center">+</div>
-                            {% elif col.name == 'TASK_NAME' or col.name == 'CUSTOMER_NAME' %}
+                            {% elif col.name == 'TASK_NAME' or col.name == 'CUSTOMER_NAME' or col.name == 'ENQUIRY_NO' %}
                                 {% if col.data_type == 'DROPDOWN' %}
                                     <select x-model="newRowCells.{{ col.name }}" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
-                                        <option value="">-- Select {% if table.job_type == 'SALES' %}Customer Name{% else %}Task Name{% endif %} --</option>
+                                        <option value="">-- Select {% if table.job_type == 'SALES' %}Customer Name{% elif table.job_type == 'LIST_PID' %}Enquiry No{% else %}Task Name{% endif %} --</option>
                                         <template x-for="opt in '{{ col.options|default:""|escapejs }}'.split(',').map(s => s.trim()).filter(Boolean)" :key="opt">
                                             <option :value="opt" x-text="opt"></option>
                                         </template>
                                     </select>
                                 {% else %}
-                                    <input type="text" x-model="newRowCells.{{ col.name }}" placeholder="{% if table.job_type == 'SALES' %}Customer Name (Required){% else %}Task Name (Required){% endif %}" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
+                                    <input type="text" x-model="newRowCells.{{ col.name }}" placeholder="{% if table.job_type == 'SALES' %}Customer Name{% elif table.job_type == 'LIST_PID' %}Enquiry No{% else %}Task Name{% endif %} (Required)" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
                                 {% endif %}
-                            {% elif col.name == 'DUE_DATE' or col.name == 'FOLLOW_UP_DATE' %}
+                            {% elif col.name == 'DUE_DATE' or col.name == 'FOLLOW_UP_DATE' or col.name == 'DUE_DATE_FLOW_FORCE' or col.name == 'DUE_DATE_CUSTOMER' %}
                                 <input type="date" x-model="newRowCells.{{ col.name }}" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
                             {% elif col.name == 'DATE' %}
                                 <div class="px-3 py-1 text-gray-400 text-xs italic">Auto</div>
@@ -518,7 +637,13 @@
                                         </template>
                                     </select>
                                 </template>
-                                <template x-if="'{{ col.data_type }}' !== 'DROPDOWN'">
+                                <template x-if="'{{ col.data_type }}' === 'DATE'">
+                                    <input type="date" x-model="newRowCells['{{ col.name }}']" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
+                                </template>
+                                <template x-if="'{{ col.data_type }}' === 'NUMBER'">
+                                    <input type="number" x-model="newRowCells['{{ col.name }}']" placeholder="{{ col.name }} value" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
+                                </template>
+                                <template x-if="'{{ col.data_type }}' !== 'DROPDOWN' && '{{ col.data_type }}' !== 'DATE' && '{{ col.data_type }}' !== 'NUMBER'">
                                     <input type="text" x-model="newRowCells['{{ col.name }}']" placeholder="{{ col.name }} value" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
                                 </template>
                             {% endif %}
@@ -762,7 +887,7 @@
                     </div>
                 </div>
 
-                {% if table.job_type == 'SALES' %}
+                {% if table.job_type == 'SALES' or table.job_type == 'LIST_PID' %}
                 <!-- Sales Follow-ups Timeline -->
                 <div class="mt-6 border-t border-gray-200 pt-4">
                     <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 mb-3 flex items-center gap-1.5">
@@ -899,6 +1024,11 @@
             isLoading: false,
             
             selectedPidFilter: '',
+            selectedYearFilter: '',
+            selectedMonthFilter: '',
+            selectedDueFilter: '',
+            listPidStatusChartInstance: null,
+            listPidProjectChartInstance: null,
             rowEditingRowId: null,
             editingRowValues: {},
 
@@ -906,6 +1036,23 @@
             newRowCells: ('{{ table.job_type }}' === 'SALES') ? {
                 CUSTOMER_NAME: '',
                 FOLLOW_UP_DATE: ''
+            } : ('{{ table.job_type }}' === 'LIST_PID') ? {
+                ENQUIRY_NO: '',
+                PID: '',
+                NEW_PID_NO: '',
+                SALES_ORDER: '',
+                PO: '',
+                DATE: '',
+                FFE_SINGAPORE: '',
+                COMPANY_NAME: '',
+                DESCRIPTION: '',
+                QTY: '',
+                DUE_DATE_CUSTOMER: '',
+                DUE_DATE_FLOW_FORCE: '',
+                PROJECT: '',
+                STATUS: '',
+                INITIAL_MAIL: '',
+                ALERT_MAIL: ''
             } : {
                 TASK_NAME: '',
                 DUE_DATE: ''
@@ -987,6 +1134,18 @@
                  });
              },
 
+             getDueOrFollowUpDate(row) {
+                 const isSales = '{{ table.job_type }}' === 'SALES';
+                 const isListPid = '{{ table.job_type }}' === 'LIST_PID';
+                 if (isSales) {
+                     return this.getCellValue(row, 'FOLLOW_UP_DATE');
+                 } else if (isListPid) {
+                     return this.getCellValue(row, 'DUE_DATE_FLOW_FORCE') || this.getCellValue(row, 'DUE_DATE_CUSTOMER');
+                 } else {
+                     return this.getCellValue(row, 'DUE_DATE');
+                 }
+             },
+
              getUniquePids() {
                  const pids = new Set();
                  this.rows.forEach(row => {
@@ -998,199 +1157,381 @@
                  return Array.from(pids).sort();
              },
 
-             filteredRows() {
-                 if (!this.selectedPidFilter) {
-                     return this.rows;
-                 }
-                 return this.rows.filter(row => {
-                     const pid = this.getCellValue(row, 'PID');
-                     return pid && pid.trim() === this.selectedPidFilter;
+             getUniqueYears() {
+                 const years = new Set();
+                 this.rows.forEach(row => {
+                     const dateVal = this.getDueOrFollowUpDate(row) || this.getCellValue(row, 'DATE');
+                     if (dateVal) {
+                         const year = new Date(dateVal).getFullYear();
+                         if (!isNaN(year)) {
+                             years.add(year.toString());
+                         }
+                     }
                  });
+                 return Array.from(years).sort().reverse();
              },
 
-            toggleDashboard() {
-                this.showDashboard = !this.showDashboard;
-            },
+             resetFilters() {
+                 this.selectedPidFilter = '';
+                 this.selectedYearFilter = '';
+                 this.selectedMonthFilter = '';
+                 this.selectedDueFilter = '';
+                 if (this.showDashboard) {
+                     this.renderCharts();
+                 }
+             },
 
-            getStatusCount(statusName) {
-                let count = 0;
-                this.filteredRows().forEach(row => {
-                    const val = this.getCellValue(row, 'STATUS');
-                    if (val && val.toLowerCase().trim() === statusName.toLowerCase().trim()) {
-                        count++;
-                    }
-                });
-                return count;
-            },
+             filteredRows() {
+                 let result = this.rows;
 
-            getSuccessfulTasksPercent() {
-                if (this.rows.length === 0) return 0;
-                const successfulCount = this.getStatusCount('Order Received');
-                return Math.round((successfulCount / this.rows.length) * 100);
-            },
+                 if (this.selectedPidFilter) {
+                     result = result.filter(row => {
+                         const pid = this.getCellValue(row, 'PID');
+                         return pid && pid.trim() === this.selectedPidFilter;
+                     });
+                 }
 
-            getOverdueTasksCount() {
-                let count = 0;
-                this.filteredRows().forEach(row => {
-                    if (this.isOverdue(row)) {
-                        count++;
-                    }
-                });
-                return count;
-            },
+                 if (this.selectedYearFilter) {
+                     result = result.filter(row => {
+                         const dateVal = this.getDueOrFollowUpDate(row) || this.getCellValue(row, 'DATE');
+                         if (!dateVal) return false;
+                         const year = new Date(dateVal).getFullYear();
+                         return year.toString() === this.selectedYearFilter;
+                     });
+                 }
 
-            getWeekRange() {
-                const now = new Date();
-                const day = now.getDay();
-                const diff = now.getDate() - day + (day === 0 ? -6 : 1); // Adjust for Monday start
-                const monday = new Date(now.setDate(diff));
-                monday.setHours(0, 0, 0, 0);
-                const sunday = new Date(monday);
-                sunday.setDate(monday.getDate() + 6);
-                sunday.setHours(23, 59, 59, 999);
-                return { monday, sunday };
-            },
+                 if (this.selectedMonthFilter) {
+                     result = result.filter(row => {
+                         const dateVal = this.getDueOrFollowUpDate(row);
+                         if (!dateVal) return false;
+                         const month = new Date(dateVal).getMonth() + 1; // 1-indexed
+                         return month.toString() === this.selectedMonthFilter;
+                     });
+                 }
 
-            getWeekActuals() {
-                const range = this.getWeekRange();
-                let calls = 0;
-                let visits = 0;
-                let enquiries = 0;
-                let quotes = 0;
-                let orders = 0;
-                
-                this.filteredRows().forEach(row => {
-                    const dateVal = this.getCellValue(row, 'FOLLOW - UP DATE') || this.getCellValue(row, 'FOLLOW-UP DATE') || this.getCellValue(row, 'DATE');
-                    if (!dateVal) return;
-                    
-                    const d = new Date(dateVal);
-                    if (d >= range.monday && d <= range.sunday) {
-                        const actType = (this.getCellValue(row, 'ACTIVITY TYPE') || this.getCellValue(row, 'ACTIVITY_TYPE') || '').toLowerCase().trim();
-                        const status = (this.getCellValue(row, 'STATUS') || '').toLowerCase().trim();
-                        
-                        if (actType.includes('call') || actType.includes('whatsapp') || actType.includes('linkedin')) {
-                            calls++;
-                        }
-                        if (actType.includes('site visit') || actType.includes('customer visit') || actType === 'visit') {
-                            visits++;
-                        }
-                        if (status.includes('enquiry') || status.includes('enquiries')) {
-                            enquiries++;
-                        }
-                        if (status.includes('quotation') || status.includes('quote')) {
-                            quotes++;
-                        }
-                        if (status.includes('order received') || status.includes('order')) {
-                            orders++;
-                        }
-                    }
-                });
-                
-                const targetCalls = 20;
-                const targetVisits = 10;
-                const targetEnquiries = 10;
-                const targetOrders = 2;
-                
-                const callsAch = Math.min(100, (calls / targetCalls) * 100);
-                const visitsAch = Math.min(100, (visits / targetVisits) * 100);
-                const enquiriesAch = Math.min(100, (enquiries / targetEnquiries) * 100);
-                const ordersAch = Math.min(100, (orders / targetOrders) * 100);
-                
-                const achievementPercent = ((callsAch + visitsAch + enquiriesAch + ordersAch) / 4).toFixed(2);
-                
-                return {
-                    calls,
-                    visits,
-                    enquiries,
-                    quotes,
-                    orders,
-                    achievementPercent
-                };
-            },
+                 if (this.selectedDueFilter === 'today') {
+                     const todayStr = new Date().toISOString().split('T')[0];
+                     result = result.filter(row => {
+                         const dueDate = this.getDueOrFollowUpDate(row);
+                         return dueDate && dueDate === todayStr;
+                     });
+                 } else if (this.selectedDueFilter === 'this_week') {
+                     const range = this.getWeekRange();
+                     result = result.filter(row => {
+                         const dueDateStr = this.getDueOrFollowUpDate(row);
+                         if (!dueDateStr) return false;
+                         const d = new Date(dueDateStr);
+                         d.setHours(12, 0, 0, 0);
+                         return d >= range.monday && d <= range.sunday;
+                     });
+                 }
 
-            getTasksDueTodayCount() {
-                let count = 0;
-                const todayStr = new Date().toISOString().split('T')[0];
-                this.filteredRows().forEach(row => {
-                    const dueDate = this.getCellValue(row, 'DUE_DATE');
-                    if (dueDate && dueDate === todayStr) {
-                        count++;
-                    }
-                });
-                return count;
-            },
+                 return result;
+             },
 
-            getGeneralStatusCount(statusName) {
-                let count = 0;
-                const target = statusName.toUpperCase().replace(/\s+/g, '_');
-                this.filteredRows().forEach(row => {
-                    let val = this.getCellValue(row, 'STATUS');
-                    if (!val && row.task_details) {
-                        val = row.task_details.status;
-                    }
-                    if (val) {
-                        const normalized = val.toUpperCase().replace(/\s+/g, '_');
-                        if (normalized === target || 
-                            (target === 'COMPLETED' && (normalized === 'COMPLETE' || normalized === 'COMPLETED')) ||
-                            (target === 'COMPLETE' && (normalized === 'COMPLETED' || normalized === 'COMPLETE'))) {
-                            count++;
-                        }
-                    }
-                });
-                return count;
-            },
+             toggleDashboard() {
+                 this.showDashboard = !this.showDashboard;
+             },
 
-            getCompletionStats() {
-                const total = this.rows.length;
-                const completed = this.getGeneralStatusCount('COMPLETED');
-                const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
-                return { completed, total, percent };
-            },
+             getStatusCount(statusName) {
+                 let count = 0;
+                 this.filteredRows().forEach(row => {
+                     const val = this.getCellValue(row, 'STATUS');
+                     if (val && val.toLowerCase().trim() === statusName.toLowerCase().trim()) {
+                         count++;
+                     }
+                 });
+                 return count;
+             },
 
-            isRowCompleted(row) {
-                if (!row) return false;
-                const statusVal = (this.getCellValue(row, 'STATUS') || '').toLowerCase().trim();
-                if (statusVal === 'completed' || statusVal === 'complete') {
-                    return true;
-                }
-                if (row.task_details) {
-                    const taskStatus = (row.task_details.status || '').toLowerCase().trim();
-                    if (taskStatus === 'completed' || taskStatus === 'approved') {
-                        return true;
-                    }
-                }
-                return false;
-            },
+             getSuccessfulTasksPercent() {
+                 if (this.rows.length === 0) return 0;
+                 const successfulCount = this.getStatusCount('Order Received');
+                 return Math.round((successfulCount / this.rows.length) * 100);
+             },
 
-            renderCharts() {
-                this.$nextTick(() => {
-                    const ctx = document.getElementById('priorityChart');
-                    if (!ctx) return;
-                    
-                    const priorityCounts = { 'Urgent': 0, 'High': 0, 'Med': 0, 'Low': 0 };
-                    this.filteredRows().forEach(row => {
-                        const priority = this.getCellValue(row, 'PRIORITY');
-                        if (priority in priorityCounts) {
-                            priorityCounts[priority]++;
-                        } else if (priority) {
-                            const pl = priority.toLowerCase();
-                            if (pl.startsWith('med')) {
-                                priorityCounts['Med']++;
-                            } else if (pl.startsWith('urg')) {
-                                priorityCounts['Urgent']++;
-                            } else if (pl.startsWith('hi')) {
-                                priorityCounts['High']++;
-                            } else if (pl.startsWith('lo')) {
-                                priorityCounts['Low']++;
-                            }
-                        }
-                    });
-                    
-                    if (this.chartInstance) {
-                        this.chartInstance.destroy();
-                    }
-                    
-                    this.chartInstance = new Chart(ctx, {
+             getOverdueTasksCount() {
+                 let count = 0;
+                 this.filteredRows().forEach(row => {
+                     if (this.isOverdue(row)) {
+                         count++;
+                     }
+                 });
+                 return count;
+             },
+
+             getWeekRange() {
+                 const now = new Date();
+                 const day = now.getDay();
+                 const diff = now.getDate() - day + (day === 0 ? -6 : 1); // Adjust for Monday start
+                 const monday = new Date(now.setDate(diff));
+                 monday.setHours(0, 0, 0, 0);
+                 const sunday = new Date(monday);
+                 sunday.setDate(monday.getDate() + 6);
+                 sunday.setHours(23, 59, 59, 999);
+                 return { monday, sunday };
+             },
+
+             getWeekActuals() {
+                 const range = this.getWeekRange();
+                 let calls = 0;
+                 let visits = 0;
+                 let enquiries = 0;
+                 let quotes = 0;
+                 let orders = 0;
+                 
+                 this.filteredRows().forEach(row => {
+                     const dateVal = this.getCellValue(row, 'FOLLOW - UP DATE') || this.getCellValue(row, 'FOLLOW-UP DATE') || this.getCellValue(row, 'DATE');
+                     if (!dateVal) return;
+                     
+                     const d = new Date(dateVal);
+                     if (d >= range.monday && d <= range.sunday) {
+                         const actType = (this.getCellValue(row, 'ACTIVITY TYPE') || this.getCellValue(row, 'ACTIVITY_TYPE') || '').toLowerCase().trim();
+                         const status = (this.getCellValue(row, 'STATUS') || '').toLowerCase().trim();
+                         
+                         if (actType.includes('call') || actType.includes('whatsapp') || actType.includes('linkedin')) {
+                             calls++;
+                         }
+                         if (actType.includes('site visit') || actType.includes('customer visit') || actType === 'visit') {
+                             visits++;
+                         }
+                         if (status.includes('enquiry') || status.includes('enquiries')) {
+                             enquiries++;
+                         }
+                         if (status.includes('quotation') || status.includes('quote')) {
+                             quotes++;
+                         }
+                         if (status.includes('order received') || status.includes('order')) {
+                             orders++;
+                         }
+                     }
+                 });
+                 
+                 const targetCalls = 20;
+                 const targetVisits = 10;
+                 const targetEnquiries = 10;
+                 const targetOrders = 2;
+                 
+                 const callsAch = Math.min(100, (calls / targetCalls) * 100);
+                 const visitsAch = Math.min(100, (visits / targetVisits) * 100);
+                 const enquiriesAch = Math.min(100, (enquiries / targetEnquiries) * 100);
+                 const ordersAch = Math.min(100, (orders / targetOrders) * 100);
+                 
+                 const achievementPercent = ((callsAch + visitsAch + enquiriesAch + ordersAch) / 4).toFixed(2);
+                 
+                 return {
+                     calls,
+                     visits,
+                     enquiries,
+                     quotes,
+                     orders,
+                     achievementPercent
+                 };
+             },
+
+             getTasksDueTodayCount() {
+                 let count = 0;
+                 const todayStr = new Date().toISOString().split('T')[0];
+                 this.filteredRows().forEach(row => {
+                     const dueDate = this.getDueOrFollowUpDate(row);
+                     if (dueDate && dueDate === todayStr) {
+                         count++;
+                     }
+                 });
+                 return count;
+             },
+
+             getGeneralStatusCount(statusName) {
+                 let count = 0;
+                 const target = statusName.toUpperCase().replace(/\s+/g, '_');
+                 this.filteredRows().forEach(row => {
+                     let val = this.getCellValue(row, 'STATUS');
+                     if (!val && row.task_details) {
+                         val = row.task_details.status;
+                     }
+                     if (val) {
+                         const normalized = val.toUpperCase().replace(/\s+/g, '_');
+                         if (normalized === target || 
+                             (target === 'COMPLETED' && (normalized === 'COMPLETE' || normalized === 'COMPLETED')) ||
+                             (target === 'COMPLETE' && (normalized === 'COMPLETED' || normalized === 'COMPLETE'))) {
+                             count++;
+                         }
+                     }
+                 });
+                 return count;
+             },
+
+             getCompletionStats() {
+                 const total = this.rows.length;
+                 const completed = this.getGeneralStatusCount('COMPLETED');
+                 const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+                 return { completed, total, percent };
+             },
+
+             getListPidTotalQty() {
+                 let total = 0;
+                 this.filteredRows().forEach(row => {
+                     const qtyStr = this.getCellValue(row, 'QTY');
+                     const qtyVal = parseFloat(qtyStr);
+                     if (!isNaN(qtyVal)) {
+                         total += qtyVal;
+                     }
+                 });
+                 return total;
+             },
+
+             getListPidCompletionStats() {
+                 const total = this.rows.length;
+                 let completed = 0;
+                 this.rows.forEach(row => {
+                     let val = this.getCellValue(row, 'STATUS');
+                     if (!val && row.task_details) {
+                         val = row.task_details.status;
+                     }
+                     if (val) {
+                         const statusUpper = val.toUpperCase().trim();
+                         if (statusUpper === 'COMPLETED' || statusUpper === 'COMPLETE' || statusUpper === 'APPROVED') {
+                             completed++;
+                         }
+                     }
+                 });
+                 const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+                 return { completed, total, percent };
+             },
+
+             isRowCompleted(row) {
+                 if (!row) return false;
+                 const statusVal = (this.getCellValue(row, 'STATUS') || '').toLowerCase().trim();
+                 if (statusVal === 'completed' || statusVal === 'complete') {
+                     return true;
+                 }
+                 if (row.task_details) {
+                     const taskStatus = (row.task_details.status || '').toLowerCase().trim();
+                     if (taskStatus === 'completed' || taskStatus === 'approved') {
+                         return true;
+                     }
+                 }
+                 return false;
+             },
+
+             renderCharts() {
+                 this.$nextTick(() => {
+                     if (this.chartInstance) {
+                         this.chartInstance.destroy();
+                         this.chartInstance = null;
+                     }
+                     if (this.listPidStatusChartInstance) {
+                         this.listPidStatusChartInstance.destroy();
+                         this.listPidStatusChartInstance = null;
+                     }
+                     if (this.listPidProjectChartInstance) {
+                         this.listPidProjectChartInstance.destroy();
+                         this.listPidProjectChartInstance = null;
+                     }
+
+                     if ('{{ table.job_type }}' === 'LIST_PID') {
+                         const statusCtx = document.getElementById('listPidStatusChart');
+                         if (statusCtx) {
+                             const statusCounts = {};
+                             this.filteredRows().forEach(row => {
+                                 let status = this.getCellValue(row, 'STATUS');
+                                 if (!status && row.task_details) {
+                                     status = row.task_details.status;
+                                 }
+                                 status = status || 'PENDING';
+                                 statusCounts[status] = (statusCounts[status] || 0) + 1;
+                             });
+
+                             const labels = Object.keys(statusCounts);
+                             const data = Object.values(statusCounts);
+                             const colors = labels.map((label, idx) => {
+                                 const palette = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6'];
+                                 return palette[idx % palette.length];
+                             });
+
+                             this.listPidStatusChartInstance = new Chart(statusCtx, {
+                                 type: 'doughnut',
+                                 data: {
+                                     labels: labels,
+                                     datasets: [{
+                                         data: data,
+                                         backgroundColor: colors
+                                     }]
+                                 },
+                                 options: {
+                                     responsive: true,
+                                     maintainAspectRatio: false,
+                                     plugins: {
+                                         legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 10 } } }
+                                     }
+                                 }
+                             });
+                         }
+
+                         const projectCtx = document.getElementById('listPidProjectChart');
+                         if (projectCtx) {
+                             const projectCounts = {};
+                             this.filteredRows().forEach(row => {
+                                 const project = this.getCellValue(row, 'PROJECT') || 'No Project';
+                                 projectCounts[project] = (projectCounts[project] || 0) + 1;
+                             });
+
+                             const sortedProjects = Object.entries(projectCounts)
+                                 .sort((a, b) => b[1] - a[1])
+                                 .slice(0, 7);
+
+                             const labels = sortedProjects.map(entry => entry[0]);
+                             const data = sortedProjects.map(entry => entry[1]);
+
+                             this.listPidProjectChartInstance = new Chart(projectCtx, {
+                                 type: 'bar',
+                                 data: {
+                                     labels: labels,
+                                     datasets: [{
+                                         label: 'Enquiries',
+                                         data: data,
+                                         backgroundColor: '#8b5cf6',
+                                         borderRadius: 4
+                                     }]
+                                 },
+                                 options: {
+                                     responsive: true,
+                                     maintainAspectRatio: false,
+                                     plugins: {
+                                         legend: { display: false }
+                                     },
+                                     scales: {
+                                         y: { beginAtZero: true, ticks: { stepSize: 1 } }
+                                     }
+                                 }
+                             });
+                         }
+                         return;
+                     }
+
+                     const ctx = document.getElementById('priorityChart');
+                     if (!ctx) return;
+                     
+                     const priorityCounts = { 'Urgent': 0, 'High': 0, 'Med': 0, 'Low': 0 };
+                     this.filteredRows().forEach(row => {
+                         const priority = this.getCellValue(row, 'PRIORITY');
+                         if (priority in priorityCounts) {
+                             priorityCounts[priority]++;
+                         } else if (priority) {
+                             const pl = priority.toLowerCase();
+                             if (pl.startsWith('med')) {
+                                 priorityCounts['Med']++;
+                             } else if (pl.startsWith('urg')) {
+                                 priorityCounts['Urgent']++;
+                             } else if (pl.startsWith('hi')) {
+                                 priorityCounts['High']++;
+                             } else if (pl.startsWith('lo')) {
+                                 priorityCounts['Low']++;
+                             }
+                         }
+                     });
+                     
+                     this.chartInstance = new Chart(ctx, {
                         type: 'bar',
                         data: {
                             labels: ['Urgent', 'High', 'Med', 'Low'],
@@ -1305,7 +1646,8 @@
                 if (status === 'COMPLETED' || status === 'APPROVED') return false;
                 
                 const isSales = '{{ table.job_type }}' === 'SALES';
-                const dateCol = isSales ? 'FOLLOW_UP_DATE' : 'DUE_DATE';
+                const isListPid = '{{ table.job_type }}' === 'LIST_PID';
+                const dateCol = isSales ? 'FOLLOW_UP_DATE' : (isListPid ? 'DUE_DATE_FLOW_FORCE' : 'DUE_DATE');
                 const dueDateVal = this.getCellValue(row, dateCol);
                 if (!dueDateVal) return false;
                 
@@ -1507,12 +1849,15 @@
 
             submitInlineRow() {
                 const isSales = '{{ table.job_type }}' === 'SALES';
-                const nameVal = isSales ? this.newRowCells.CUSTOMER_NAME : this.newRowCells.TASK_NAME;
-                const dateVal = isSales ? this.newRowCells.FOLLOW_UP_DATE : this.newRowCells.DUE_DATE;
+                const isListPid = '{{ table.job_type }}' === 'LIST_PID';
+                const nameVal = isSales ? this.newRowCells.CUSTOMER_NAME : (isListPid ? this.newRowCells.ENQUIRY_NO : this.newRowCells.TASK_NAME);
+                const dateVal = isSales ? this.newRowCells.FOLLOW_UP_DATE : (isListPid ? this.newRowCells.DUE_DATE_FLOW_FORCE : this.newRowCells.DUE_DATE);
                 
                 if (!nameVal || !dateVal) {
                     if (isSales) {
                         alert("Customer Name and Follow-up Date are mandatory fields.");
+                    } else if (isListPid) {
+                        alert("Enquiry No and Flow Force Due Date are mandatory fields.");
                     } else {
                         alert("Task Name and Due Date are mandatory fields.");
                     }
@@ -1544,6 +1889,25 @@
                             this.newRowCells = {
                                 CUSTOMER_NAME: '',
                                 FOLLOW_UP_DATE: ''
+                            };
+                        } else if (isListPid) {
+                            this.newRowCells = {
+                                ENQUIRY_NO: '',
+                                PID: '',
+                                NEW_PID_NO: '',
+                                SALES_ORDER: '',
+                                PO: '',
+                                DATE: '',
+                                FFE_SINGAPORE: '',
+                                COMPANY_NAME: '',
+                                DESCRIPTION: '',
+                                QTY: '',
+                                DUE_DATE_CUSTOMER: '',
+                                DUE_DATE_FLOW_FORCE: '',
+                                PROJECT: '',
+                                STATUS: '',
+                                INITIAL_MAIL: '',
+                                ALERT_MAIL: ''
                             };
                         } else {
                             this.newRowCells = {
@@ -1987,13 +2351,14 @@
             openTaskModal(row) {
                 this.activeRow = row;
                 const isSales = '{{ table.job_type }}' === 'SALES';
-                this.activeTaskName = isSales ? this.getCellValue(row, 'CUSTOMER_NAME') : this.getCellValue(row, 'TASK_NAME');
-                this.activeTaskDueDate = isSales ? this.getCellValue(row, 'FOLLOW_UP_DATE') : this.getCellValue(row, 'DUE_DATE');
+                const isListPid = '{{ table.job_type }}' === 'LIST_PID';
+                this.activeTaskName = isSales ? this.getCellValue(row, 'CUSTOMER_NAME') : (isListPid ? (this.getCellValue(row, 'ENQUIRY_NO') || this.getCellValue(row, 'PID') || 'Unnamed') : this.getCellValue(row, 'TASK_NAME'));
+                this.activeTaskDueDate = isSales ? this.getCellValue(row, 'FOLLOW_UP_DATE') : (isListPid ? (this.getCellValue(row, 'DUE_DATE_FLOW_FORCE') || this.getCellValue(row, 'DUE_DATE_CUSTOMER')) : this.getCellValue(row, 'DUE_DATE'));
                 this.activeTaskPriority = row.task_details ? row.task_details.priority : 'MEDIUM';
                 this.activeTaskStatus = row.task_details ? row.task_details.status : 'PENDING';
                 this.isTaskModalOpen = true;
                 
-                if (isSales) {
+                if (isSales || isListPid) {
                     this.salesDiscussedPoints = '';
                     this.salesNextFollowUpDate = '';
                     this.salesStatus = this.activeTaskStatus;

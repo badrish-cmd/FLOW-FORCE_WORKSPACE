@@ -191,9 +191,9 @@ class TaskViewSet(viewsets.ModelViewSet):
     def log_follow_up(self, request, pk=None):
         task = get_object_or_404(Task, pk=pk)
         
-        # Verify table is SALES
-        if task.row.table.job_type != "SALES":
-            return Response({"error": "This action is only supported for Sales tasks."}, status=status.HTTP_400_BAD_REQUEST)
+        # Verify table is SALES or LIST_PID
+        if task.row.table.job_type not in ["SALES", "LIST_PID"]:
+            return Response({"error": "This action is only supported for Sales or LIST_PID tasks."}, status=status.HTTP_400_BAD_REQUEST)
         
         discussed_points = request.data.get("discussed_points")
         new_status = request.data.get("status")
@@ -262,6 +262,14 @@ class TaskViewSet(viewsets.ModelViewSet):
         if follow_up_col and is_continuing and next_follow_up_date:
             CellValue.objects.update_or_create(
                 row=task.row, column=follow_up_col,
+                defaults={"value": next_follow_up_date.isoformat(), "updated_by": request.user}
+            )
+            
+        # Sync next follow up date to DUE_DATE_FLOW_FORCE column if continuing
+        flow_force_col = Column.objects.filter(table=task.row.table, name__iexact="DUE_DATE_FLOW_FORCE").first()
+        if flow_force_col and is_continuing and next_follow_up_date:
+            CellValue.objects.update_or_create(
+                row=task.row, column=flow_force_col,
                 defaults={"value": next_follow_up_date.isoformat(), "updated_by": request.user}
             )
             

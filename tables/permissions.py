@@ -113,8 +113,13 @@ def get_column_access_level(user, column):
         return access_rule.access_level
     except ColumnAccess.DoesNotExist:
         # Default behavior:
-        # System columns INITIAL_MAIL and ALERT_MAIL are always READ_ONLY for employees,
-        # and S_NO is always READ_ONLY for everyone.
+        if table.job_type == "LIST_PID":
+            if has_table_access(user, table, "EDIT"):
+                return "EDITABLE"
+            return "READ_ONLY"
+
+        # System columns default to read-only for employees or editable based on context
+        # S_NO, DATE, DUE_DATE, TASK_NAME, INITIAL_MAIL, ALERT_MAIL
         if column.is_system_column:
             if column.name == "S_NO":
                 return "READ_ONLY"

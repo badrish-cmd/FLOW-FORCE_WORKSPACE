@@ -302,8 +302,8 @@ def send_daily_alert_mails():
             continue
 
         # 1. Create in-app notifications separated by task type
-        sales_tasks = [t for t in tasks_to_alert if t.row.table.job_type == "SALES"]
-        other_tasks = [t for t in tasks_to_alert if t.row.table.job_type != "SALES"]
+        sales_tasks = [t for t in tasks_to_alert if t.row.table.job_type in ["SALES", "LIST_PID"]]
+        other_tasks = [t for t in tasks_to_alert if t.row.table.job_type not in ["SALES", "LIST_PID"]]
 
         if sales_tasks:
             Notification.objects.create(
@@ -324,7 +324,7 @@ def send_daily_alert_mails():
         # 2. Build consolidated email log details
         task_items = []
         for task in tasks_to_alert:
-            is_sales = task.row.table.job_type == "SALES"
+            is_sales = task.row.table.job_type in ["SALES", "LIST_PID"]
             task_link = f"http://localhost:8000/tables/{task.row.table_id}/?open_task_id={task.id}"
             
             # Fetch last follow-up discussion points for sales tasks
@@ -414,7 +414,7 @@ def send_alert_mail(task_id):
         if employee.role in ["ADMIN", "SUPER_ADMIN"]:
             continue
 
-        is_sales = task.row.table.job_type == "SALES"
+        is_sales = task.row.table.job_type in ["SALES", "LIST_PID"]
         
         # If it is not a sales task, check if ALERT_MAIL has already been logged.
         # For sales, rolling follow-ups require emails to be sent on every new follow-up date,

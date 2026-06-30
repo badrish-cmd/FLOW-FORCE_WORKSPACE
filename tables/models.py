@@ -21,7 +21,7 @@ class Table(models.Model):
     is_active = models.BooleanField(default=True)
     job_type = models.CharField(
         max_length=50,
-        choices=[("SALES", "Sales"), ("GENERAL", "General"), ("ENGINEER", "Engineer")],
+        choices=[("SALES", "Sales"), ("GENERAL", "General"), ("ENGINEER", "Engineer"), ("LIST_PID", "List PID")],
         default="GENERAL"
     )
     created_at = models.DateTimeField(auto_now_add=True)
@@ -46,6 +46,26 @@ class Table(models.Model):
                     ("CUSTOMER_NAME", "TEXT", 4),
                     ("INITIAL_MAIL", "TEXT", 5),
                     ("ALERT_MAIL", "TEXT", 6),
+                ]
+            elif self.job_type == "LIST_PID":
+                system_cols = [
+                    ("S_NO", "NUMBER", 1),
+                    ("ENQUIRY_NO", "TEXT", 2),
+                    ("PID", "TEXT", 3),
+                    ("NEW_PID_NO", "TEXT", 4),
+                    ("SALES_ORDER", "TEXT", 5),
+                    ("PO", "TEXT", 6),
+                    ("DATE", "DATE", 7),
+                    ("FFE_SINGAPORE", "TEXT", 8),
+                    ("COMPANY_NAME", "TEXT", 9),
+                    ("DESCRIPTION", "TEXT", 10),
+                    ("QTY", "NUMBER", 11),
+                    ("DUE_DATE_CUSTOMER", "DATE", 12),
+                    ("DUE_DATE_FLOW_FORCE", "DATE", 13),
+                    ("PROJECT", "TEXT", 14),
+                    ("STATUS", "TEXT", 15),
+                    ("INITIAL_MAIL", "TEXT", 16),
+                    ("ALERT_MAIL", "TEXT", 17),
                 ]
             else:
                 system_cols = [
