@@ -177,7 +177,7 @@ class TablesTestCase(TestCase):
 
         response = view(request, pk=table.id)
         self.assertEqual(response.status_code, 400)
-        self.assertIn("Column mismatch", response.data["error"])
+        self.assertIn("Required column", response.data["error"])
 
     def test_import_google_sheet_mocked(self):
         from unittest.mock import patch

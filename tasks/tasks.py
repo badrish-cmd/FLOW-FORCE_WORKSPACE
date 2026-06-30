@@ -263,7 +263,7 @@ def send_daily_alert_mails():
     """
     today = timezone.localdate()
     tasks = Task.objects.filter(
-        due_date=today
+        due_date__lte=today
     ).exclude(
         status__in=['COMPLETED', 'APPROVED']
     ).select_related('row', 'row__table', 'assigned_by').prefetch_related('assigned_to')
@@ -282,19 +282,26 @@ def send_daily_alert_mails():
     for employee, tasks_list in employee_tasks.items():
         tasks_to_alert = []
         for task in tasks_list:
-            # Check if alert_mail_sent is already True
-            if task.alert_mail_sent:
-                continue
-
-            # Double check with spreadsheet CellValue directly
-            alert_mail_col = Column.objects.filter(table=task.row.table, name__iexact="ALERT_MAIL").first()
-            if alert_mail_col:
-                alert_cell = CellValue.objects.filter(row=task.row, column=alert_mail_col).first()
-                if alert_cell and str(alert_cell.value).upper() == "YES":
-                    # Keep DB status in sync
-                    task.alert_mail_sent = True
-                    task.save(update_fields=['alert_mail_sent'])
+            is_sales = task.row.table.job_type in ["SALES", "LIST_PID"]
+            
+            if is_sales:
+                # For sales/list_pid, allow sending if no alert mail has been sent today
+                if EmailLog.objects.filter(task=task, recipient_email=employee.email, email_type="ALERT_MAIL", created_at__date=today).exists():
                     continue
+            else:
+                # For other tasks, only alert once
+                if task.alert_mail_sent:
+                    continue
+
+                # Double check with spreadsheet CellValue directly
+                alert_mail_col = Column.objects.filter(table=task.row.table, name__iexact="ALERT_MAIL").first()
+                if alert_mail_col:
+                    alert_cell = CellValue.objects.filter(row=task.row, column=alert_mail_col).first()
+                    if alert_cell and str(alert_cell.value).upper() == "YES":
+                        # Keep DB status in sync
+                        task.alert_mail_sent = True
+                        task.save(update_fields=['alert_mail_sent'])
+                        continue
 
             tasks_to_alert.append(task)
 
@@ -569,61 +576,86 @@ def send_approval_status_mail(task_id):
 def check_overdue_escalations():
     """
     Daily check for overdue tasks and escalate to higher roles.
+    Aggregated for each table the employee has access to and sent accordingly.
     """
     today = timezone.localdate()
-    tasks = Task.objects.filter(due_date__lt=today).exclude(status__in=['COMPLETED', 'APPROVED'])
+    all_overdue = Task.objects.filter(due_date__lt=today).exclude(status__in=['COMPLETED', 'APPROVED']).select_related('row', 'row__table', 'row__table__department').prefetch_related('assigned_to')
 
-    for task in tasks:
-        days_overdue = (today - task.due_date).days
+    overdue_tasks = []
+    for task in all_overdue:
+        if (today - task.due_date).days == 6:
+            overdue_tasks.append(task)
+
+    if not overdue_tasks:
+        return
+
+    # Group tasks by employee -> table
+    employee_table_tasks = {}
+    for task in overdue_tasks:
+        recipients = list(task.assigned_to.all())
+        for employee in recipients:
+            if employee.role in ["ADMIN", "SUPER_ADMIN"]:
+                continue
+            if employee not in employee_table_tasks:
+                employee_table_tasks[employee] = {}
+            table = task.row.table
+            if table not in employee_table_tasks[employee]:
+                employee_table_tasks[employee][table] = []
+            employee_table_tasks[employee][table].append(task)
+
+    for employee, tables_dict in employee_table_tasks.items():
+        # Build template context
+        table_data = []
+        all_employee_tasks_for_log = []
         
-        recipients = []
-        if days_overdue == 6:
-            recipients = list(task.assigned_to.all())
-        else:
-            continue
+        for table, tasks_list in tables_dict.items():
+            tasks_info = []
+            for task in tasks_list:
+                # Update task last escalation level in DB
+                task.last_escalation_level = 6
+                task.last_escalation_at = timezone.now()
+                task.save()
+                all_employee_tasks_for_log.append(task)
 
-        unique_recipients = []
-        seen_emails = set()
-        for r in recipients:
-            if r.email and r.email not in seen_emails:
-                seen_emails.add(r.email)
-                unique_recipients.append(r)
-
-        if unique_recipients:
-            task.last_escalation_level = days_overdue
-            task.last_escalation_at = timezone.now()
-            task.save()
-
-            for recipient in unique_recipients:
-                subject = f"ESCALATION: Overdue Task - {task.task_name} ({days_overdue} days overdue)"
                 site_url = getattr(settings, 'SITE_URL', 'https://flowforceworkspace.cloud')
                 task_link = f"{site_url}/tables/{task.row.table_id}/?open_task_id={task.id}"
-
-                context = {
-                    'recipient_name': recipient.full_name,
-                    'days': days_overdue,
-                    'task_name': task.task_name,
+                
+                tasks_info.append({
+                    'name': task.task_name,
                     'due_date': str(task.due_date),
-                    'employee_name': ", ".join([u.full_name for u in task.assigned_to.all()]),
-                    'department_name': task.row.table.department.name if task.row.table.department else "Global",
-                    'status': task.status,
                     'priority': task.priority,
-                    'task_link': task_link,
-                }
+                    'status': task.status,
+                    'link': task_link
+                })
+            
+            table_data.append({
+                'table_name': table.name,
+                'tasks': tasks_info
+            })
 
-                html_message = render_to_string('emails/overdue_escalation_mail.html', context)
+        if not table_data:
+            continue
 
-                email_log = EmailLog.objects.create(
-                    recipient_email=recipient.email,
-                    subject=subject,
-                    body=html_message,
-                    task=task,
-                    email_type='OVERDUE_ESCALATION_MAIL',
-                    status='PENDING',
-                    max_retries=3,
-                )
+        subject = f"ESCALATION: Overdue Tasks Alert (6 days overdue)"
+        context = {
+            'recipient_name': employee.full_name or employee.email,
+            'table_data': table_data
+        }
 
-                send_email_log_task.delay(email_log.id)
+        html_message = render_to_string('emails/overdue_escalation_aggregate_mail.html', context)
+
+        # Log and send aggregated email
+        email_log = EmailLog.objects.create(
+            recipient_email=employee.email,
+            subject=subject,
+            body=html_message,
+            task=all_employee_tasks_for_log[0], # Link to first task in log
+            email_type='OVERDUE_ESCALATION_MAIL',
+            status='PENDING',
+            max_retries=3,
+        )
+
+        send_email_log_task.delay(email_log.id)
 
 @shared_task
 def retry_failed_emails():

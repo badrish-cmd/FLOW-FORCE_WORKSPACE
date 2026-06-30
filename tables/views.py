@@ -303,6 +303,7 @@ class TableViewSet(viewsets.ModelViewSet):
         # 1. Dynamically locate the header row
         header_idx = -1
         is_sales = table.job_type == "SALES"
+        is_list_pid = table.job_type == "LIST_PID"
         
         if header_row is not None and data_row is not None:
             try:
@@ -315,11 +316,13 @@ class TableViewSet(viewsets.ModelViewSet):
             for idx, line in enumerate(lines):
                 tokens = [t.strip().upper() for t in line.split(",")]
                 # Check if this line looks like our header row
-                # It should contain S_NO and task name / customer name and due date / follow up date
                 has_s_no = any(t in ["S_NO", "S.NO", "S. NO.", "SL_NO", "SL.NO", "SL. NO.", "S NO", "SL NO"] for t in tokens)
                 if is_sales:
                     has_task = any("CUSTOMER" in t or "CLIENT" in t or "TASK" in t for t in tokens)
                     has_due = any("FOLLOW" in t or "UP" in t or "DUE" in t for t in tokens)
+                elif is_list_pid:
+                    has_task = any("ENQUIRY" in t or "PID" in t or "TASK" in t for t in tokens)
+                    has_due = any("FLOW" in t or "FORCE" in t or "CUSTOMER" in t or "DUE" in t for t in tokens)
                 else:
                     has_task = any("TASK" in t for t in tokens)
                     has_due = any("DUE" in t for t in tokens)
@@ -352,10 +355,31 @@ class TableViewSet(viewsets.ModelViewSet):
             h = h.strip("_")
             
             # Map standard column name synonyms
-            if h in ["TASK_NAME", "TASKNAME", "TASK", "CUSTOMER_NAME", "CUSTOMERNAME", "CUSTOMER", "CLIENT_NAME", "CLIENTNAME", "CLIENT"]:
-                return "CUSTOMER_NAME" if is_sales else "TASK_NAME"
-            if h in ["DUE_DATE", "DUEDATE", "FOLLOW_UP_DATE", "FOLLOWUPDATE", "FOLLOW_UP"]:
-                return "FOLLOW_UP_DATE" if is_sales else "DUE_DATE"
+            if is_sales:
+                if h in ["TASK_NAME", "TASKNAME", "TASK", "CUSTOMER_NAME", "CUSTOMERNAME", "CUSTOMER", "CLIENT_NAME", "CLIENTNAME", "CLIENT"]:
+                    return "CUSTOMER_NAME"
+                if h in ["DUE_DATE", "DUEDATE", "FOLLOW_UP_DATE", "FOLLOWUPDATE", "FOLLOW_UP"]:
+                    return "FOLLOW_UP_DATE"
+            elif is_list_pid:
+                if h in ["ENQUIRY_NO", "ENQUIRYNO", "ENQUIRY", "ENQUIRIES", "TASK_NAME", "TASKNAME", "TASK", "CUSTOMER_NAME"]:
+                    return "ENQUIRY_NO"
+                if h in ["DUE_DATE_FLOW_FORCE", "FLOW_FORCE_DUE_DATE", "FLOW_FORCE", "DUE_DATE", "FOLLOW_UP_DATE"]:
+                    return "DUE_DATE_FLOW_FORCE"
+                if h in ["NEW_PID_NO", "NEWPIDNO", "NEW_PID"]:
+                    return "NEW_PID_NO"
+                if h in ["FFE_SINGAPORE", "FFE_SINGAPORE_PTE_LTD", "FFE"]:
+                    return "FFE_SINGAPORE"
+                if h in ["COMPANY_NAME", "COMPANYNAME", "COMPANY"]:
+                    return "COMPANY_NAME"
+                if h in ["DUE_DATE_CUSTOMER", "CUSTOMER_DUE_DATE", "DUE_CUSTOMER", "CUSTOMER_DUE"]:
+                    return "DUE_DATE_CUSTOMER"
+                if h in ["QTY", "QUANTITY"]:
+                    return "QTY"
+            else:
+                if h in ["TASK_NAME", "TASKNAME", "TASK", "CUSTOMER_NAME", "CUSTOMERNAME", "CUSTOMER", "CLIENT_NAME", "CLIENTNAME", "CLIENT"]:
+                    return "TASK_NAME"
+                if h in ["DUE_DATE", "DUEDATE", "FOLLOW_UP_DATE", "FOLLOWUPDATE", "FOLLOW_UP"]:
+                    return "DUE_DATE"
             if h in ["INITIAL_MAIL", "INITIALMAIL"]:
                 return "INITIAL_MAIL"
             if h in ["ALERT_MAIL", "ALERTMAIL"]:
@@ -382,24 +406,15 @@ class TableViewSet(viewsets.ModelViewSet):
             csv_headers.append(normalized)
             header_mapping[name] = normalized
 
-        # Check for column equality
-        missing_in_csv = db_col_names - set(csv_headers)
-        extra_in_csv = set(csv_headers) - db_col_names
+        # Strict validation has been changed to lenient/dynamic mapping as requested.
+        # We only require that the primary task identifier and date columns are present.
+        required_header = "CUSTOMER_NAME" if is_sales else ("ENQUIRY_NO" if is_list_pid else "TASK_NAME")
+        required_date = "FOLLOW_UP_DATE" if is_sales else ("DUE_DATE_FLOW_FORCE" if is_list_pid else "DUE_DATE")
 
-        # If there's a mismatch, return user-friendly error message
-        if missing_in_csv or extra_in_csv:
-            err_msg = "Column mismatch. Please ensure all columns are equal."
-            if missing_in_csv:
-                missing_orig = [normalized_db_cols[norm].name for norm in missing_in_csv]
-                err_msg += f" Missing in sheet: {', '.join(sorted(missing_orig))}."
-            if extra_in_csv:
-                # To display original extra column name
-                extra_orig = []
-                for name in reader.fieldnames:
-                    if header_mapping.get(name) in extra_in_csv:
-                        extra_orig.append(name)
-                err_msg += f" Extra in sheet: {', '.join(sorted(extra_orig))}."
-            return None, err_msg
+        if required_header not in csv_headers:
+            return None, f"Required column for task name/customer name/enquiry no is missing in the CSV sheet headers. Expected one of: {required_header}"
+        if required_date not in csv_headers:
+            return None, f"Required column for due date/follow up date is missing in the CSV sheet headers. Expected one of: {required_date}"
 
         created_rows = []
         for row_dict in reader:
@@ -414,6 +429,9 @@ class TableViewSet(viewsets.ModelViewSet):
             if is_sales:
                 task_name = normalized_row.get("CUSTOMER_NAME")
                 due_date_str = normalized_row.get("FOLLOW_UP_DATE")
+            elif is_list_pid:
+                task_name = normalized_row.get("ENQUIRY_NO") or normalized_row.get("PID") or "Unnamed"
+                due_date_str = normalized_row.get("DUE_DATE_FLOW_FORCE") or normalized_row.get("DUE_DATE_CUSTOMER")
             else:
                 task_name = normalized_row.get("TASK_NAME")
                 due_date_str = normalized_row.get("DUE_DATE")
@@ -476,8 +494,8 @@ class TableViewSet(viewsets.ModelViewSet):
             else:
                 alert_mail_val = "NO"
 
-            system_field_names = ["S_NO", "DATE", "FOLLOW_UP_DATE", "CUSTOMER_NAME", "INITIAL_MAIL", "ALERT_MAIL"] if is_sales else ["S_NO", "DATE", "DUE_DATE", "TASK_NAME", "INITIAL_MAIL", "ALERT_MAIL"]
             if is_sales:
+                system_field_names = ["S_NO", "DATE", "FOLLOW_UP_DATE", "CUSTOMER_NAME", "INITIAL_MAIL", "ALERT_MAIL"]
                 cell_values = {
                     "S_NO": s_no,
                     "DATE": date_val,
@@ -486,7 +504,18 @@ class TableViewSet(viewsets.ModelViewSet):
                     "INITIAL_MAIL": initial_mail_val,
                     "ALERT_MAIL": alert_mail_val
                 }
+            elif is_list_pid:
+                system_field_names = ["S_NO", "DATE", "ENQUIRY_NO", "DUE_DATE_FLOW_FORCE", "INITIAL_MAIL", "ALERT_MAIL"]
+                cell_values = {
+                    "S_NO": s_no,
+                    "DATE": date_val,
+                    "ENQUIRY_NO": task_name,
+                    "DUE_DATE_FLOW_FORCE": due_date.isoformat(),
+                    "INITIAL_MAIL": initial_mail_val,
+                    "ALERT_MAIL": alert_mail_val
+                }
             else:
+                system_field_names = ["S_NO", "DATE", "DUE_DATE", "TASK_NAME", "INITIAL_MAIL", "ALERT_MAIL"]
                 cell_values = {
                     "S_NO": s_no,
                     "DATE": date_val,

@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1f2937; background-color: #f3f4f6; margin: 0; padding: 0; }
+        .wrapper { width: 100%; background-color: #f3f4f6; padding: 40px 0; }
+        .container { max-width: 650px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); }
+        .header { background: linear-gradient(135deg, #be123c, #9f1239); color: #ffffff; padding: 32px 24px; text-align: center; }
+        .header h1 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.025em; }
+        .content { padding: 32px 24px; }
+        .greeting { font-size: 18px; font-weight: 600; color: #111827; margin-top: 0; margin-bottom: 16px; }
+        .intro { font-size: 16px; color: #4b5563; margin-bottom: 24px; }
+        .table-section { margin-bottom: 28px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; background-color: #ffffff; }
+        .table-header { background-color: #f9fafb; padding: 12px 16px; font-weight: 700; font-size: 14px; color: #374151; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; }
+        .table-header-title { text-transform: uppercase; letter-spacing: 0.05em; }
+        .table-body { padding: 0; }
+        .tasks-table { width: 100%; border-collapse: collapse; text-align: left; }
+        .tasks-table th { background-color: #f3f4f6; padding: 10px 14px; font-size: 12px; font-weight: 600; text-transform: uppercase; color: #4b5563; border-bottom: 1px solid #e5e7eb; }
+        .tasks-table td { padding: 12px 14px; font-size: 14px; border-bottom: 1px solid #e5e7eb; color: #111827; }
+        .tasks-table tr:last-child td { border-bottom: none; }
+        .priority-badge { font-size: 11px; font-weight: 700; padding: 2px 6px; rounded: 4px; display: inline-block; text-transform: uppercase; border-radius: 4px; }
+        .priority-urgent { background-color: #fee2e2; color: #991b1b; }
+        .priority-high { background-color: #fef3c7; color: #92400e; }
+        .priority-medium { background-color: #dbeafe; color: #1e40af; }
+        .priority-low { background-color: #d1fae5; color: #065f46; }
+        .link-btn { font-size: 13px; font-weight: 600; color: #be123c !important; text-decoration: none; }
+        .link-btn:hover { text-decoration: underline; }
+        .outro { font-size: 15px; color: #4b5563; margin-top: 24px; margin-bottom: 24px; }
+        .footer { text-align: center; padding: 24px; border-top: 1px solid #e5e7eb; background-color: #fafafa; }
+        .footer-logo { font-size: 16px; font-weight: 700; color: #374151; margin-bottom: 6px; }
+        .footer-text { font-size: 12px; color: #9ca3af; margin: 0; }
+    </style>
+</head>
+<body>
+    <div class="wrapper">
+        <div class="container">
+            <div class="header">
+                <h1>Aggregated Overdue Escalations</h1>
+            </div>
+            
+            <div class="content">
+                <p class="greeting">Dear {{ recipient_name }},</p>
+                <p class="intro">You have task(s) that are exactly <strong>6 days overdue</strong> and require immediate action. Below is a summary grouped by table workspace:</p>
+                
+                {% for item in table_data %}
+                <div class="table-section">
+                    <div class="table-header">
+                        <span class="table-header-title">📋 {{ item.table_name }}</span>
+                    </div>
+                    <div class="table-body">
+                        <table class="tasks-table">
+                            <thead>
+                                <tr>
+                                    <th>Task / Enquiry</th>
+                                    <th>Due Date</th>
+                                    <th>Priority</th>
+                                    <th>Status</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for task in item.tasks %}
+                                <tr>
+                                    <td><strong>{{ task.name }}</strong></td>
+                                    <td>{{ task.due_date }}</td>
+                                    <td>
+                                        <span class="priority-badge 
+                                            {% if task.priority == 'URGENT' %}priority-urgent
+                                            {% elif task.priority == 'HIGH' %}priority-high
+                                            {% elif task.priority == 'LOW' %}priority-low
+                                            {% else %}priority-medium{% endif %}">
+                                            {{ task.priority }}
+                                        </span>
+                                    </td>
+                                    <td>{{ task.status }}</td>
+                                    <td>
+                                        <a href="{{ task.link }}" class="link-btn">Open Task</a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                {% endfor %}
+                
+                <p class="outro">Please log in to the workspace to address these overdue items immediately.</p>
+            </div>
+            
+            <div class="footer">
+                <div class="footer-logo">Flow-Force Workspace</div>
+                <p class="footer-text">This is an automated notification. Please do not reply directly to this email.</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

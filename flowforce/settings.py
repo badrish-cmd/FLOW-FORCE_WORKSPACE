@@ -148,7 +148,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Kolkata'
 
 USE_I18N = True
 
@@ -235,15 +235,15 @@ CELERY_BROKER_URL = 'redis://localhost:6379/0'
 CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
-CELERY_TIMEZONE = 'UTC'
+CELERY_TIMEZONE = 'Asia/Kolkata'
 CELERY_BEAT_SCHEDULE = {
     'send-daily-alert-mails': {
         'task': 'tasks.tasks.send_daily_alert_mails',
-        'schedule': crontab(hour=8, minute=0),  # 08:00 AM daily
+        'schedule': crontab(hour=9, minute=0),  # 09:00 AM daily (IST)
     },
     'check-overdue-escalations': {
         'task': 'tasks.tasks.check_overdue_escalations',
-        'schedule': crontab(hour=10, minute=0),  # 10:00 AM daily
+        'schedule': crontab(hour=9, minute=0),  # 09:00 AM daily (IST)
     },
     'retry-failed-emails': {
         'task': 'tasks.tasks.retry_failed_emails',
