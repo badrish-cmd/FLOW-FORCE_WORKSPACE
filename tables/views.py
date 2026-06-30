@@ -20,7 +20,7 @@ class TableViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return get_accessible_tables(self.request.user).prefetch_related('columns')
+        return get_accessible_tables(self.request.user).select_related('department').prefetch_related('columns')
 
     def perform_create(self, serializer):
         # Automatically assign creator and department if admin/department admin
@@ -1275,21 +1275,21 @@ class TableAccessViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return TableAccess.objects.all()
+        return TableAccess.objects.all().select_related('user', 'department')
 
 class ColumnAccessViewSet(viewsets.ModelViewSet):
     serializer_class = ColumnAccessSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return ColumnAccess.objects.all()
+        return ColumnAccess.objects.all().select_related('user')
 
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 
 @login_required
 def table_spreadsheet_view(request, table_id):
-    table = get_object_or_404(Table, id=table_id)
+    table = get_object_or_404(Table.objects.prefetch_related('columns'), id=table_id)
     if not has_table_access(request.user, table, "VIEW"):
         return redirect("/")
     has_edit = has_table_access(request.user, table, "EDIT")

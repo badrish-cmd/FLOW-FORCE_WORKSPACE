@@ -1023,25 +1023,25 @@
                         <div class="flex-grow overflow-y-auto pr-1 mb-3 scrollbar-thin space-y-3 flex flex-col pt-1">
                             <template x-for="comment in comments" :key="comment.id">
                                 <div class="flex items-start gap-2 animate-fade-in" 
-                                     :class="comment.author_detail.email === '{{ user.email }}' ? 'justify-end' : 'justify-start'">
+                                     :class="(comment.author_detail && comment.author_detail.email === '{{ user.email }}') ? 'justify-end' : 'justify-start'">
                                      
                                      <!-- Left Avatar -->
-                                     <template x-if="comment.author_detail.email !== '{{ user.email }}'">
+                                     <template x-if="!comment.author_detail || comment.author_detail.email !== '{{ user.email }}'">
                                          <div class="w-6.5 h-6.5 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 font-extrabold text-[9px]"
-                                              x-text="comment.author_detail.full_name ? comment.author_detail.full_name.split(' ').map(n => n[0]).join('').toUpperCase() : 'U'">
+                                              x-text="comment.author_detail && comment.author_detail.full_name ? comment.author_detail.full_name.split(' ').map(n => n[0]).join('').toUpperCase() : 'U'">
                                          </div>
                                      </template>
 
                                      <!-- Bubble -->
                                      <div class="max-w-[80%] flex flex-col"
-                                          :class="comment.author_detail.email === '{{ user.email }}' ? 'items-end' : 'items-start'">
+                                          :class="(comment.author_detail && comment.author_detail.email === '{{ user.email }}') ? 'items-end' : 'items-start'">
                                          <div class="flex items-center gap-1 text-[8px] text-slate-400 font-bold mb-0.5 px-0.5">
-                                             <span class="text-slate-600" x-text="comment.author_detail.full_name"></span>
+                                             <span class="text-slate-600" x-text="comment.author_detail ? comment.author_detail.full_name : 'Deleted User'"></span>
                                              <span>•</span>
                                              <span x-text="new Date(comment.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})"></span>
                                          </div>
                                          <div class="px-3 py-2 rounded-xl text-[11px] font-medium leading-normal shadow-sm"
-                                              :class="comment.author_detail.email === '{{ user.email }}' 
+                                              :class="(comment.author_detail && comment.author_detail.email === '{{ user.email }}') 
                                                  ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-tr-none' 
                                                  : 'bg-slate-100 text-slate-700 border border-slate-200/60 rounded-tl-none'">
                                              <p x-text="comment.content" style="white-space: pre-wrap;"></p>
@@ -1049,9 +1049,9 @@
                                      </div>
 
                                      <!-- Right Avatar -->
-                                     <template x-if="comment.author_detail.email === '{{ user.email }}'">
+                                     <template x-if="comment.author_detail && comment.author_detail.email === '{{ user.email }}'">
                                          <div class="w-6.5 h-6.5 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center text-white font-extrabold text-[9px]"
-                                              x-text="comment.author_detail.full_name ? comment.author_detail.full_name.split(' ').map(n => n[0]).join('').toUpperCase() : 'ME'">
+                                              x-text="comment.author_detail && comment.author_detail.full_name ? comment.author_detail.full_name.split(' ').map(n => n[0]).join('').toUpperCase() : 'ME'">
                                          </div>
                                      </template>
                                 </div>
@@ -1230,7 +1230,7 @@
                  this.rows.forEach(row => {
                      const pid = this.getCellValue(row, 'PID');
                      if (pid) {
-                         pids.add(pid.trim());
+                         pids.add(String(pid).trim());
                      }
                  });
                  return Array.from(pids).sort();
@@ -1266,7 +1266,7 @@
                  if (this.selectedPidFilter) {
                      result = result.filter(row => {
                          const pid = this.getCellValue(row, 'PID');
-                         return pid && pid.trim() === this.selectedPidFilter;
+                         return pid && String(pid).trim() === this.selectedPidFilter;
                      });
                  }
 
@@ -1316,7 +1316,7 @@
                  let count = 0;
                  this.filteredRows().forEach(row => {
                      const val = this.getCellValue(row, 'STATUS');
-                     if (val && val.toLowerCase().trim() === statusName.toLowerCase().trim()) {
+                     if (val && String(val).toLowerCase().trim() === String(statusName).toLowerCase().trim()) {
                          count++;
                      }
                  });
@@ -1365,8 +1365,8 @@
                      
                      const d = new Date(dateVal);
                      if (d >= range.monday && d <= range.sunday) {
-                         const actType = (this.getCellValue(row, 'ACTIVITY TYPE') || this.getCellValue(row, 'ACTIVITY_TYPE') || '').toLowerCase().trim();
-                         const status = (this.getCellValue(row, 'STATUS') || '').toLowerCase().trim();
+                         const actType = String(this.getCellValue(row, 'ACTIVITY TYPE') || this.getCellValue(row, 'ACTIVITY_TYPE') || '').toLowerCase().trim();
+                         const status = String(this.getCellValue(row, 'STATUS') || '').toLowerCase().trim();
                          
                          if (actType.includes('call') || actType.includes('whatsapp') || actType.includes('linkedin')) {
                              calls++;
@@ -1422,14 +1422,14 @@
 
              getGeneralStatusCount(statusName) {
                  let count = 0;
-                 const target = statusName.toUpperCase().replace(/\s+/g, '_');
+                 const target = String(statusName).toUpperCase().replace(/\s+/g, '_');
                  this.filteredRows().forEach(row => {
                      let val = this.getCellValue(row, 'STATUS');
                      if (!val && row.task_details) {
                          val = row.task_details.status;
                      }
                      if (val) {
-                         const normalized = val.toUpperCase().replace(/\s+/g, '_');
+                         const normalized = String(val).toUpperCase().replace(/\s+/g, '_');
                          if (normalized === target || 
                              (target === 'COMPLETED' && (normalized === 'COMPLETE' || normalized === 'COMPLETED')) ||
                              (target === 'COMPLETE' && (normalized === 'COMPLETED' || normalized === 'COMPLETE'))) {
@@ -1468,7 +1468,7 @@
                          val = row.task_details.status;
                      }
                      if (val) {
-                         const statusUpper = val.toUpperCase().trim();
+                         const statusUpper = String(val).toUpperCase().trim();
                          if (statusUpper === 'COMPLETED' || statusUpper === 'COMPLETE' || statusUpper === 'APPROVED') {
                              completed++;
                          }
@@ -1480,12 +1480,12 @@
 
              isRowCompleted(row) {
                  if (!row) return false;
-                 const statusVal = (this.getCellValue(row, 'STATUS') || '').toLowerCase().trim();
+                 const statusVal = String(this.getCellValue(row, 'STATUS') || '').toLowerCase().trim();
                  if (statusVal === 'completed' || statusVal === 'complete') {
                      return true;
                  }
                  if (row.task_details) {
-                     const taskStatus = (row.task_details.status || '').toLowerCase().trim();
+                     const taskStatus = String(row.task_details.status || '').toLowerCase().trim();
                      if (taskStatus === 'completed' || taskStatus === 'approved') {
                          return true;
                      }
@@ -1597,7 +1597,7 @@
                          if (priority in priorityCounts) {
                              priorityCounts[priority]++;
                          } else if (priority) {
-                             const pl = priority.toLowerCase();
+                             const pl = String(priority).toLowerCase();
                              if (pl.startsWith('med')) {
                                  priorityCounts['Med']++;
                              } else if (pl.startsWith('urg')) {

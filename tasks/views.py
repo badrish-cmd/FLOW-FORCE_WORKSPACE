@@ -20,12 +20,20 @@ class TaskViewSet(viewsets.ModelViewSet):
         # Users see tasks belonging to accessible tables
         user = self.request.user
         if user.role == "SUPER_ADMIN":
-            return Task.objects.all()
+            qs = Task.objects.all()
+        else:
+            # Get rows in user's accessible tables
+            from tables.permissions import get_accessible_tables
+            accessible_tables = get_accessible_tables(user)
+            qs = Task.objects.filter(row__table__in=accessible_tables)
 
-        # Get rows in user's accessible tables
-        from tables.permissions import get_accessible_tables
-        accessible_tables = get_accessible_tables(user)
-        return Task.objects.filter(row__table__in=accessible_tables)
+        return qs.select_related(
+            "row__table", "row__table__department", "assigned_by"
+        ).prefetch_related(
+            "assigned_to", "comments", "comments__author",
+            "activity_logs", "activity_logs__user",
+            "follow_ups", "follow_ups__entered_by"
+        )
 
     @action(detail=True, methods=["post"], url_path="update-status")
     @transaction.atomic
@@ -381,7 +389,7 @@ class TaskCommentViewSet(viewsets.ModelViewSet):
         task_id = self.request.query_params.get("task")
         if not task_id:
             return TaskComment.objects.none()
-        return TaskComment.objects.filter(task_id=task_id)
+        return TaskComment.objects.filter(task_id=task_id).select_related("author")
 
     def perform_create(self, serializer):
         task = serializer.validated_data["task"]
@@ -422,7 +430,7 @@ class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
         task_id = self.request.query_params.get("task")
         if not task_id:
             return ActivityLog.objects.none()
-        return ActivityLog.objects.filter(task_id=task_id)
+        return ActivityLog.objects.filter(task_id=task_id).select_related("user")
 
 class NotificationViewSet(viewsets.ModelViewSet):
     serializer_class = NotificationSerializer
