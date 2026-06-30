@@ -99,6 +99,57 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         return Response(TaskSerializer(task).data, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=["post"], url_path="bulk-update-status")
+    @transaction.atomic
+    def bulk_update_status(self, request):
+        task_ids = request.data.get("task_ids", [])
+        row_ids = request.data.get("row_ids", [])
+        new_status = request.data.get("status")
+
+        if not new_status or new_status not in dict(Task.STATUS_CHOICES):
+            return Response({"error": "Invalid status value"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not task_ids and not row_ids:
+            return Response({"error": "No task_ids or row_ids provided"}, status=status.HTTP_400_BAD_REQUEST)
+
+        tasks = Task.objects.none()
+        if task_ids:
+            tasks = Task.objects.filter(id__in=task_ids)
+        elif row_ids:
+            tasks = Task.objects.filter(row_id__in=row_ids)
+
+        if not tasks.exists():
+            return Response({"message": "No matching tasks found to update"}, status=status.HTTP_200_OK)
+
+        updated_count = 0
+        from tables.models import Column, CellValue
+
+        for task in tasks:
+            is_assigned = task.assigned_to.filter(id=request.user.id).exists()
+            if not (has_table_access(request.user, task.row.table, "EDIT") or (new_status == "COMPLETED" and is_assigned)):
+                continue
+
+            old_status = task.status
+            task.status = new_status
+            task.save(update_fields=["status"])
+
+            status_col = Column.objects.filter(table=task.row.table, name__iexact="STATUS").first()
+            if status_col:
+                CellValue.objects.update_or_create(
+                    row=task.row, column=status_col,
+                    defaults={"value": new_status, "updated_by": request.user}
+                )
+
+            ActivityLog.objects.create(
+                task=task,
+                action=f"Bulk changed status from {old_status} to {new_status}",
+                user=request.user,
+                details={"old_status": old_status, "new_status": new_status}
+            )
+            updated_count += 1
+
+        return Response({"message": f"Successfully updated status to {new_status} for {updated_count} task(s)"}, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=["post"], url_path="assign")
     @transaction.atomic
     def assign_task(self, request, pk=None):

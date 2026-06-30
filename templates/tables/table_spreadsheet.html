@@ -75,6 +75,12 @@
             <button x-show="selectedRowIds.length > 0" @click="bulkDeleteRows(true)" class="bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out flex items-center gap-1.5" x-transition style="display: none;">
                 <i class="fas fa-trash-alt"></i> <span>Delete Selected (<span x-text="selectedRowIds.length"></span>)</span>
             </button>
+            <button x-show="selectedRowIds.length > 0" @click="bulkUpdateSelectedStatus('COMPLETED')" class="bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out flex items-center gap-1.5" x-transition style="display: none;">
+                <i class="fas fa-check-circle"></i> <span>Mark Completed (<span x-text="selectedRowIds.length"></span>)</span>
+            </button>
+            <button x-show="selectedRowIds.length > 0" @click="bulkUpdateSelectedStatus('PENDING')" class="bg-amber-600 hover:bg-amber-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out flex items-center gap-1.5" x-transition style="display: none;">
+                <i class="fas fa-undo"></i> <span>Mark Pending (<span x-text="selectedRowIds.length"></span>)</span>
+            </button>
 
             {% if has_admin_access %}
             <div class="relative inline-block text-left" x-data="{ open: false }">
@@ -838,19 +844,20 @@
 
 
     <!-- TASK DETAIL & COMMENTS DRAWER/MODAL -->
-    <div x-show="isTaskModalOpen" class="fixed inset-0 z-50 flex items-center justify-end bg-gray-900 bg-opacity-50" style="display: none;">
-        <div class="bg-white w-full max-w-lg h-full p-6 shadow-2xl flex flex-col justify-between border-l border-gray-200" @click.away="isTaskModalOpen = false">
-            <div>
-                <div class="flex items-center justify-between bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white px-6 py-4 -mx-6 -mt-6 mb-6 border-b border-indigo-900/40">
+    <div x-show="isTaskModalOpen" class="fixed inset-0 z-50 flex items-center justify-end bg-slate-900 bg-opacity-40 backdrop-blur-sm" style="display: none;" x-transition>
+        <div class="bg-white w-full max-w-lg h-full p-6 shadow-2xl flex flex-col justify-between border-l border-gray-200 animate-slide-in" @click.away="isTaskModalOpen = false" x-transition:enter="transition ease-out duration-300 transform" x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0" x-transition:leave="transition ease-in duration-200 transform" x-transition:leave-start="translate-x-0" x-transition:leave-end="translate-x-full">
+            <div class="flex flex-col h-full overflow-hidden">
+                <!-- Header -->
+                <div class="flex items-center justify-between bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white px-6 py-4 -mx-6 -mt-6 mb-4 border-b border-indigo-900/40">
                     <div class="flex items-center gap-3">
                         <div class="bg-indigo-500/20 text-indigo-400 p-2.5 rounded-xl border border-indigo-500/30 shadow-inner">
-                            <i class="fas fa-comments text-lg"></i>
+                            <i class="fas fa-tasks text-lg"></i>
                         </div>
                         <div>
-                            <h3 class="text-sm font-bold tracking-wide">Task Details & Chat</h3>
+                            <h3 class="text-sm font-bold tracking-wide">Task Workspace</h3>
                             <p class="text-[9px] text-slate-400 font-semibold uppercase mt-0.5 tracking-widest flex items-center gap-1.5">
                                 <span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                                Discussion Feed
+                                Detail Panel
                             </p>
                         </div>
                     </div>
@@ -859,149 +866,236 @@
                     </button>
                 </div>
 
-                <!-- Task Properties -->
-                <div class="space-y-4 mb-6 bg-gray-50 p-4 rounded-xl border border-gray-100">
-                    <div class="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                            <span class="text-gray-500 font-medium">{% if table.job_type == 'SALES' %}Customer Name:{% else %}Task Name:{% endif %}</span>
-                            <div class="font-bold text-gray-900 mt-1" x-text="activeTaskName"></div>
-                        </div>
-                        <div>
-                            <span class="text-gray-500 font-medium">{% if table.job_type == 'SALES' %}Follow Up Date:{% else %}Due Date:{% endif %}</span>
-                            <div class="font-bold mt-1" :class="isOverdue(activeRow) ? 'text-red-600' : 'text-gray-900'" x-text="activeTaskDueDate"></div>
-                        </div>
-                        <div>
-                            <span class="text-gray-500 font-medium">Status:</span>
-                            <select x-model="activeTaskStatus" @change="updateTaskStatus" class="w-full mt-1 bg-white border border-gray-300 rounded p-1 text-sm">
-                                <option value="PENDING">Pending</option>
-                                <option value="IN_PROGRESS">In Progress</option>
-                                <option value="READY_FOR_REVIEW">Ready for Review</option>
-                                <option value="APPROVED">Approved</option>
-                                <option value="COMPLETED">Completed</option>
-                            </select>
-                        </div>
-                        <div>
-                            <span class="text-gray-500 font-medium">Priority:</span>
-                            <div class="font-bold text-gray-900 mt-1" x-text="activeTaskPriority"></div>
-                        </div>
-                    </div>
-                </div>
-
-                {% if table.job_type == 'SALES' or table.job_type == 'LIST_PID' %}
-                <!-- Sales Follow-ups Timeline -->
-                <div class="mt-6 border-t border-gray-200 pt-4">
-                    <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 mb-3 flex items-center gap-1.5">
-                        <i class="fas fa-history text-emerald-600"></i> Follow-up History
-                    </h4>
-                    <div class="space-y-3 overflow-y-auto max-h-[160px] pr-2 mb-4">
-                        <template x-for="fu in (activeRow.task_details ? activeRow.task_details.follow_ups : [])" :key="fu.id">
-                            <div class="p-3 bg-emerald-50/50 rounded-lg border border-emerald-100/80 text-xs">
-                                <div class="flex justify-between items-center mb-1">
-                                    <span class="font-bold text-emerald-800" x-text="fu.entered_by_detail ? fu.entered_by_detail.full_name : 'System'"></span>
-                                    <span class="text-gray-400 font-semibold" x-text="fu.follow_up_date"></span>
-                                </div>
-                                <p class="text-gray-700 font-medium" x-text="fu.discussed_points"></p>
-                                <template x-if="fu.next_follow_up_date">
-                                    <div class="mt-2 text-[10px] text-emerald-700 font-bold bg-emerald-100/50 px-2 py-0.5 rounded inline-block">
-                                        Next Follow-up: <span x-text="fu.next_follow_up_date"></span>
-                                    </div>
-                                </template>
-                            </div>
-                        </template>
-                        <template x-if="!activeRow.task_details || !activeRow.task_details.follow_ups || activeRow.task_details.follow_ups.length === 0">
-                            <div class="text-center py-4 text-gray-400 italic text-xs">
-                                No follow-up history logged yet.
-                            </div>
-                        </template>
-                    </div>
-                </div>
-
-                <!-- Record Today's Follow-up Form -->
-                <div class="mt-6 border-t border-gray-200 pt-4 bg-slate-50 p-4 rounded-xl border border-slate-100" x-show="activeRow.task_details && activeRow.task_details.status !== 'COMPLETED' && activeRow.task_details.status !== 'APPROVED'">
-                    <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 mb-3 flex items-center gap-1.5">
-                        <i class="fas fa-edit text-slate-600"></i> Record Today's Follow-up
-                    </h4>
-                    
-                    <div class="space-y-3">
-                        <div>
-                            <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Discussed Points *</label>
-                            <textarea x-model="salesDiscussedPoints" placeholder="What did you discuss today?" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs focus:ring-emerald-500 focus:border-emerald-500" rows="3"></textarea>
-                        </div>
-                        
-                        <div class="grid grid-cols-2 gap-3">
-                            <div>
-                                <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Next Action / Status *</label>
-                                <select x-model="salesStatus" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs">
-                                    <option value="IN_PROGRESS">Continuing (In Progress)</option>
-                                    <option value="COMPLETED">Closed (Completed)</option>
-                                    <option value="PENDING">Pending</option>
-                                    <option value="READY_FOR_REVIEW">Ready for Review</option>
-                                </select>
-                            </div>
-                            <div x-show="salesStatus !== 'COMPLETED'">
-                                <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Next Follow-up Date *</label>
-                                <input type="date" x-model="salesNextFollowUpDate" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs">
-                            </div>
-                        </div>
-
-                        <!-- Validation Error message -->
-                        <div x-show="salesError" class="text-[11px] text-red-600 font-bold" x-text="salesError"></div>
-
-                        <button @click="submitSalesFollowUp" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs py-2 transition duration-150 flex items-center justify-center gap-1.5 shadow-sm">
-                            <i class="fas fa-save"></i> Save Follow-up
-                        </button>
-                    </div>
-                </div>
-                {% endif %}
-
-                <!-- Report Issue Form -->
-                <div class="mb-6 bg-red-50 p-4 rounded-xl border border-red-100 space-y-3">
-                    <h4 class="text-xs font-bold uppercase tracking-wider text-red-800 flex items-center gap-1">
-                        <i class="fas fa-exclamation-circle"></i> Report / Flag Issue to Employee
-                    </h4>
-                    <div>
-                        <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Select Recipient</label>
-                        <select x-model="flagRecipientId" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs">
-                            <option value="">-- Select Recipient --</option>
-                            <template x-for="emp in recipients" :key="emp.id">
-                                <option :value="emp.id" x-text="`${emp.full_name || emp.email} (${emp.role})`"></option>
-                            </template>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Issue Description</label>
-                        <textarea x-model="flagDescription" placeholder="Enter description of the issue..." class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs" rows="2"></textarea>
-                    </div>
-                    <button @click="submitFlagIssue" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold rounded text-xs py-1.5 transition">
-                        Flag Issue
+                <!-- Tabs Navigation -->
+                <div class="flex border-b border-gray-200 mb-4 bg-gray-50 p-1 rounded-xl">
+                    <button @click="activeDrawerTab = 'properties'" 
+                            :class="activeDrawerTab === 'properties' ? 'bg-white text-slate-800 shadow-sm border border-gray-200/50' : 'text-gray-500 hover:text-slate-800'"
+                            class="flex-1 py-2 text-xs font-bold rounded-lg transition-all duration-150 flex items-center justify-center gap-1.5 focus:outline-none">
+                        <i class="fas fa-info-circle text-emerald-600"></i> Follow-ups & Info
+                    </button>
+                    <button @click="activeDrawerTab = 'chat'" 
+                            :class="activeDrawerTab === 'chat' ? 'bg-white text-slate-800 shadow-sm border border-gray-200/50' : 'text-gray-500 hover:text-slate-800'"
+                            class="flex-1 py-2 text-xs font-bold rounded-lg transition-all duration-150 flex items-center justify-center gap-1.5 focus:outline-none">
+                        <i class="fas fa-comments text-indigo-600"></i> Chat & Notes (<span x-text="comments.length"></span>)
                     </button>
                 </div>
 
-                <!-- Comments List -->
-                <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-1.5">
-                    <i class="fas fa-comments text-indigo-500"></i> Internal Notes & Discussion
-                </h4>
-                <div class="space-y-3 overflow-y-auto max-h-[300px] pr-2 mb-4 scrollbar-thin">
-                    <template x-for="comment in comments" :key="comment.id">
-                        <div class="p-3.5 rounded-xl text-xs flex flex-col gap-1.5 transition-all hover:shadow-sm"
-                             :class="comment.author_detail.email === '{{ user.email }}' ? 'bg-indigo-50 border border-indigo-100 ml-6' : 'bg-slate-50 border border-slate-100 mr-6'">
-                            <div class="flex justify-between items-center text-[10px]">
-                                <span class="font-bold text-slate-700" x-text="comment.author_detail.full_name"></span>
-                                <span class="text-slate-400" x-text="new Date(comment.created_at).toLocaleString()"></span>
+                <!-- Scrollable Body content -->
+                <div class="flex-grow overflow-y-auto pr-1 scrollbar-thin space-y-4">
+                    
+                    <!-- TAB 1: PROPERTIES & TIMELINE -->
+                    <div x-show="activeDrawerTab === 'properties'" class="space-y-4">
+                        
+                        <!-- Task Properties Grid -->
+                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                            <div class="grid grid-cols-2 gap-4 text-xs">
+                                <div>
+                                    <span class="text-slate-500 font-bold uppercase tracking-wider text-[10px]">{% if table.job_type == 'SALES' %}Customer Name{% else %}Task Name{% endif %}</span>
+                                    <div class="font-extrabold text-slate-800 mt-1 text-sm" x-text="activeTaskName"></div>
+                                </div>
+                                <div>
+                                    <span class="text-slate-500 font-bold uppercase tracking-wider text-[10px]">{% if table.job_type == 'SALES' %}Follow Up Date{% else %}Due Date{% endif %}</span>
+                                    <div class="font-extrabold mt-1 text-sm flex items-center gap-1" :class="isOverdue(activeRow) ? 'text-red-600' : 'text-slate-800'">
+                                        <i class="far fa-calendar-alt"></i> <span x-text="activeTaskDueDate"></span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <span class="text-slate-500 font-bold uppercase tracking-wider text-[10px]">Status</span>
+                                    <select x-model="activeTaskStatus" @change="updateTaskStatus" class="w-full mt-1 bg-white border border-gray-300 rounded-lg p-1.5 text-xs font-semibold text-slate-700 focus:ring-1 focus:ring-primary">
+                                        <option value="PENDING">Pending</option>
+                                        <option value="IN_PROGRESS">In Progress</option>
+                                        <option value="READY_FOR_REVIEW">Ready for Review</option>
+                                        <option value="APPROVED">Approved</option>
+                                        <option value="COMPLETED">Completed</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <span class="text-slate-500 font-bold uppercase tracking-wider text-[10px]">Priority</span>
+                                    <div class="mt-1.5">
+                                        <span class="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase"
+                                              :class="{
+                                                 'bg-red-100 text-red-700': activeTaskPriority === 'URGENT',
+                                                 'bg-orange-100 text-orange-700': activeTaskPriority === 'HIGH',
+                                                 'bg-blue-100 text-blue-700': activeTaskPriority === 'MEDIUM',
+                                                 'bg-green-100 text-green-700': activeTaskPriority === 'LOW'
+                                              }"
+                                              x-text="activeTaskPriority"></span>
+                                    </div>
+                                </div>
                             </div>
-                            <p class="text-slate-600 leading-relaxed font-medium" x-text="comment.content" style="white-space: pre-wrap;"></p>
                         </div>
-                    </template>
+
+                        {% if table.job_type == 'SALES' or table.job_type == 'LIST_PID' %}
+                        <!-- Record Today's Follow-up Form -->
+                        <div class="bg-gradient-to-br from-emerald-50 to-teal-50/30 p-4 rounded-xl border border-emerald-100 space-y-3" x-show="activeRow.task_details && activeRow.task_details.status !== 'COMPLETED' && activeRow.task_details.status !== 'APPROVED'">
+                            <h4 class="text-xs font-bold uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
+                                <i class="fas fa-edit"></i> Record Today's Follow-up
+                            </h4>
+                            
+                            <div class="space-y-3">
+                                <div>
+                                    <label class="block text-[9px] font-extrabold text-emerald-700 uppercase mb-1">Discussed Points *</label>
+                                    <textarea x-model="salesDiscussedPoints" placeholder="What did you discuss today?" class="w-full bg-white border border-emerald-200/80 rounded-lg p-2 text-xs focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500" rows="2.5"></textarea>
+                                </div>
+                                
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label class="block text-[9px] font-extrabold text-emerald-700 uppercase mb-1">Next Action / Status *</label>
+                                        <select x-model="salesStatus" class="w-full bg-white border border-emerald-200/80 rounded-lg p-1.5 text-xs font-semibold text-slate-700 focus:ring-1 focus:ring-emerald-500">
+                                            <option value="IN_PROGRESS">Continuing (In Progress)</option>
+                                            <option value="COMPLETED">Closed (Completed)</option>
+                                            <option value="PENDING">Pending</option>
+                                            <option value="READY_FOR_REVIEW">Ready for Review</option>
+                                        </select>
+                                    </div>
+                                    <div x-show="salesStatus !== 'COMPLETED'">
+                                        <label class="block text-[9px] font-extrabold text-emerald-700 uppercase mb-1">Next Follow-up Date *</label>
+                                        <input type="date" x-model="salesNextFollowUpDate" class="w-full bg-white border border-emerald-200/80 rounded-lg p-1.5 text-xs font-semibold text-slate-700 focus:ring-1 focus:ring-emerald-500">
+                                    </div>
+                                </div>
+
+                                <!-- Validation Error message -->
+                                <div x-show="salesError" class="text-[11px] text-red-600 font-bold" x-text="salesError"></div>
+
+                                <button @click="submitSalesFollowUp" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs py-2 transition duration-150 flex items-center justify-center gap-1.5 shadow-sm">
+                                    <i class="fas fa-save"></i> Save Follow-up
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Sales Follow-ups Timeline -->
+                        <div class="pt-2">
+                            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 mb-4 flex items-center gap-1.5">
+                                <i class="fas fa-history text-slate-600"></i> Follow-up History
+                            </h4>
+                            
+                            <!-- Vertical Timeline -->
+                            <div class="relative pl-6 border-l-2 border-slate-200 space-y-5 ml-3">
+                                <template x-for="fu in (activeRow.task_details ? activeRow.task_details.follow_ups : [])" :key="fu.id">
+                                    <div class="relative">
+                                        <!-- Node bullet -->
+                                        <span class="absolute -left-[31px] top-0 bg-emerald-600 border-4 border-white h-4.5 w-4.5 rounded-full shadow"></span>
+                                        
+                                        <!-- Timeline Card -->
+                                        <div class="bg-slate-50 hover:bg-slate-100/70 p-3.5 rounded-xl border border-slate-200/60 shadow-sm transition duration-150 text-xs animate-fade-in">
+                                            <div class="flex justify-between items-center mb-1.5">
+                                                <span class="font-extrabold text-slate-700 flex items-center gap-1" x-text="fu.entered_by_detail ? fu.entered_by_detail.full_name : 'System'"></span>
+                                                <span class="text-[10px] text-slate-400 font-bold" x-text="fu.follow_up_date"></span>
+                                            </div>
+                                            <p class="text-slate-600 leading-relaxed font-medium" x-text="fu.discussed_points"></p>
+                                            <template x-if="fu.next_follow_up_date">
+                                                <div class="mt-2 text-[9px] text-emerald-700 font-extrabold bg-emerald-100/50 px-2 py-0.5 rounded-md inline-block">
+                                                    Next Follow-up: <span x-text="fu.next_follow_up_date"></span>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </template>
+                                <template x-if="!activeRow.task_details || !activeRow.task_details.follow_ups || activeRow.task_details.follow_ups.length === 0">
+                                    <div class="text-center py-4 text-gray-400 italic text-xs -ml-6">
+                                        No follow-up history logged yet.
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Report Issue Form -->
+                        <div class="bg-rose-50 p-4 rounded-xl border border-rose-100 space-y-3">
+                            <h4 class="text-xs font-bold uppercase tracking-wider text-rose-800 flex items-center gap-1.5">
+                                <i class="fas fa-exclamation-circle text-rose-600"></i> Flag / Report Issue to Employee
+                            </h4>
+                            <div>
+                                <label class="block text-[9px] font-bold text-rose-700 uppercase mb-1">Select Recipient</label>
+                                <select x-model="flagRecipientId" class="w-full bg-white border border-rose-200 rounded-lg p-1.5 text-xs font-semibold text-slate-700">
+                                    <option value="">-- Select Recipient --</option>
+                                    <template x-for="emp in recipients" :key="emp.id">
+                                        <option :value="emp.id" x-text="`${emp.full_name || emp.email} (${emp.role})`"></option>
+                                    </template>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-[9px] font-bold text-rose-700 uppercase mb-1">Issue Description</label>
+                                <textarea x-model="flagDescription" placeholder="Enter description of the issue..." class="w-full bg-white border border-rose-200 rounded-lg p-2 text-xs focus:ring-rose-500 focus:border-rose-500" rows="2"></textarea>
+                            </div>
+                            <button @click="submitFlagIssue" class="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg text-xs py-2 transition duration-150 shadow-sm flex items-center justify-center gap-1.5">
+                                <i class="fas fa-flag"></i> Flag Issue
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- TAB 2: INTERNAL NOTES & DISCUSSION (CHAT) -->
+                    <div x-show="activeDrawerTab === 'chat'" class="flex flex-col h-full overflow-hidden">
+                        <div class="space-y-4 flex flex-col h-full">
+                            
+                            <!-- Chat Box -->
+                            <div class="space-y-3.5 overflow-y-auto max-h-[420px] pr-2 mb-4 scrollbar-thin flex flex-col pt-1">
+                                <template x-for="comment in comments" :key="comment.id">
+                                    <div class="flex items-start gap-2.5" 
+                                         :class="comment.author_detail.email === '{{ user.email }}' ? 'justify-end' : 'justify-start'">
+                                         
+                                         <!-- Left Avatar for other users -->
+                                         <template x-if="comment.author_detail.email !== '{{ user.email }}'">
+                                             <div class="w-8 h-8 rounded-full bg-indigo-100 border border-indigo-200 flex items-center justify-center text-indigo-700 font-extrabold text-[10px]"
+                                                  x-text="comment.author_detail.full_name ? comment.author_detail.full_name.split(' ').map(n => n[0]).join('').toUpperCase() : 'U'">
+                                             </div>
+                                         </template>
+
+                                         <!-- Message bubble -->
+                                         <div class="max-w-[75%] transition-all hover:scale-[1.01] duration-150 flex flex-col"
+                                              :class="comment.author_detail.email === '{{ user.email }}' ? 'items-end' : 'items-start'">
+                                              
+                                             <!-- Sender name & date -->
+                                             <div class="flex items-center gap-1.5 text-[9px] text-slate-400 font-semibold mb-0.5 px-1">
+                                                 <span class="font-bold text-slate-600" x-text="comment.author_detail.full_name"></span>
+                                                 <span>•</span>
+                                                 <span x-text="new Date(comment.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})"></span>
+                                             </div>
+
+                                             <!-- Bubble body -->
+                                             <div class="p-3.5 rounded-2xl text-xs leading-relaxed font-medium shadow-sm"
+                                                  :class="comment.author_detail.email === '{{ user.email }}' 
+                                                     ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-tr-none shadow-md' 
+                                                     : 'bg-slate-100 text-slate-700 border border-slate-200/60 rounded-tl-none'">
+                                                 <p x-text="comment.content" style="white-space: pre-wrap;"></p>
+                                             </div>
+                                         </div>
+
+                                         <!-- Right Avatar for current user -->
+                                         <template x-if="comment.author_detail.email === '{{ user.email }}'">
+                                             <div class="w-8 h-8 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center text-white font-extrabold text-[10px]"
+                                                  x-text="comment.author_detail.full_name ? comment.author_detail.full_name.split(' ').map(n => n[0]).join('').toUpperCase() : 'ME'">
+                                             </div>
+                                         </template>
+                                    </div>
+                                </template>
+                                
+                                <template x-if="comments.length === 0">
+                                    <div class="text-center py-12 text-slate-400 italic text-xs flex flex-col items-center justify-center gap-2">
+                                        <i class="far fa-comments text-3xl text-slate-300 animate-bounce"></i>
+                                        <span>No discussion logged yet. Start the conversation!</span>
+                                    </div>
+                                </template>
+                            </div>
+
+                            <!-- Comment Input -->
+                            <div class="border-t border-gray-150 pt-4 bg-white mt-auto">
+                                <div class="relative bg-slate-50 border border-gray-300 rounded-xl p-2 focus-within:ring-1 focus-within:ring-indigo-500 focus-within:border-indigo-500">
+                                    <textarea x-model="newCommentText" placeholder="Type a note or message here..." class="w-full bg-transparent border-0 text-slate-900 p-1.5 text-xs focus:ring-0 focus:outline-none" rows="2.5"></textarea>
+                                    <div class="flex justify-between items-center border-t border-gray-200/60 pt-2 px-1">
+                                        <span class="text-[10px] text-slate-400 font-semibold"><i class="fas fa-lock text-indigo-400"></i> Internal notes only</span>
+                                        <button @click="postComment" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-[11px] px-3.5 py-1.5 transition duration-150 ease-in-out flex items-center gap-1 shadow-sm">
+                                            <i class="fas fa-paper-plane text-[10px]"></i> Send
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
-
-            <!-- Comment Input -->
-            <div class="border-t border-gray-200 pt-4">
-                <textarea x-model="newCommentText" placeholder="Write a comment..." class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-xs focus:ring-primary focus:border-primary mb-2" rows="3"></textarea>
-                <button @click="postComment" class="w-full bg-primary hover:bg-blue-700 text-white font-medium rounded-lg text-xs py-2 transition duration-150 ease-in-out">
-                    Post Comment
-                </button>
-            </div>
+        </div>
+    </div>
         </div>
     </div>
 </div>
@@ -1011,6 +1105,7 @@
         return {
             tableId: tableId,
             isEditTableModalOpen: false,
+            activeDrawerTab: 'properties',
             editTableName: '{{ table.name|escapejs }}',
             editTableDescription: '{{ table.description|default:""|escapejs }}',
             selectedRowIds: [],
@@ -2117,6 +2212,45 @@
                 });
             },
 
+            bulkUpdateSelectedStatus(newStatus) {
+                if (this.selectedRowIds.length === 0) {
+                    alert("Please select at least one row.");
+                    return;
+                }
+                const msg = `Are you sure you want to mark the ${this.selectedRowIds.length} selected task(s) as ${newStatus}?`;
+                if (!confirm(msg)) {
+                    return;
+                }
+                
+                this.isLoading = true;
+                fetch('/tasks/api/tasks/bulk-update-status/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({
+                        row_ids: this.selectedRowIds,
+                        status: newStatus
+                    })
+                })
+                .then(res => res.json().then(data => ({ status: res.status, data })))
+                .then(result => {
+                    if (result.status === 200) {
+                        alert(result.data.message);
+                        this.selectedRowIds = [];
+                        this.fetchRows();
+                    } else {
+                        alert(result.data.error || "Failed to bulk update status.");
+                        this.isLoading = false;
+                    }
+                })
+                .catch(err => {
+                    alert("An error occurred: " + err);
+                    this.isLoading = false;
+                });
+            },
+
             openEditTableModal() {
                 this.editTableName = '{{ table.name|escapejs }}';
                 this.editTableDescription = '{{ table.description|default:""|escapejs }}';
@@ -2356,6 +2490,7 @@
                 this.activeTaskDueDate = isSales ? this.getCellValue(row, 'FOLLOW_UP_DATE') : (isListPid ? (this.getCellValue(row, 'DUE_DATE_FLOW_FORCE') || this.getCellValue(row, 'DUE_DATE_CUSTOMER')) : this.getCellValue(row, 'DUE_DATE'));
                 this.activeTaskPriority = row.task_details ? row.task_details.priority : 'MEDIUM';
                 this.activeTaskStatus = row.task_details ? row.task_details.status : 'PENDING';
+                this.activeDrawerTab = 'properties';
                 this.isTaskModalOpen = true;
                 
                 if (isSales || isListPid) {
