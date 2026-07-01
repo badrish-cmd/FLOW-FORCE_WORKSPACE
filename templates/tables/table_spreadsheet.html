@@ -611,7 +611,7 @@
                     </template>
 
                     <!-- Inline Row Creator at the bottom (No Prompts!) -->
-                    <tr class="bg-gray-50 border-t border-gray-200">
+                    <tr x-show="currentPage === totalPages()" class="bg-gray-50 border-t border-gray-200">
                         <td class="p-1 border-r border-gray-200"></td>
                         {% for col in table.columns.all %}
                         <td class="p-1 border-r border-gray-200 text-sm whitespace-nowrap align-middle">
@@ -1571,6 +1571,14 @@ comments: [],
                     .then(data => {
                         const results = data.results || [];
                         this.totalRows = data.count || 0;
+                        
+                        // Self-healing: if current page is out of bounds due to deletion, redirect to new last page
+                        if (results.length === 0 && this.totalRows > 0 && this.currentPage > this.totalPages()) {
+                            this.currentPage = this.totalPages();
+                            this.fetchRows();
+                            return;
+                        }
+
                         this.uniquePids = data.unique_pids || [];
                         this.uniqueYears = data.unique_years || [];
                         this.dashboardStats = data.stats || {};
