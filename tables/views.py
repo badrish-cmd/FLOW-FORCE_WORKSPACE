@@ -866,9 +866,209 @@ class ColumnViewSet(viewsets.ModelViewSet):
             
         return Response({"status": "reordered"}, status=status.HTTP_200_OK)
 
+from rest_framework.pagination import PageNumberPagination
+from django.db.models import Count
+
+class RowPagination(PageNumberPagination):
+    page_size = 50
+    page_size_query_param = 'page_size'
+    max_page_size = 500
+
+    def get_paginated_response(self, data):
+        table_id = self.request.query_params.get("table")
+        if not table_id:
+            return super().get_paginated_response(data)
+            
+        table = get_object_or_404(Table, id=table_id)
+        
+        # Calculate statistics
+        # Unique PIDs
+        unique_pids = list(CellValue.objects.filter(
+            column__table=table,
+            column__name='PID',
+            row__is_archived=False
+        ).exclude(value=None).values_list('value', flat=True).distinct().order_by('value'))
+        
+        # Unique Years
+        from django.db.models.functions import ExtractYear
+        from tasks.models import Task
+        years_qs = Task.objects.filter(
+            row__table=table,
+            row__is_archived=False
+        ).annotate(year=ExtractYear('due_date')).values_list('year', flat=True).distinct().order_by('-year')
+        unique_years = [str(y) for y in years_qs if y]
+        
+        # Status counts
+        status_counts = {}
+        s_counts = Task.objects.filter(
+            row__table=table,
+            row__is_archived=False
+        ).values('status').annotate(count=Count('id'))
+        for item in s_counts:
+            val = item['status'] or 'PENDING'
+            status_counts[val] = item['count']
+            
+        # Priority counts
+        priority_counts = {'Urgent': 0, 'High': 0, 'Med': 0, 'Low': 0}
+        p_counts = Task.objects.filter(
+            row__table=table,
+            row__is_archived=False
+        ).values('priority').annotate(count=Count('id'))
+        for item in p_counts:
+            priority = item['priority']
+            pl = str(priority).lower()
+            if pl.startswith('med'):
+                priority_counts['Med'] += item['count']
+            elif pl.startswith('urg'):
+                priority_counts['Urgent'] += item['count']
+            elif pl.startswith('hi'):
+                priority_counts['High'] += item['count']
+            elif pl.startswith('lo'):
+                priority_counts['Low'] += item['count']
+                
+        # Project counts (for List PID)
+        project_counts = {}
+        pr_counts = CellValue.objects.filter(
+            column__table=table,
+            column__name='PROJECT',
+            row__is_archived=False
+        ).values('value').annotate(count=Count('id'))
+        for item in pr_counts:
+            val = item['value'] or 'No Project'
+            project_counts[val] = item['count']
+            
+        # Tasks due today count
+        from django.utils import timezone
+        due_today_count = Task.objects.filter(
+            row__table=table,
+            row__is_archived=False,
+            due_date=timezone.localdate()
+        ).count()
+        
+        # Overdue tasks count
+        overdue_count = Task.objects.filter(
+            row__table=table,
+            row__is_archived=False,
+            due_date__lt=timezone.localdate()
+        ).exclude(status__in=['COMPLETED', 'APPROVED', 'COMPLETE']).count()
+        
+        # Total QTY
+        qty_vals = CellValue.objects.filter(
+            column__table=table,
+            column__name='QTY',
+            row__is_archived=False
+        ).values_list('value', flat=True)
+        total_qty = 0.0
+        for v in qty_vals:
+            try:
+                total_qty += float(v)
+            except (ValueError, TypeError):
+                pass
+                
+        # Completion stats
+        total_tasks = Task.objects.filter(row__table=table, row__is_archived=False).count()
+        completed_tasks = Task.objects.filter(row__table=table, row__is_archived=False, status__in=['COMPLETED', 'COMPLETE']).count()
+        completion_percent = round((completed_tasks / total_tasks) * 100) if total_tasks > 0 else 0
+        completion_stats = {
+            'completed': completed_tasks,
+            'total': total_tasks,
+            'percent': completion_percent
+        }
+        
+        # Week actuals for SALES followups
+        import datetime
+        today_date = timezone.localdate()
+        monday = today_date - datetime.timedelta(days=today_date.weekday())
+        sunday = monday + datetime.timedelta(days=6)
+        
+        cells_qs = CellValue.objects.filter(
+            row__table=table,
+            row__is_archived=False,
+            column__name__in=['FOLLOW - UP DATE', 'FOLLOW-UP DATE', 'DATE', 'ACTIVITY TYPE', 'ACTIVITY_TYPE', 'STATUS']
+        ).select_related('column')
+        
+        from collections import defaultdict
+        row_cells = defaultdict(dict)
+        for cell in cells_qs:
+            row_cells[cell.row_id][cell.column.name] = cell.value
+
+        calls = 0
+        visits = 0
+        enquiries = 0
+        quotes = 0
+        orders = 0
+
+        for r_id, c_dict in row_cells.items():
+            date_val = c_dict.get('FOLLOW - UP DATE') or c_dict.get('FOLLOW-UP DATE') or c_dict.get('DATE')
+            if not date_val:
+                continue
+            try:
+                if isinstance(date_val, str):
+                    d = datetime.datetime.strptime(date_val.split('T')[0], "%Y-%m-%d").date()
+                else:
+                    continue
+            except Exception:
+                continue
+
+            if monday <= d <= sunday:
+                act_type = str(c_dict.get('ACTIVITY TYPE') or c_dict.get('ACTIVITY_TYPE') or '').lower().strip()
+                status = str(c_dict.get('STATUS') or '').lower().strip()
+
+                if 'call' in act_type or 'whatsapp' in act_type or 'linkedin' in act_type:
+                    calls += 1
+                if 'site visit' in act_type or 'customer visit' in act_type or act_type == 'visit':
+                    visits += 1
+                if 'enquiry' in status or 'enquiries' in status:
+                    enquiries += 1
+                if 'quotation' in status or 'quote' in status:
+                    quotes += 1
+                if 'order received' in status or 'order' in status:
+                    orders += 1
+
+        target_calls = 20
+        target_visits = 10
+        target_enquiries = 10
+        target_orders = 2
+
+        calls_ach = min(100.0, (calls / target_calls) * 100 if target_calls else 0)
+        visits_ach = min(100.0, (visits / target_visits) * 100 if target_visits else 0)
+        enquiries_ach = min(100.0, (enquiries / target_enquiries) * 100 if target_enquiries else 0)
+        orders_ach = min(100.0, (orders / target_orders) * 100 if target_orders else 0)
+
+        achievement_percent = round((calls_ach + visits_ach + enquiries_ach + orders_ach) / 4.0, 2)
+        
+        week_actuals = {
+            'calls': calls,
+            'visits': visits,
+            'enquiries': enquiries,
+            'quotes': quotes,
+            'orders': orders,
+            'achievementPercent': achievement_percent
+        }
+            
+        return Response({
+            'count': self.page.paginator.count,
+            'next': self.get_next_link(),
+            'previous': self.get_previous_link(),
+            'results': data,
+            'unique_pids': unique_pids,
+            'unique_years': unique_years,
+            'stats': {
+                'status_counts': status_counts,
+                'priority_counts': priority_counts,
+                'project_counts': project_counts,
+                'due_today_count': due_today_count,
+                'overdue_count': overdue_count,
+                'total_qty': total_qty,
+                'completion_stats': completion_stats,
+                'week_actuals': week_actuals
+            }
+        })
+
 class RowViewSet(viewsets.ModelViewSet):
     serializer_class = RowSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = RowPagination
 
     def get_queryset(self):
         table_id = self.request.query_params.get("table")
@@ -878,10 +1078,39 @@ class RowViewSet(viewsets.ModelViewSet):
                 accessible_tables = get_accessible_tables(self.request.user)
                 return Row.objects.filter(table__in=accessible_tables, is_archived=False).select_related('created_by', 'task', 'task__assigned_by').prefetch_related('cells', 'cells__column', 'task__assigned_to')
             return Row.objects.none()
+            
         table = get_object_or_404(Table, id=table_id)
         if not has_table_access(self.request.user, table, "VIEW"):
             return Row.objects.none()
-        return Row.objects.filter(table=table, is_archived=False).select_related('created_by', 'task', 'task__assigned_by').prefetch_related('cells', 'cells__column', 'task__assigned_to')
+            
+        queryset = Row.objects.filter(table=table, is_archived=False).select_related('created_by', 'task', 'task__assigned_by').prefetch_related('cells', 'cells__column', 'task__assigned_to')
+        
+        # Apply Query Params Filters
+        pid = self.request.query_params.get("pid")
+        if pid:
+            queryset = queryset.filter(cells__column__name='PID', cells__value=pid)
+            
+        year = self.request.query_params.get("year")
+        if year:
+            queryset = queryset.filter(task__due_date__year=year)
+            
+        month = self.request.query_params.get("month")
+        if month:
+            queryset = queryset.filter(task__due_date__month=month)
+            
+        due = self.request.query_params.get("due")
+        if due:
+            import datetime
+            from django.utils import timezone
+            today = timezone.localdate()
+            if due == "today":
+                queryset = queryset.filter(task__due_date=today)
+            elif due == "this_week":
+                monday = today - datetime.timedelta(days=today.weekday())
+                sunday = monday + datetime.timedelta(days=6)
+                queryset = queryset.filter(task__due_date__range=[monday, sunday])
+                
+        return queryset
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()

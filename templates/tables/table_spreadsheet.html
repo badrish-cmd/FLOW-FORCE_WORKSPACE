@@ -155,7 +155,7 @@
                     </div>
                     <div class="bg-slate-50 p-3 rounded-lg border border-gray-150 text-center shadow-sm">
                         <div class="text-[10px] uppercase font-bold text-gray-400">Total Enquiries</div>
-                        <div class="text-xl font-extrabold text-slate-800" x-text="filteredRows().length"></div>
+                        <div class="text-xl font-extrabold text-slate-800" x-text="totalRows"></div>
                     </div>
                 </div>
 
@@ -358,7 +358,7 @@
             <div class="flex items-center gap-2">
                 <label class="text-xs font-semibold text-gray-500">Project ID (PID):</label>
                 <select x-model="selectedPidFilter" 
-                        @change="if (showDashboard) renderCharts();" 
+                        @change="changeFilter()" 
                         class="bg-gray-50 border border-gray-300 text-gray-700 rounded-lg py-1.5 px-3 text-xs focus:ring-primary focus:border-primary font-medium">
                     <option value="">-- All Projects --</option>
                     <template x-for="pid in getUniquePids()" :key="pid">
@@ -372,7 +372,7 @@
             <div class="flex items-center gap-2">
                 <label class="text-xs font-semibold text-gray-500">Year:</label>
                 <select x-model="selectedYearFilter" 
-                        @change="if (showDashboard) renderCharts();" 
+                        @change="changeFilter()" 
                         class="bg-gray-50 border border-gray-300 text-gray-700 rounded-lg py-1.5 px-3 text-xs focus:ring-primary focus:border-primary font-medium">
                     <option value="">-- All Years --</option>
                     <template x-for="year in getUniqueYears()" :key="year">
@@ -385,7 +385,7 @@
             <div class="flex items-center gap-2">
                 <label class="text-xs font-semibold text-gray-500">Month:</label>
                 <select x-model="selectedMonthFilter" 
-                        @change="if (showDashboard) renderCharts();" 
+                        @change="changeFilter()" 
                         class="bg-gray-50 border border-gray-300 text-gray-700 rounded-lg py-1.5 px-3 text-xs focus:ring-primary focus:border-primary font-medium">
                     <option value="">-- All Months --</option>
                     <option value="1">January</option>
@@ -407,7 +407,7 @@
             <div class="flex items-center gap-2">
                 <label class="text-xs font-semibold text-gray-500">Due Status:</label>
                 <select x-model="selectedDueFilter" 
-                        @change="if (showDashboard) renderCharts();" 
+                        @change="changeFilter()" 
                         class="bg-gray-50 border border-gray-300 text-gray-700 rounded-lg py-1.5 px-3 text-xs focus:ring-primary focus:border-primary font-medium">
                     <option value="">-- All Due Dates --</option>
                     <option value="today">Due Today</option>
@@ -663,6 +663,38 @@
                     </tr>
                 </tbody>
             </table>
+        </div>
+        <!-- Pagination Footer -->
+        <div class="bg-slate-50 border-t border-gray-200 px-5 py-3.5 flex items-center justify-between flex-wrap gap-4 select-none">
+            <div class="flex items-center gap-3">
+                <span class="text-xs text-gray-500 font-medium">Rows per page:</span>
+                <select x-model="pageSize" @change="changePageSize" class="bg-white border border-gray-300 rounded-lg py-1 px-2.5 text-xs text-gray-700 font-bold focus:outline-none focus:ring-1 focus:ring-primary shadow-sm cursor-pointer">
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                    <option value="250">250</option>
+                    <option value="500">500</option>
+                </select>
+                <span class="text-xs text-slate-500 font-semibold ml-2" x-text="`Showing ${startIndex()}-${endIndex()} of ${totalRows} rows`"></span>
+            </div>
+            
+            <div class="flex items-center gap-1.5">
+                <button @click="gotoPage(1)" :disabled="currentPage === 1" class="p-1.5 px-2.5 text-xs font-bold rounded-lg bg-white border border-gray-200 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm">
+                    <i class="fas fa-angle-double-left"></i>
+                </button>
+                <button @click="gotoPage(currentPage - 1)" :disabled="currentPage === 1" class="p-1.5 px-3 text-xs font-bold rounded-lg bg-white border border-gray-200 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm flex items-center gap-1">
+                    <i class="fas fa-angle-left"></i> Prev
+                </button>
+                
+                <span class="text-xs font-extrabold text-slate-700 px-3 bg-slate-200/50 py-1.5 rounded-lg border border-slate-300/30" x-text="`Page ${currentPage} of ${totalPages()}`"></span>
+                
+                <button @click="gotoPage(currentPage + 1)" :disabled="currentPage === totalPages()" class="p-1.5 px-3 text-xs font-bold rounded-lg bg-white border border-gray-200 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm flex items-center gap-1">
+                    Next <i class="fas fa-angle-right"></i>
+                </button>
+                <button @click="gotoPage(totalPages())" :disabled="currentPage === totalPages()" class="p-1.5 px-2.5 text-xs font-bold rounded-lg bg-white border border-gray-200 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm">
+                    <i class="fas fa-angle-double-right"></i>
+                </button>
+            </div>
         </div>
     </div>
 
@@ -1200,7 +1232,7 @@
             activeTaskDueDate: '',
             activeTaskPriority: '',
             activeTaskStatus: '',
-            comments: [],
+comments: [],
             newCommentText: '',
 
             recipients: [],
@@ -1210,308 +1242,191 @@
             showDashboard: false,
             chartInstance: null,
 
-             init() {
-                 // Check query parameters to automatically open task modal
-                 const urlParams = new URLSearchParams(window.location.search);
-                 const openTaskId = urlParams.get('open_task_id');
-                 if (openTaskId) {
-                     this.autoOpenTaskId = parseInt(openTaskId);
-                 }
-                 this.fetchRows();
-                 this.fetchRecipients();
+            // Pagination properties
+            currentPage: 1,
+            pageSize: 50,
+            totalRows: 0,
+            uniquePids: [],
+            uniqueYears: [],
+            dashboardStats: {},
 
-                 this.$watch('showDashboard', value => {
-                     if (value) {
-                         this.renderCharts();
-                     }
-                 });
+            startIndex() {
+                if (this.totalRows === 0) return 0;
+                return (this.currentPage - 1) * this.pageSize + 1;
+            },
 
-                 document.addEventListener('mouseup', () => {
-                     if (this.isDraggingFill) {
-                         this.endDragFill();
-                     }
-                 });
-             },
+            endIndex() {
+                return Math.min(this.currentPage * this.pageSize, this.totalRows);
+            },
 
-             getDueOrFollowUpDate(row) {
-                 const isSales = '{{ table.job_type }}' === 'SALES';
-                 const isListPid = '{{ table.job_type }}' === 'LIST_PID';
-                 if (isSales) {
-                     return this.getCellValue(row, 'FOLLOW_UP_DATE');
-                 } else if (isListPid) {
-                     return this.getCellValue(row, 'DUE_DATE_FLOW_FORCE') || this.getCellValue(row, 'DUE_DATE_CUSTOMER');
-                 } else {
-                     return this.getCellValue(row, 'DUE_DATE');
-                 }
-             },
+            totalPages() {
+                return Math.ceil(this.totalRows / this.pageSize) || 1;
+            },
 
-             getUniquePids() {
-                 const pids = new Set();
-                 this.rows.forEach(row => {
-                     const pid = this.getCellValue(row, 'PID');
-                     if (pid) {
-                         pids.add(String(pid).trim());
-                     }
-                 });
-                 return Array.from(pids).sort();
-             },
+            gotoPage(p) {
+                if (p < 1 || p > this.totalPages()) return;
+                this.currentPage = p;
+                this.fetchRows();
+            },
 
-             getUniqueYears() {
-                 const years = new Set();
-                 this.rows.forEach(row => {
-                     const dateVal = this.getDueOrFollowUpDate(row) || this.getCellValue(row, 'DATE');
-                     if (dateVal) {
-                         const year = new Date(dateVal).getFullYear();
-                         if (!isNaN(year)) {
-                             years.add(year.toString());
-                         }
-                     }
-                 });
-                 return Array.from(years).sort().reverse();
-             },
+            changePageSize() {
+                this.currentPage = 1;
+                this.fetchRows();
+            },
 
-             resetFilters() {
-                 this.selectedPidFilter = '';
-                 this.selectedYearFilter = '';
-                 this.selectedMonthFilter = '';
-                 this.selectedDueFilter = '';
-                 if (this.showDashboard) {
-                     this.renderCharts();
-                 }
-             },
+            changeFilter() {
+                this.currentPage = 1;
+                this.fetchRows();
+            },
 
-             filteredRows() {
-                 let result = this.rows;
+            init() {
+                // Check query parameters to automatically open task modal
+                const urlParams = new URLSearchParams(window.location.search);
+                const openTaskId = urlParams.get('open_task_id');
+                if (openTaskId) {
+                    this.autoOpenTaskId = parseInt(openTaskId);
+                }
+                this.fetchRows();
+                this.fetchRecipients();
 
-                 if (this.selectedPidFilter) {
-                     result = result.filter(row => {
-                         const pid = this.getCellValue(row, 'PID');
-                         return pid && String(pid).trim() === this.selectedPidFilter;
-                     });
-                 }
+                this.$watch('showDashboard', value => {
+                    if (value) {
+                        this.renderCharts();
+                    }
+                });
 
-                 if (this.selectedYearFilter) {
-                     result = result.filter(row => {
-                         const dateVal = this.getDueOrFollowUpDate(row) || this.getCellValue(row, 'DATE');
-                         if (!dateVal) return false;
-                         const year = new Date(dateVal).getFullYear();
-                         return year.toString() === this.selectedYearFilter;
-                     });
-                 }
+                document.addEventListener('mouseup', () => {
+                    if (this.isDraggingFill) {
+                        this.endDragFill();
+                    }
+                });
+            },
 
-                 if (this.selectedMonthFilter) {
-                     result = result.filter(row => {
-                         const dateVal = this.getDueOrFollowUpDate(row);
-                         if (!dateVal) return false;
-                         const month = new Date(dateVal).getMonth() + 1; // 1-indexed
-                         return month.toString() === this.selectedMonthFilter;
-                     });
-                 }
+            getDueOrFollowUpDate(row) {
+                const isSales = '{{ table.job_type }}' === 'SALES';
+                const isListPid = '{{ table.job_type }}' === 'LIST_PID';
+                if (isSales) {
+                    return this.getCellValue(row, 'FOLLOW_UP_DATE');
+                } else if (isListPid) {
+                    return this.getCellValue(row, 'DUE_DATE_FLOW_FORCE') || this.getCellValue(row, 'DUE_DATE_CUSTOMER');
+                } else {
+                    return this.getCellValue(row, 'DUE_DATE');
+                }
+            },
 
-                 if (this.selectedDueFilter === 'today') {
-                     const todayStr = new Date().toISOString().split('T')[0];
-                     result = result.filter(row => {
-                         const dueDate = this.getDueOrFollowUpDate(row);
-                         return dueDate && dueDate === todayStr;
-                     });
-                 } else if (this.selectedDueFilter === 'this_week') {
-                     const range = this.getWeekRange();
-                     result = result.filter(row => {
-                         const dueDateStr = this.getDueOrFollowUpDate(row);
-                         if (!dueDateStr) return false;
-                         const d = new Date(dueDateStr);
-                         d.setHours(12, 0, 0, 0);
-                         return d >= range.monday && d <= range.sunday;
-                     });
-                 }
+            getUniquePids() {
+                return this.uniquePids;
+            },
 
-                 return result;
-             },
+            getUniqueYears() {
+                return this.uniqueYears;
+            },
 
-             toggleDashboard() {
-                 this.showDashboard = !this.showDashboard;
-             },
+            resetFilters() {
+                this.selectedPidFilter = '';
+                this.selectedYearFilter = '';
+                this.selectedMonthFilter = '';
+                this.selectedDueFilter = '';
+                this.currentPage = 1;
+                this.fetchRows();
+            },
 
-             getStatusCount(statusName) {
-                 let count = 0;
-                 this.filteredRows().forEach(row => {
-                     const val = this.getCellValue(row, 'STATUS');
-                     if (val && String(val).toLowerCase().trim() === String(statusName).toLowerCase().trim()) {
-                         count++;
-                     }
-                 });
-                 return count;
-             },
+            filteredRows() {
+                return this.rows;
+            },
 
-             getSuccessfulTasksPercent() {
-                 if (this.rows.length === 0) return 0;
-                 const successfulCount = this.getStatusCount('Order Received');
-                 return Math.round((successfulCount / this.rows.length) * 100);
-             },
+            toggleDashboard() {
+                this.showDashboard = !this.showDashboard;
+            },
 
-             getOverdueTasksCount() {
-                 let count = 0;
-                 this.filteredRows().forEach(row => {
-                     if (this.isOverdue(row)) {
-                         count++;
-                     }
-                 });
-                 return count;
-             },
+            getStatusCount(statusName) {
+                if (!this.dashboardStats || !this.dashboardStats.status_counts) return 0;
+                // Try upper case / spaces normalized matching
+                const key = String(statusName).toUpperCase().trim();
+                return this.dashboardStats.status_counts[key] || 0;
+            },
 
-             getWeekRange() {
-                 const now = new Date();
-                 const day = now.getDay();
-                 const diff = now.getDate() - day + (day === 0 ? -6 : 1); // Adjust for Monday start
-                 const monday = new Date(now.setDate(diff));
-                 monday.setHours(0, 0, 0, 0);
-                 const sunday = new Date(monday);
-                 sunday.setDate(monday.getDate() + 6);
-                 sunday.setHours(23, 59, 59, 999);
-                 return { monday, sunday };
-             },
+            getSuccessfulTasksPercent() {
+                if (this.totalRows === 0) return 0;
+                const successfulCount = this.getStatusCount('Order Received') || this.getStatusCount('ORDER_RECEIVED');
+                return Math.round((successfulCount / this.totalRows) * 100);
+            },
 
-             getWeekActuals() {
-                 const range = this.getWeekRange();
-                 let calls = 0;
-                 let visits = 0;
-                 let enquiries = 0;
-                 let quotes = 0;
-                 let orders = 0;
-                 
-                 this.filteredRows().forEach(row => {
-                     const dateVal = this.getCellValue(row, 'FOLLOW - UP DATE') || this.getCellValue(row, 'FOLLOW-UP DATE') || this.getCellValue(row, 'DATE');
-                     if (!dateVal) return;
-                     
-                     const d = new Date(dateVal);
-                     if (d >= range.monday && d <= range.sunday) {
-                         const actType = String(this.getCellValue(row, 'ACTIVITY TYPE') || this.getCellValue(row, 'ACTIVITY_TYPE') || '').toLowerCase().trim();
-                         const status = String(this.getCellValue(row, 'STATUS') || '').toLowerCase().trim();
-                         
-                         if (actType.includes('call') || actType.includes('whatsapp') || actType.includes('linkedin')) {
-                             calls++;
-                         }
-                         if (actType.includes('site visit') || actType.includes('customer visit') || actType === 'visit') {
-                             visits++;
-                         }
-                         if (status.includes('enquiry') || status.includes('enquiries')) {
-                             enquiries++;
-                         }
-                         if (status.includes('quotation') || status.includes('quote')) {
-                             quotes++;
-                         }
-                         if (status.includes('order received') || status.includes('order')) {
-                             orders++;
-                         }
-                     }
-                 });
-                 
-                 const targetCalls = 20;
-                 const targetVisits = 10;
-                 const targetEnquiries = 10;
-                 const targetOrders = 2;
-                 
-                 const callsAch = Math.min(100, (calls / targetCalls) * 100);
-                 const visitsAch = Math.min(100, (visits / targetVisits) * 100);
-                 const enquiriesAch = Math.min(100, (enquiries / targetEnquiries) * 100);
-                 const ordersAch = Math.min(100, (orders / targetOrders) * 100);
-                 
-                 const achievementPercent = ((callsAch + visitsAch + enquiriesAch + ordersAch) / 4).toFixed(2);
-                 
-                 return {
-                     calls,
-                     visits,
-                     enquiries,
-                     quotes,
-                     orders,
-                     achievementPercent
-                 };
-             },
+            getOverdueTasksCount() {
+                return this.dashboardStats.overdue_count || 0;
+            },
 
-             getTasksDueTodayCount() {
-                 let count = 0;
-                 const todayStr = new Date().toISOString().split('T')[0];
-                 this.filteredRows().forEach(row => {
-                     const dueDate = this.getDueOrFollowUpDate(row);
-                     if (dueDate && dueDate === todayStr) {
-                         count++;
-                     }
-                 });
-                 return count;
-             },
+            getWeekRange() {
+                const now = new Date();
+                const day = now.getDay();
+                const diff = now.getDate() - day + (day === 0 ? -6 : 1); // Adjust for Monday start
+                const monday = new Date(now.setDate(diff));
+                monday.setHours(0, 0, 0, 0);
+                const sunday = new Date(monday);
+                sunday.setDate(monday.getDate() + 6);
+                sunday.setHours(23, 59, 59, 999);
+                return { monday, sunday };
+            },
 
-             getGeneralStatusCount(statusName) {
-                 let count = 0;
-                 const target = String(statusName).toUpperCase().replace(/\s+/g, '_');
-                 this.filteredRows().forEach(row => {
-                     let val = this.getCellValue(row, 'STATUS');
-                     if (!val && row.task_details) {
-                         val = row.task_details.status;
-                     }
-                     if (val) {
-                         const normalized = String(val).toUpperCase().replace(/\s+/g, '_');
-                         if (normalized === target || 
-                             (target === 'COMPLETED' && (normalized === 'COMPLETE' || normalized === 'COMPLETED')) ||
-                             (target === 'COMPLETE' && (normalized === 'COMPLETED' || normalized === 'COMPLETE'))) {
-                             count++;
-                         }
-                     }
-                 });
-                 return count;
-             },
+            getWeekActuals() {
+                if (this.dashboardStats && this.dashboardStats.week_actuals) {
+                    return this.dashboardStats.week_actuals;
+                }
+                return { calls: 0, visits: 0, enquiries: 0, quotes: 0, orders: 0, achievementPercent: 0 };
+            },
 
-             getCompletionStats() {
-                 const total = this.rows.length;
-                 const completed = this.getGeneralStatusCount('COMPLETED');
-                 const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
-                 return { completed, total, percent };
-             },
+            getTasksDueTodayCount() {
+                return this.dashboardStats.due_today_count || 0;
+            },
 
-             getListPidTotalQty() {
-                 let total = 0;
-                 this.filteredRows().forEach(row => {
-                     const qtyStr = this.getCellValue(row, 'QTY');
-                     const qtyVal = parseFloat(qtyStr);
-                     if (!isNaN(qtyVal)) {
-                         total += qtyVal;
-                     }
-                 });
-                 return total;
-             },
+            getGeneralStatusCount(statusName) {
+                if (!this.dashboardStats || !this.dashboardStats.status_counts) return 0;
+                const target = String(statusName).toUpperCase().replace(/\s+/g, '_');
+                // Check direct key, or keys with underscores instead of spaces
+                let count = this.dashboardStats.status_counts[target] || 0;
+                if (!count) {
+                    // Try exact match or spaces replaced
+                    for (const [k, v] of Object.entries(this.dashboardStats.status_counts)) {
+                        const normKey = String(k).toUpperCase().replace(/\s+/g, '_');
+                        if (normKey === target || 
+                            (target === 'COMPLETED' && (normKey === 'COMPLETE' || normKey === 'COMPLETED')) ||
+                            (target === 'COMPLETE' && (normKey === 'COMPLETED' || normKey === 'COMPLETE'))) {
+                            count += v;
+                        }
+                    }
+                }
+                return count;
+            },
 
-             getListPidCompletionStats() {
-                 const total = this.rows.length;
-                 let completed = 0;
-                 this.rows.forEach(row => {
-                     let val = this.getCellValue(row, 'STATUS');
-                     if (!val && row.task_details) {
-                         val = row.task_details.status;
-                     }
-                     if (val) {
-                         const statusUpper = String(val).toUpperCase().trim();
-                         if (statusUpper === 'COMPLETED' || statusUpper === 'COMPLETE' || statusUpper === 'APPROVED') {
-                             completed++;
-                         }
-                     }
-                 });
-                 const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
-                 return { completed, total, percent };
-             },
+            getCompletionStats() {
+                if (this.dashboardStats && this.dashboardStats.completion_stats) {
+                    return this.dashboardStats.completion_stats;
+                }
+                return { completed: 0, total: 0, percent: 0 };
+            },
 
-             isRowCompleted(row) {
-                 if (!row) return false;
-                 const statusVal = String(this.getCellValue(row, 'STATUS') || '').toLowerCase().trim();
-                 if (statusVal === 'completed' || statusVal === 'complete') {
-                     return true;
-                 }
-                 if (row.task_details) {
-                     const taskStatus = String(row.task_details.status || '').toLowerCase().trim();
-                     if (taskStatus === 'completed' || taskStatus === 'approved') {
-                         return true;
-                     }
-                 }
-                 return false;
-             },
+            getListPidTotalQty() {
+                return this.dashboardStats.total_qty || 0;
+            },
+
+            getListPidCompletionStats() {
+                return this.getCompletionStats();
+            },
+
+            isRowCompleted(row) {
+                if (!row) return false;
+                const statusVal = String(this.getCellValue(row, 'STATUS') || '').toLowerCase().trim();
+                if (statusVal === 'completed' || statusVal === 'complete') {
+                    return true;
+                }
+                if (row.task_details) {
+                    const taskStatus = String(row.task_details.status || '').toLowerCase().trim();
+                    if (taskStatus === 'completed' || taskStatus === 'approved') {
+                        return true;
+                    }
+                }
+                return false;
+            },
 
              renderCharts() {
                  this.$nextTick(() => {
@@ -1531,16 +1446,7 @@
                      if ('{{ table.job_type }}' === 'LIST_PID') {
                          const statusCtx = document.getElementById('listPidStatusChart');
                          if (statusCtx) {
-                             const statusCounts = {};
-                             this.filteredRows().forEach(row => {
-                                 let status = this.getCellValue(row, 'STATUS');
-                                 if (!status && row.task_details) {
-                                     status = row.task_details.status;
-                                 }
-                                 status = status || 'PENDING';
-                                 statusCounts[status] = (statusCounts[status] || 0) + 1;
-                             });
-
+                             const statusCounts = this.dashboardStats.status_counts || {};
                              const labels = Object.keys(statusCounts);
                              const data = Object.values(statusCounts);
                              const colors = labels.map((label, idx) => {
@@ -1569,12 +1475,7 @@
 
                          const projectCtx = document.getElementById('listPidProjectChart');
                          if (projectCtx) {
-                             const projectCounts = {};
-                             this.filteredRows().forEach(row => {
-                                 const project = this.getCellValue(row, 'PROJECT') || 'No Project';
-                                 projectCounts[project] = (projectCounts[project] || 0) + 1;
-                             });
-
+                             const projectCounts = this.dashboardStats.project_counts || {};
                              const sortedProjects = Object.entries(projectCounts)
                                  .sort((a, b) => b[1] - a[1])
                                  .slice(0, 7);
@@ -1611,24 +1512,7 @@
                      const ctx = document.getElementById('priorityChart');
                      if (!ctx) return;
                      
-                     const priorityCounts = { 'Urgent': 0, 'High': 0, 'Med': 0, 'Low': 0 };
-                     this.filteredRows().forEach(row => {
-                         const priority = this.getCellValue(row, 'PRIORITY');
-                         if (priority in priorityCounts) {
-                             priorityCounts[priority]++;
-                         } else if (priority) {
-                             const pl = String(priority).toLowerCase();
-                             if (pl.startsWith('med')) {
-                                 priorityCounts['Med']++;
-                             } else if (pl.startsWith('urg')) {
-                                 priorityCounts['Urgent']++;
-                             } else if (pl.startsWith('hi')) {
-                                 priorityCounts['High']++;
-                             } else if (pl.startsWith('lo')) {
-                                 priorityCounts['Low']++;
-                             }
-                         }
-                     });
+                     const priorityCounts = this.dashboardStats.priority_counts || { 'Urgent': 0, 'High': 0, 'Med': 0, 'Low': 0 };
                      
                      this.chartInstance = new Chart(ctx, {
                         type: 'bar',
@@ -1637,10 +1521,10 @@
                             datasets: [{
                                 label: 'Tasks',
                                 data: [
-                                    priorityCounts['Urgent'],
-                                    priorityCounts['High'],
-                                    priorityCounts['Med'],
-                                    priorityCounts['Low']
+                                    priorityCounts['Urgent'] || 0,
+                                    priorityCounts['High'] || 0,
+                                    priorityCounts['Med'] || 0,
+                                    priorityCounts['Low'] || 0
                                 ],
                                 backgroundColor: [
                                     '#ef4444',
@@ -1665,16 +1549,34 @@
                             }
                         }
                     });
-                });
-            },
+                 });
+             },
 
             fetchRows() {
                 this.isLoading = true;
-                fetch(`/tables/api/rows/?table=${this.tableId}`)
+                
+                const params = new URLSearchParams({
+                    table: this.tableId,
+                    page: this.currentPage,
+                    page_size: this.pageSize
+                });
+                
+                if (this.selectedPidFilter) params.append('pid', this.selectedPidFilter);
+                if (this.selectedYearFilter) params.append('year', this.selectedYearFilter);
+                if (this.selectedMonthFilter) params.append('month', this.selectedMonthFilter);
+                if (this.selectedDueFilter) params.append('due', this.selectedDueFilter);
+
+                fetch(`/tables/api/rows/?${params.toString()}`)
                     .then(res => res.json())
                     .then(data => {
+                        const results = data.results || [];
+                        this.totalRows = data.count || 0;
+                        this.uniquePids = data.unique_pids || [];
+                        this.uniqueYears = data.unique_years || [];
+                        this.dashboardStats = data.stats || {};
+
                         // Optimize: pre-map cells to a cells_dict lookup to avoid O(C) loops during render
-                        data.forEach(row => {
+                        results.forEach(row => {
                             row.cells_dict = {};
                             if (row.cells) {
                                 row.cells.forEach(c => {
@@ -1682,13 +1584,31 @@
                                 });
                             }
                         });
-                        this.rows = data;
+                        this.rows = results;
+                        
                         if (this.autoOpenTaskId) {
                             const matchingRow = this.rows.find(r => r.task_details && r.task_details.id === this.autoOpenTaskId);
                             if (matchingRow) {
                                 this.openTaskModal(matchingRow);
+                                this.autoOpenTaskId = null;
+                            } else {
+                                // Fetch that single row details in background to slide open the modal
+                                fetch(`/tables/api/rows/?table=${this.tableId}&task_id=${this.autoOpenTaskId}`)
+                                    .then(res => res.json())
+                                    .then(resData => {
+                                        const singleRow = resData.results ? resData.results[0] : null;
+                                        if (singleRow) {
+                                            singleRow.cells_dict = {};
+                                            if (singleRow.cells) {
+                                                singleRow.cells.forEach(c => {
+                                                    singleRow.cells_dict[c.column_name] = c.value;
+                                                });
+                                            }
+                                            this.openTaskModal(singleRow);
+                                        }
+                                        this.autoOpenTaskId = null;
+                                    });
                             }
-                            this.autoOpenTaskId = null;
                         }
                         if (this.showDashboard) {
                             this.renderCharts();
