@@ -1103,6 +1103,10 @@ class RowViewSet(viewsets.ModelViewSet):
         if task_id:
             queryset = queryset.filter(task__id=task_id)
 
+        assignee = self.request.query_params.get("assignee")
+        if assignee:
+            queryset = queryset.filter(task__assigned_to__id=assignee)
+
         pid = self.request.query_params.get("pid")
         if pid:
             queryset = queryset.filter(cells__column__name='PID', cells__value=pid)
@@ -1540,10 +1544,20 @@ def table_spreadsheet_view(request, table_id):
         return redirect("/")
     has_edit = has_table_access(request.user, table, "EDIT")
     has_admin = has_table_access(request.user, table, "ADMIN")
+    
+    # Check if table has an assignee (USER data type) column
+    has_assignee_col = table.columns.filter(data_type="USER").exists()
+    
+    # Fetch active employees to populate the filter dropdown
+    from auth_app.models import EmployeeUser
+    employees = EmployeeUser.objects.filter(is_active=True).order_by("full_name")
+    
     return render(request, "tables/table_spreadsheet.html", {
         "table": table,
         "has_edit_access": has_edit,
-        "has_admin_access": has_admin
+        "has_admin_access": has_admin,
+        "has_assignee_col": has_assignee_col,
+        "employees": employees
     })
 
 @login_required
