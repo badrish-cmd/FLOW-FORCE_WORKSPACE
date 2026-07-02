@@ -415,20 +415,7 @@
                 </select>
             </div>
 
-            <!-- Assignee Filter -->
-            {% if has_assignee_col %}
-            <div class="flex items-center gap-2">
-                <label class="text-xs font-semibold text-gray-500">Assignee:</label>
-                <select x-model="selectedAssigneeFilter" 
-                        @change="changeFilter()" 
-                        class="bg-gray-50 border border-gray-300 text-gray-700 rounded-lg py-1.5 px-3 text-xs focus:ring-primary focus:border-primary font-medium">
-                    <option value="">-- All Assignees --</option>
-                    {% for emp in employees %}
-                    <option value="{{ emp.id }}">{{ emp.full_name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            {% endif %}
+
         </div>
 
         <button @click="resetFilters" class="text-xs text-red-500 hover:text-red-700 font-semibold flex items-center gap-1">
@@ -1173,7 +1160,7 @@
             selectedYearFilter: '',
             selectedMonthFilter: '',
             selectedDueFilter: '',
-            selectedAssigneeFilter: '',
+
             listPidStatusChartInstance: null,
             listPidProjectChartInstance: null,
             rowEditingRowId: null,
@@ -1302,10 +1289,7 @@ comments: [],
                 if (openTaskId) {
                     this.autoOpenTaskId = parseInt(openTaskId);
                 }
-                const assigneeFilter = urlParams.get('assignee');
-                if (assigneeFilter) {
-                    this.selectedAssigneeFilter = assigneeFilter;
-                }
+
                 this.fetchRows();
                 this.fetchRecipients();
 
@@ -1347,7 +1331,7 @@ comments: [],
                 this.selectedYearFilter = '';
                 this.selectedMonthFilter = '';
                 this.selectedDueFilter = '';
-                this.selectedAssigneeFilter = '';
+
                 this.currentPage = 1;
                 this.fetchRows();
             },
@@ -1586,7 +1570,7 @@ comments: [],
                 if (this.selectedYearFilter) params.append('year', this.selectedYearFilter);
                 if (this.selectedMonthFilter) params.append('month', this.selectedMonthFilter);
                 if (this.selectedDueFilter) params.append('due', this.selectedDueFilter);
-                if (this.selectedAssigneeFilter) params.append('assignee', this.selectedAssigneeFilter);
+
 
                 fetch(`/tables/api/rows/?${params.toString()}`)
                     .then(res => res.json())
