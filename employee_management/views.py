@@ -943,6 +943,53 @@ def global_activity_logs(request):
         last_task_action=Subquery(last_task_action_sub)
     ).order_by("full_name")
 
+    # Daily activity status calculations
+    from django.utils import timezone
+    from django.db.models import Count, Max
+    from tables.models import CellValue
+
+    today = timezone.localdate()
+
+    # 1. Logged In Today: active employees whose last_login is today
+    logged_in_today = EmployeeUser.objects.filter(
+        last_login__date=today,
+        is_active=True
+    ).order_by("full_name")
+
+    # 2. Not Logged In Today: active employees whose last_login is not today
+    not_logged_in_today = EmployeeUser.objects.filter(
+        is_active=True
+    ).exclude(
+        last_login__date=today
+    ).order_by("full_name")
+
+    # 3. Done changes today / Not done changes today in tables
+    today_changes = CellValue.objects.filter(
+        updated_at__date=today,
+        updated_by__isnull=False
+    ).values("updated_by").annotate(
+        cnt=Count("id"),
+        last_time=Max("updated_at")
+    )
+
+    changes_map = {c["updated_by"]: {"count": c["cnt"], "last_time": c["last_time"]} for c in today_changes}
+
+    done_changes_today = []
+    not_done_changes_today = []
+
+    for emp in employees:
+        if emp.is_active:
+            if emp.id in changes_map:
+                emp.today_changes_count = changes_map[emp.id]["count"]
+                emp.last_change_time = changes_map[emp.id]["last_time"]
+                done_changes_today.append(emp)
+            else:
+                emp.today_changes_count = 0
+                emp.last_change_time = None
+                not_done_changes_today.append(emp)
+
+    done_changes_today.sort(key=lambda x: x.today_changes_count, reverse=True)
+
     # Populate employees_activity summary list
     employees_activity = [
         {
@@ -962,6 +1009,10 @@ def global_activity_logs(request):
         "selected_type": activity_type,
         "activity_types": EmployeeActivityLog.ACTIVITY_TYPES,
         "employees_activity": employees_activity,
+        "logged_in_today": logged_in_today,
+        "not_logged_in_today": not_logged_in_today,
+        "done_changes_today": done_changes_today,
+        "not_done_changes_today": not_done_changes_today,
     }
 
     return render(

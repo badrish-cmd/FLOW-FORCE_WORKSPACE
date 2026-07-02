@@ -17,6 +17,122 @@
 
 {% block content %}
 <div class="container-fluid animate-fade-in">
+    <!-- Daily Employee Activity Dashboard -->
+    <div class="row g-4 mb-4">
+        <!-- Card 1: Attendance Today -->
+        <div class="col-12 col-xl-6">
+            <div class="card shadow-sm border border-slate-200 h-100">
+                <div class="card-header bg-light border-bottom py-3 d-flex align-items-center gap-2">
+                    <span class="p-2 bg-success bg-opacity-10 text-success rounded-lg" style="display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px;"><i class="fas fa-user-check text-sm"></i></span>
+                    <h6 class="mb-0 fw-bold text-dark">Daily Attendance Today</h6>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <!-- Logged In Today -->
+                        <div class="col-6 border-end border-slate-100">
+                            <span class="text-xs font-bold text-success uppercase tracking-wider d-block mb-3"><i class="fas fa-check-circle me-1"></i> Logged In ({{ logged_in_today|length }})</span>
+                            <div class="overflow-y-auto" style="max-height: 220px; display: flex; flex-direction: column; gap: 8px;">
+                                {% for emp in logged_in_today %}
+                                    <div class="d-flex align-items-center gap-2 bg-light p-2 rounded border border-light">
+                                        <div class="bg-success text-white rounded-circle flex items-center justify-center font-bold text-xs" style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                                            {{ emp.full_name|slice:":2"|upper }}
+                                        </div>
+                                        <div style="min-width: 0; flex-grow: 1;">
+                                            <span class="fw-bold text-dark text-xs d-block text-truncate" title="{{ emp.full_name }}">{{ emp.full_name }}</span>
+                                            <span class="text-muted d-block" style="font-size: 10px;">{{ emp.last_login|date:"g:i A" }}</span>
+                                        </div>
+                                    </div>
+                                {% empty %}
+                                    <p class="text-muted italic small text-center my-3">No logins today.</p>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <!-- Not Logged In Today -->
+                        <div class="col-6">
+                            <span class="text-xs font-bold text-secondary uppercase tracking-wider d-block mb-3"><i class="fas fa-times-circle me-1"></i> Not Logged In ({{ not_logged_in_today|length }})</span>
+                            <div class="overflow-y-auto" style="max-height: 220px; display: flex; flex-direction: column; gap: 8px;">
+                                {% for emp in not_logged_in_today %}
+                                    <div class="d-flex align-items-center gap-2 bg-light p-2 rounded border border-light">
+                                        <div class="bg-secondary text-white rounded-circle flex items-center justify-center font-bold text-xs" style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                                            {{ emp.full_name|slice:":2"|upper }}
+                                        </div>
+                                        <div style="min-width: 0; flex-grow: 1;">
+                                            <span class="fw-bold text-slate-600 text-xs d-block text-truncate" title="{{ emp.full_name }}">{{ emp.full_name }}</span>
+                                            <span class="text-muted d-block" style="font-size: 10px;">
+                                                {% if emp.last_login %}
+                                                    Was: {{ emp.last_login|date:"M j" }}
+                                                {% else %}
+                                                    Never
+                                                {% endif %}
+                                            </span>
+                                        </div>
+                                    </div>
+                                {% empty %}
+                                    <p class="text-muted italic small text-center my-3">All logged in!</p>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Card 2: Table Changes Today -->
+        <div class="col-12 col-xl-6">
+            <div class="card shadow-sm border border-slate-200 h-100">
+                <div class="card-header bg-light border-bottom py-3 d-flex align-items-center gap-2">
+                    <span class="p-2 bg-primary bg-opacity-10 text-primary rounded-lg" style="display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px;"><i class="fas fa-edit text-sm"></i></span>
+                    <h6 class="mb-0 fw-bold text-dark">Daily Table Updates Today</h6>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <!-- Done Changes Today -->
+                        <div class="col-6 border-end border-slate-100">
+                            <span class="text-xs font-bold text-primary uppercase tracking-wider d-block mb-3"><i class="fas fa-pen-fancy me-1"></i> Made Changes ({{ done_changes_today|length }})</span>
+                            <div class="overflow-y-auto" style="max-height: 220px; display: flex; flex-direction: column; gap: 8px;">
+                                {% for emp in done_changes_today %}
+                                    <div class="d-flex align-items-center gap-2 bg-light p-2 rounded border border-light">
+                                        <div class="bg-primary text-white rounded-circle flex items-center justify-center font-bold text-xs" style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                                            {{ emp.full_name|slice:":2"|upper }}
+                                        </div>
+                                        <div style="min-width: 0; flex-grow: 1;">
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <span class="fw-bold text-dark text-xs text-truncate" style="max-width: 75%;" title="{{ emp.full_name }}">{{ emp.full_name }}</span>
+                                                <span class="badge bg-primary text-white rounded-pill" style="font-size: 9px; padding: 2px 6px;" title="Edits count">{{ emp.today_changes_count }}</span>
+                                            </div>
+                                            <span class="text-muted d-block" style="font-size: 10px;">Last: {{ emp.last_change_time|date:"g:i A" }}</span>
+                                        </div>
+                                    </div>
+                                {% empty %}
+                                    <p class="text-muted italic small text-center my-3">No changes today.</p>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <!-- No Changes Today -->
+                        <div class="col-6">
+                            <span class="text-xs font-bold text-warning uppercase tracking-wider d-block mb-3"><i class="fas fa-exclamation-triangle me-1"></i> No Changes Today ({{ not_done_changes_today|length }})</span>
+                            <div class="overflow-y-auto" style="max-height: 220px; display: flex; flex-direction: column; gap: 8px;">
+                                {% for emp in not_done_changes_today %}
+                                    <div class="d-flex align-items-center gap-2 bg-light p-2 rounded border border-light">
+                                        <div class="bg-warning text-dark rounded-circle flex items-center justify-center font-bold text-xs" style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                                            {{ emp.full_name|slice:":2"|upper }}
+                                        </div>
+                                        <div style="min-width: 0; flex-grow: 1;">
+                                            <span class="fw-bold text-slate-600 text-xs d-block text-truncate" title="{{ emp.full_name }}">{{ emp.full_name }}</span>
+                                            <span class="text-muted d-block" style="font-size: 10px;">No edits today</span>
+                                        </div>
+                                    </div>
+                                {% empty %}
+                                    <p class="text-muted italic small text-center my-3">All edited!</p>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="card shadow-sm mb-4">
         <div class="card-header d-flex justify-content-between align-items-center bg-light border-bottom py-3">
             <div>

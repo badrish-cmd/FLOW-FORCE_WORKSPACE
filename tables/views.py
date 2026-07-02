@@ -1086,6 +1086,10 @@ class RowViewSet(viewsets.ModelViewSet):
         queryset = Row.objects.filter(table=table, is_archived=False).select_related('created_by', 'task', 'task__assigned_by').prefetch_related('cells', 'cells__column', 'task__assigned_to')
         
         # Apply Query Params Filters
+        task_id = self.request.query_params.get("task_id")
+        if task_id:
+            queryset = queryset.filter(task__id=task_id)
+
         pid = self.request.query_params.get("pid")
         if pid:
             queryset = queryset.filter(cells__column__name='PID', cells__value=pid)
