@@ -1105,7 +1105,21 @@ class RowViewSet(viewsets.ModelViewSet):
 
         assignee = self.request.query_params.get("assignee")
         if assignee:
-            queryset = queryset.filter(task__assigned_to__id=assignee)
+            from auth_app.models import EmployeeUser
+            from django.db.models import Q
+            user = EmployeeUser.objects.filter(id=assignee).first()
+            if user:
+                queryset = queryset.filter(
+                    Q(task__assigned_to=user) |
+                    Q(
+                        cells__column__data_type="USER",
+                        cells__value__in=[str(user.id), int(user.id), user.email, user.full_name]
+                    ) |
+                    Q(
+                        cells__column__name__in=["ASSIGNED_TO", "ASSIGNED TO", "ASSIGNEE"],
+                        cells__value__in=[str(user.id), int(user.id), user.email, user.full_name]
+                    )
+                ).distinct()
 
         pid = self.request.query_params.get("pid")
         if pid:
@@ -1545,8 +1559,8 @@ def table_spreadsheet_view(request, table_id):
     has_edit = has_table_access(request.user, table, "EDIT")
     has_admin = has_table_access(request.user, table, "ADMIN")
     
-    # Check if table has an assignee (USER data type) column
-    has_assignee_col = table.columns.filter(data_type="USER").exists()
+    # Check if table has an assignee (USER data type or matching name) column
+    has_assignee_col = table.columns.filter(data_type="USER").exists() or table.columns.filter(name__in=["ASSIGNED_TO", "ASSIGNED TO", "ASSIGNEE"]).exists()
     
     # Fetch active employees to populate the filter dropdown
     from auth_app.models import EmployeeUser
