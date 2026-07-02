@@ -416,7 +416,20 @@ class TableViewSet(viewsets.ModelViewSet):
         if required_date not in csv_headers:
             return None, f"Required column for due date/follow up date is missing in the CSV sheet headers. Expected one of: {required_date}"
 
+        # Performance Optimizations: pre-map columns, pre-query S_NO base, and setup user cache
+        columns_by_name = {c.name: c for c in table.columns.all()}
+        
+        base_s_no = 0
+        s_no_col = normalized_db_cols.get("S_NO")
+        if s_no_col:
+            latest_cell = CellValue.objects.filter(column=s_no_col).order_by("-id").first()
+            if latest_cell and isinstance(latest_cell.value, int):
+                base_s_no = latest_cell.value
+        
+        resolved_users_cache = {}
+        
         created_rows = []
+        row_import_idx = 1
         for row_dict in reader:
             normalized_row = {}
             for original_key, val in row_dict.items():
@@ -459,14 +472,8 @@ class TableViewSet(viewsets.ModelViewSet):
             # Create Row
             row = Row.objects.create(table=table, created_by=request_user)
 
-            # Auto compute S_NO
-            latest_s_no = 0
-            s_no_col = normalized_db_cols.get("S_NO")
-            if s_no_col:
-                latest_cell = CellValue.objects.filter(column=s_no_col).order_by("-id").first()
-                if latest_cell and isinstance(latest_cell.value, int):
-                    latest_s_no = latest_cell.value
-            s_no = latest_s_no + 1
+            # Auto compute S_NO (using pre-fetched base)
+            s_no = base_s_no + row_import_idx
 
             # Parse and normalize other system fields
             csv_date_str = normalized_row.get("DATE")
@@ -537,7 +544,7 @@ class TableViewSet(viewsets.ModelViewSet):
                 if name in system_field_names:
                     col = normalized_db_cols.get(name)
                 else:
-                    col = next((c for c in table.columns.all() if c.name == name), None)
+                    col = columns_by_name.get(name)
                 if col:
                     CellValue.objects.create(row=row, column=col, value=val, updated_by=request_user)
 
@@ -571,28 +578,34 @@ class TableViewSet(viewsets.ModelViewSet):
                 if col_name in system_field_names:
                     col = normalized_db_cols.get(col_name)
                 else:
-                    col = next((c for c in table.columns.all() if c.name == col_name), None)
+                    col = columns_by_name.get(col_name)
 
                 if col and (col.data_type == "USER" or col.name.upper() in ["ASSIGNED_TO", "ASSIGNED TO", "ASSIGNEE"]):
                     if val:
-                        try:
-                            if str(val).isdigit():
-                                user_to_assign = EmployeeUser.objects.get(id=int(val), is_active=True)
-                            elif "@" in str(val):
-                                user_to_assign = EmployeeUser.objects.get(email=val, is_active=True)
-                            else:
-                                user_to_assign = EmployeeUser.objects.get(full_name__iexact=val, is_active=True)
-                        except EmployeeUser.DoesNotExist:
-                            user_to_assign = EmployeeUser.objects.filter(
-                                Q(full_name__icontains=val) | Q(email__icontains=val),
-                                is_active=True
-                            ).first()
+                        cache_key = str(val).strip()
+                        if cache_key in resolved_users_cache:
+                            user_to_assign = resolved_users_cache[cache_key]
+                        else:
+                            try:
+                                if str(val).isdigit():
+                                    user_to_assign = EmployeeUser.objects.get(id=int(val), is_active=True)
+                                elif "@" in str(val):
+                                    user_to_assign = EmployeeUser.objects.get(email=val, is_active=True)
+                                else:
+                                    user_to_assign = EmployeeUser.objects.get(full_name__iexact=val, is_active=True)
+                            except EmployeeUser.DoesNotExist:
+                                user_to_assign = EmployeeUser.objects.filter(
+                                    Q(full_name__icontains=val) | Q(email__icontains=val),
+                                    is_active=True
+                                ).first()
+                            resolved_users_cache[cache_key] = user_to_assign
                         break
 
             if user_to_assign:
                 task.assigned_to.set([user_to_assign])
 
             created_rows.append(row)
+            row_import_idx += 1
 
         return created_rows, None
 

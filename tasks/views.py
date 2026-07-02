@@ -629,12 +629,13 @@ def reports_view(request):
         writer.writerow(["=== DETAILED TASK REPORT ==="])
         writer.writerow(["S_NO", "Task Name", "Table Name", "Due Date", "Priority", "Status", "Assigned To", "Assigned By", "Department"])
         for t in tasks:
-            task_name = t.row.cells.filter(column__name="TASK_NAME").first()
-            task_name_val = task_name.value if task_name else "Unnamed"
+            # Use pre-fetched cells list in-memory to prevent N+1 query loops
+            task_name_cell = next((c for c in t.row.cells.all() if c.column.name == "TASK_NAME"), None)
+            task_name_val = task_name_cell.value if task_name_cell else "Unnamed"
             assigned_to = ", ".join([u.full_name for u in t.assigned_to.all()])
             assigned_by = t.assigned_by.full_name if t.assigned_by else "System"
             dept_name = t.row.table.department.name if t.row.table.department else "Global"
-            s_no_cell = t.row.cells.filter(column__name="S_NO").first()
+            s_no_cell = next((c for c in t.row.cells.all() if c.column.name == "S_NO"), None)
             s_no_val = s_no_cell.value if s_no_cell else t.id
 
             writer.writerow([s_no_val, task_name_val, t.row.table.name, t.due_date, t.priority, t.status, assigned_to, assigned_by, dept_name])
@@ -660,12 +661,13 @@ def reports_view(request):
         ws3 = wb.create_sheet(title="Detailed Tasks")
         ws3.append(["S_NO", "Task Name", "Table Name", "Due Date", "Priority", "Status", "Assigned To", "Assigned By", "Department"])
         for t in tasks:
-            task_name = t.row.cells.filter(column__name="TASK_NAME").first()
-            task_name_val = task_name.value if task_name else "Unnamed"
+            # Use pre-fetched cells list in-memory to prevent N+1 query loops
+            task_name_cell = next((c for c in t.row.cells.all() if c.column.name == "TASK_NAME"), None)
+            task_name_val = task_name_cell.value if task_name_cell else "Unnamed"
             assigned_to = ", ".join([u.full_name for u in t.assigned_to.all()])
             assigned_by = t.assigned_by.full_name if t.assigned_by else "System"
             dept_name = t.row.table.department.name if t.row.table.department else "Global"
-            s_no_cell = t.row.cells.filter(column__name="S_NO").first()
+            s_no_cell = next((c for c in t.row.cells.all() if c.column.name == "S_NO"), None)
             s_no_val = s_no_cell.value if s_no_cell else t.id
 
             ws3.append([s_no_val, task_name_val, t.row.table.name, str(t.due_date), t.priority, t.status, assigned_to, assigned_by, dept_name])
@@ -780,10 +782,11 @@ def reports_view(request):
         task_headers = ["S_NO", "Task Name", "Table Name", "Due Date", "Priority", "Status", "Assigned To"]
         task_data = [[Paragraph(h, header_cell_style) for h in task_headers]]
         for t in tasks:
-            task_name = t.row.cells.filter(column__name="TASK_NAME").first()
-            task_name_val = task_name.value if task_name else "Unnamed"
+            # Use pre-fetched cells list in-memory to prevent N+1 query loops
+            task_name_cell = next((c for c in t.row.cells.all() if c.column.name == "TASK_NAME"), None)
+            task_name_val = task_name_cell.value if task_name_cell else "Unnamed"
             assigned_to = ", ".join([u.full_name for u in t.assigned_to.all()])
-            s_no_cell = t.row.cells.filter(column__name="S_NO").first()
+            s_no_cell = next((c for c in t.row.cells.all() if c.column.name == "S_NO"), None)
             s_no_val = s_no_cell.value if s_no_cell else t.id
             
             task_data.append([
