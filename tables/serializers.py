@@ -16,7 +16,7 @@ class DepartmentMinSerializer(serializers.ModelSerializer):
 class ColumnSerializer(serializers.ModelSerializer):
     class Meta:
         model = Column
-        fields = ["id", "table", "name", "data_type", "is_mandatory", "is_system_column", "position", "options"]
+        fields = ["id", "table", "name", "data_type", "is_mandatory", "is_system_column", "position", "options", "is_filterable"]
         read_only_fields = ["is_system_column"]
 
     def validate(self, attrs):

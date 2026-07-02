@@ -415,7 +415,20 @@
                 </select>
             </div>
 
-
+            <!-- Dynamic Dropdown Column Filters -->
+            <template x-for="col in columns.filter(c => c.data_type === 'DROPDOWN' && c.is_filterable)" :key="col.id">
+                <div class="flex items-center gap-2">
+                    <label class="text-xs font-semibold text-gray-500" x-text="col.name + ':'"></label>
+                    <select x-model="columnFilters[col.id]" 
+                            @change="changeFilter()" 
+                            class="bg-gray-50 border border-gray-300 text-gray-700 rounded-lg py-1.5 px-3 text-xs focus:ring-primary focus:border-primary font-medium">
+                        <option value="" x-text="'-- All ' + col.name + ' --'"></option>
+                        <template x-for="opt in col.options.split(',').map(s => s.trim()).filter(Boolean)" :key="opt">
+                            <option :value="opt" x-text="opt"></option>
+                        </template>
+                    </select>
+                </div>
+            </template>
         </div>
 
         <button @click="resetFilters" class="text-xs text-red-500 hover:text-red-700 font-semibold flex items-center gap-1">
@@ -441,7 +454,7 @@
                                 </div>
                                 <div class="flex items-center gap-1 ml-2">
                                     {% if user.role in 'SUPER_ADMIN,ADMIN,DEPARTMENT_ADMIN' %}
-                                    <button @click.stop="openEditColumnModal({{ col.id }}, '{{ col.name }}', '{{ col.data_type }}', '{{ col.options|default:""|escapejs }}', {{ col.is_system_column|yesno:'true,false' }})" class="text-blue-500 hover:text-blue-700 focus:outline-none mr-1" title="Edit Column">
+                                    <button @click.stop="openEditColumnModal({{ col.id }}, '{{ col.name }}', '{{ col.data_type }}', '{{ col.options|default:""|escapejs }}', {{ col.is_system_column|yesno:'true,false' }}, {{ col.is_filterable|yesno:'true,false' }})" class="text-blue-500 hover:text-blue-700 focus:outline-none mr-1" title="Edit Column">
                                         <i class="fas fa-cog text-[9px]"></i>
                                     </button>
                                     <button @click.stop="moveColumnLeft({{ col.id }})" class="text-gray-400 hover:text-gray-600 focus:outline-none" title="Move Left">
@@ -724,6 +737,11 @@
                     <div x-show="newColumnType === 'DROPDOWN'">
                         <label class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Dropdown Options (Comma-separated)</label>
                         <textarea x-model="newColumnOptions" placeholder="e.g. Option A, Option B, Option C" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-sm" rows="3"></textarea>
+                        
+                        <div class="flex items-center gap-2 mt-3">
+                            <input type="checkbox" x-model="newColumnIsFilterable" id="newColumnIsFilterable" class="h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded">
+                            <label for="newColumnIsFilterable" class="text-xs font-semibold text-gray-700 cursor-pointer">Enable Filter dropdown for this column</label>
+                        </div>
                     </div>
                 </div>
                 <div class="flex justify-end gap-3 mt-6">
@@ -765,6 +783,11 @@
                     <div x-show="editColumnType === 'DROPDOWN'">
                         <label class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Dropdown Options (Comma-separated)</label>
                         <textarea x-model="editColumnOptions" placeholder="e.g. Option A, Option B, Option C" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-sm" rows="3"></textarea>
+                        
+                        <div class="flex items-center gap-2 mt-3">
+                            <input type="checkbox" x-model="editColumnIsFilterable" id="editColumnIsFilterable" class="h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded">
+                            <label for="editColumnIsFilterable" class="text-xs font-semibold text-gray-700 cursor-pointer">Enable Filter dropdown for this column</label>
+                        </div>
                     </div>
                 </div>
 
@@ -1147,7 +1170,7 @@
             editTableName: '{{ table.name|escapejs }}',
             editTableDescription: '{{ table.description|default:""|escapejs }}',
             selectedRowIds: [],
-            columns: [{% for col in table.columns.all %}{id: {{ col.id }}, name: '{{ col.name }}'}{% if not forloop.last %}, {% endif %}{% endfor %}],
+            columns: [{% for col in table.columns.all %}{id: {{ col.id }}, name: '{{ col.name }}', data_type: '{{ col.data_type }}', options: '{{ col.options|default:""|escapejs }}', is_filterable: {{ col.is_filterable|yesno:"true,false" }}}{% if not forloop.last %}, {% endif %}{% endfor %}],
             rows: [],
             editingRowId: null,
             editingColumnId: null,
@@ -1160,6 +1183,7 @@
             selectedYearFilter: '',
             selectedMonthFilter: '',
             selectedDueFilter: '',
+            columnFilters: {},
 
             listPidStatusChartInstance: null,
             listPidProjectChartInstance: null,
@@ -1191,8 +1215,7 @@
                 TASK_NAME: '',
                 DUE_DATE: ''
             },
-
-            // Sales Follow-up log state
+// Sales Follow-up log state
             salesDiscussedPoints: '',
             salesNextFollowUpDate: '',
             salesStatus: 'IN_PROGRESS',
@@ -1203,6 +1226,7 @@
             newColumnName: '',
             newColumnType: 'TEXT',
             newColumnOptions: '',
+            newColumnIsFilterable: false,
 
             // Edit Column Modal
             isEditColumnModalOpen: false,
@@ -1211,6 +1235,7 @@
             editColumnType: 'TEXT',
             editColumnOptions: '',
             editColumnIsSystem: false,
+            editColumnIsFilterable: false,
 
 
              // Import Modal State
@@ -1331,6 +1356,7 @@ comments: [],
                 this.selectedYearFilter = '';
                 this.selectedMonthFilter = '';
                 this.selectedDueFilter = '';
+                this.columnFilters = {};
 
                 this.currentPage = 1;
                 this.fetchRows();
@@ -1571,7 +1597,13 @@ comments: [],
                 if (this.selectedMonthFilter) params.append('month', this.selectedMonthFilter);
                 if (this.selectedDueFilter) params.append('due', this.selectedDueFilter);
 
-
+                // Append custom column filters
+                Object.keys(this.columnFilters).forEach(colId => {
+                    const filterVal = this.columnFilters[colId];
+                    if (filterVal) {
+                        params.append('col_' + colId, filterVal);
+                    }
+                });
                 fetch(`/tables/api/rows/?${params.toString()}`)
                     .then(res => res.json())
                     .then(data => {
@@ -1990,6 +2022,8 @@ comments: [],
                 this.isColumnModalOpen = true;
                 this.newColumnName = '';
                 this.newColumnType = 'TEXT';
+                this.newColumnOptions = '';
+                this.newColumnIsFilterable = false;
             },
 
             createColumn() {
@@ -2003,7 +2037,8 @@ comments: [],
                         table: this.tableId,
                         name: this.newColumnName,
                         data_type: this.newColumnType,
-                        options: this.newColumnOptions
+                        options: this.newColumnOptions,
+                        is_filterable: this.newColumnIsFilterable
                     })
                 })
                 .then(res => {
@@ -2015,12 +2050,13 @@ comments: [],
                 });
             },
 
-            openEditColumnModal(columnId, columnName, columnType, columnOptions, isSystem = false) {
+            openEditColumnModal(columnId, columnName, columnType, columnOptions, isSystem = false, isFilterable = false) {
                 this.editColumnId = columnId;
                 this.editColumnName = columnName;
                 this.editColumnType = columnType;
                 this.editColumnOptions = columnOptions || '';
                 this.editColumnIsSystem = isSystem;
+                this.editColumnIsFilterable = isFilterable;
                 this.isEditColumnModalOpen = true;
             },
 
@@ -2035,7 +2071,8 @@ comments: [],
                     body: JSON.stringify({
                         name: this.editColumnName,
                         data_type: this.editColumnType,
-                        options: this.editColumnOptions
+                        options: this.editColumnOptions,
+                        is_filterable: this.editColumnIsFilterable
                     })
                 })
                 .then(res => {

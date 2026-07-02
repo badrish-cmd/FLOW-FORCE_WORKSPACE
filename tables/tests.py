@@ -736,3 +736,25 @@ class TablesTestCase(TestCase):
         initial_mail_col = table.columns.get(name="INITIAL_MAIL")
         self.assertEqual(get_column_access_level(self.employee, s_no_col), "EDITABLE")
         self.assertEqual(get_column_access_level(self.employee, initial_mail_col), "EDITABLE")
+
+    def test_dynamic_dropdown_column_filtering(self):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from tables.views import RowViewSet
+        factory = APIRequestFactory()
+        table = Table.objects.create(name="Dynamic Filter Table", created_by=self.admin)
+        col = Column.objects.create(table=table, name="Status Col", data_type="DROPDOWN", options="Open,Closed", is_filterable=True)
+        
+        row1 = Row.objects.create(table=table, created_by=self.employee)
+        row2 = Row.objects.create(table=table, created_by=self.employee)
+        
+        CellValue.objects.create(row=row1, column=col, value="Open", updated_by=self.admin)
+        CellValue.objects.create(row=row2, column=col, value="Closed", updated_by=self.admin)
+        
+        # Test API filtering with col_<id>=Open
+        view = RowViewSet.as_view({'get': 'list'})
+        request = factory.get(f"/tables/api/rows/?table={table.id}&col_{col.id}=Open")
+        force_authenticate(request, user=self.admin)
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(response.data["results"][0]["id"], row1.id)

@@ -1102,9 +1102,14 @@ class RowViewSet(viewsets.ModelViewSet):
         task_id = self.request.query_params.get("task_id")
         if task_id:
             queryset = queryset.filter(task__id=task_id)
-
-
-
+        # Custom dynamic column filters
+        for key, val in self.request.query_params.items():
+            if key.startswith("col_") and val:
+                try:
+                    col_id = int(key.replace("col_", ""))
+                    queryset = queryset.filter(cells__column_id=col_id, cells__value=val)
+                except ValueError:
+                    pass
         pid = self.request.query_params.get("pid")
         if pid:
             queryset = queryset.filter(cells__column__name='PID', cells__value=pid)

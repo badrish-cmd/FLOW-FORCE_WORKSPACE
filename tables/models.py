@@ -122,6 +122,7 @@ class Column(models.Model):
     is_system_column = models.BooleanField(default=False)
     position = models.PositiveIntegerField(default=0)
     options = models.TextField(blank=True, null=True, help_text="Comma-separated options for dropdown")
+    is_filterable = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["position", "id"]
