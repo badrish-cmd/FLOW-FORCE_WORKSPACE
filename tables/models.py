@@ -144,7 +144,7 @@ class Row(models.Model):
         null=True,
         related_name="created_new_rows"
     )
-    is_archived = models.BooleanField(default=False)
+    is_archived = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

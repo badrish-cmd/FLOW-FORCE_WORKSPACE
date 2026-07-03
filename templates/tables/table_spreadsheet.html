@@ -1594,6 +1594,11 @@ comments: [],
                     page_size: this.pageSize
                 });
                 
+                const isPaginatingOnly = this.currentPage > 1 && !this.showDashboard;
+                if (!isPaginatingOnly) {
+                    params.append('include_stats', 'true');
+                }
+                
                 if (this.selectedPidFilter) params.append('pid', this.selectedPidFilter);
                 if (this.selectedYearFilter) params.append('year', this.selectedYearFilter);
                 if (this.selectedMonthFilter) params.append('month', this.selectedMonthFilter);
