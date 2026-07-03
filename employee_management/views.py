@@ -950,20 +950,7 @@ def global_activity_logs(request):
 
     today = timezone.localdate()
 
-    # 1. Logged In Today: active employees whose last_login is today
-    logged_in_today = EmployeeUser.objects.filter(
-        last_login__date=today,
-        is_active=True
-    ).order_by("full_name")
-
-    # 2. Not Logged In Today: active employees whose last_login is not today
-    not_logged_in_today = EmployeeUser.objects.filter(
-        is_active=True
-    ).exclude(
-        last_login__date=today
-    ).order_by("full_name")
-
-    # 3. Done changes today / Not done changes today in tables
+    # Done changes today / Not done changes today in tables
     today_changes = CellValue.objects.filter(
         updated_at__date=today,
         updated_by__isnull=False
@@ -1009,8 +996,6 @@ def global_activity_logs(request):
         "selected_type": activity_type,
         "activity_types": EmployeeActivityLog.ACTIVITY_TYPES,
         "employees_activity": employees_activity,
-        "logged_in_today": logged_in_today,
-        "not_logged_in_today": not_logged_in_today,
         "done_changes_today": done_changes_today,
         "not_done_changes_today": not_done_changes_today,
     }
