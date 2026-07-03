@@ -64,17 +64,20 @@ class Task(models.Model):
     def task_name(self):
         job_type = self.row.table.job_type
         if job_type == "SALES":
-            col_name = "CUSTOMER_NAME"
+            name_cell = self.row.cells.filter(column__name="CUSTOMER_NAME").first()
+            if not name_cell:
+                name_cell = self.row.cells.filter(column__name="TASK_NAME").first()
+            return name_cell.value if name_cell else "Unnamed Task"
         elif job_type == "LIST_PID":
-            col_name = "ENQUIRY_NO"
+            name_cell = self.row.cells.filter(
+                column__name__in=["ENQUIRY_NO", "ENQUIRY_NO/QUOTATION_NO", "ENQUIRY_NO_QUOTATION_NO", "ENQUIRY NUMBER", "ENQUIRY NO", "ENQUIRY_NO / QUOTATION_NO"]
+            ).first()
+            if not name_cell:
+                name_cell = self.row.cells.filter(column__name="PID").first()
+            return name_cell.value if name_cell else "Unnamed Task"
         else:
-            col_name = "TASK_NAME"
-        name_cell = self.row.cells.filter(column__name=col_name).first()
-        if not name_cell and job_type == "LIST_PID":
-            name_cell = self.row.cells.filter(column__name="PID").first()
-        if not name_cell and job_type == "SALES":
             name_cell = self.row.cells.filter(column__name="TASK_NAME").first()
-        return name_cell.value if name_cell else "Unnamed Task"
+            return name_cell.value if name_cell else "Unnamed Task"
 
     @property
     def table_name(self):

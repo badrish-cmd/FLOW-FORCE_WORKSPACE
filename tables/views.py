@@ -369,8 +369,8 @@ class TableViewSet(viewsets.ModelViewSet):
                 if h in ["DUE_DATE", "DUEDATE", "FOLLOW_UP_DATE", "FOLLOWUPDATE", "FOLLOW_UP"]:
                     return "FOLLOW_UP_DATE"
             elif is_list_pid:
-                if h in ["ENQUIRY_NO", "ENQUIRYNO", "ENQUIRY", "ENQUIRIES", "TASK_NAME", "TASKNAME", "TASK", "CUSTOMER_NAME"]:
-                    return "ENQUIRY_NO"
+                if h in ["ENQUIRY_NO", "ENQUIRYNO", "ENQUIRY", "ENQUIRIES", "TASK_NAME", "TASKNAME", "TASK", "CUSTOMER_NAME", "ENQUIRY_NO_QUOTATION_NO", "ENQUIRY_QUOTATION_NO", "ENQUIRY_NO_QUOTATION", "QUOTATION_NO", "QUOTATION", "QUOTATION_NUMBER", "ENQUIRY_NUMBER"]:
+                    return "ENQUIRY_NO_QUOTATION_NO"
                 if h in ["DUE_DATE_FLOW_FORCE", "FLOW_FORCE_DUE_DATE", "FLOW_FORCE", "DUE_DATE", "FOLLOW_UP_DATE"]:
                     return "DUE_DATE_FLOW_FORCE"
                 if h in ["NEW_PID_NO", "NEWPIDNO", "NEW_PID"]:
@@ -416,11 +416,11 @@ class TableViewSet(viewsets.ModelViewSet):
 
         # Strict validation has been changed to lenient/dynamic mapping as requested.
         # We only require that the primary task identifier and date columns are present.
-        required_header = "CUSTOMER_NAME" if is_sales else ("ENQUIRY_NO" if is_list_pid else "TASK_NAME")
+        required_header = "CUSTOMER_NAME" if is_sales else ("ENQUIRY_NO_QUOTATION_NO" if is_list_pid else "TASK_NAME")
         required_date = "FOLLOW_UP_DATE" if is_sales else ("DUE_DATE_FLOW_FORCE" if is_list_pid else "DUE_DATE")
 
         if required_header not in csv_headers:
-            return None, f"Required column for task name/customer name/enquiry no is missing in the CSV sheet headers. Expected one of: {required_header}"
+            return None, f"Required column for task name/customer name/enquiry/quotation no is missing in the CSV sheet headers. Expected one of: {required_header}"
         if not is_list_pid and required_date not in csv_headers:
             return None, f"Required column for due date/follow up date is missing in the CSV sheet headers. Expected one of: {required_date}"
 
@@ -448,7 +448,7 @@ class TableViewSet(viewsets.ModelViewSet):
                     normalized_row[normalized_key] = val
 
             if is_list_pid:
-                task_name = normalized_row.get("ENQUIRY_NO") or normalized_row.get("PID") or "Unnamed"
+                task_name = normalized_row.get("ENQUIRY_NO_QUOTATION_NO") or normalized_row.get("PID") or "Unnamed"
                 if not task_name:
                     continue
                 ff_date_str = normalized_row.get("DUE_DATE_FLOW_FORCE")
@@ -527,11 +527,11 @@ class TableViewSet(viewsets.ModelViewSet):
                     "ALERT_MAIL": alert_mail_val
                 }
             elif is_list_pid:
-                system_field_names = ["S_NO", "DATE", "ENQUIRY_NO", "DUE_DATE_FLOW_FORCE", "INITIAL_MAIL", "ALERT_MAIL"]
+                system_field_names = ["S_NO", "DATE", "ENQUIRY_NO_QUOTATION_NO", "DUE_DATE_FLOW_FORCE", "INITIAL_MAIL", "ALERT_MAIL"]
                 cell_values = {
                     "S_NO": s_no,
                     "DATE": date_val,
-                    "ENQUIRY_NO": task_name,
+                    "ENQUIRY_NO_QUOTATION_NO": task_name,
                     "DUE_DATE_FLOW_FORCE": ff_date.isoformat() if ff_date else None,
                     "INITIAL_MAIL": initial_mail_val,
                     "ALERT_MAIL": alert_mail_val
@@ -1197,9 +1197,9 @@ class RowViewSet(viewsets.ModelViewSet):
             name_field_name = "CUSTOMER_NAME"
         elif is_list_pid:
             due_date_str = cells_data.get("DUE_DATE_FLOW_FORCE") or cells_data.get("DUE_DATE_CUSTOMER")
-            task_name = cells_data.get("ENQUIRY_NO") or cells_data.get("PID") or "Unnamed"
+            task_name = cells_data.get("ENQUIRY_NO/QUOTATION_NO") or cells_data.get("ENQUIRY_NO") or cells_data.get("PID") or "Unnamed"
             date_field_name = "DUE_DATE_FLOW_FORCE"
-            name_field_name = "ENQUIRY_NO"
+            name_field_name = "ENQUIRY_NO/QUOTATION_NO"
         else:
             due_date_str = cells_data.get("DUE_DATE")
             task_name = cells_data.get("TASK_NAME")
@@ -1208,15 +1208,14 @@ class RowViewSet(viewsets.ModelViewSet):
 
         priority = cells_data.get("priority", "MEDIUM")
 
-        if not due_date_str:
+        due_date = None
+        if due_date_str:
+            try:
+                due_date = datetime.strptime(due_date_str.split("T")[0], "%Y-%m-%d").date()
+            except ValueError:
+                return Response({"error": f"Invalid {date_field_name} format. Use YYYY-MM-DD"}, status=status.HTTP_400_BAD_REQUEST)
+        elif not is_list_pid:
             return Response({"error": f"{date_field_name} is mandatory"}, status=status.HTTP_400_BAD_REQUEST)
-        if not task_name:
-            return Response({"error": f"{name_field_name} is mandatory"}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            due_date = datetime.strptime(due_date_str.split("T")[0], "%Y-%m-%d").date()
-        except ValueError:
-            return Response({"error": f"Invalid {date_field_name} format. Use YYYY-MM-DD"}, status=status.HTTP_400_BAD_REQUEST)
 
         # 1. Create Row
         row = Row.objects.create(table=table, created_by=request.user)
@@ -1238,17 +1237,18 @@ class RowViewSet(viewsets.ModelViewSet):
             cell_values = {
                 "S_NO": s_no,
                 "DATE": timezone.localdate().isoformat(),
-                "FOLLOW_UP_DATE": due_date.isoformat(),
+                "FOLLOW_UP_DATE": due_date.isoformat() if due_date else None,
                 "CUSTOMER_NAME": task_name,
                 "INITIAL_MAIL": "NO",
                 "ALERT_MAIL": "NO"
             }
         elif is_list_pid:
+            enq_col_name = "ENQUIRY_NO/QUOTATION_NO" if "ENQUIRY_NO/QUOTATION_NO" in cols else "ENQUIRY_NO"
             cell_values = {
                 "S_NO": s_no,
                 "DATE": timezone.localdate().isoformat(),
-                "ENQUIRY_NO": task_name,
-                "DUE_DATE_FLOW_FORCE": due_date.isoformat(),
+                enq_col_name: task_name,
+                "DUE_DATE_FLOW_FORCE": due_date.isoformat() if due_date else None,
                 "INITIAL_MAIL": "NO",
                 "ALERT_MAIL": "NO"
             }
@@ -1256,7 +1256,7 @@ class RowViewSet(viewsets.ModelViewSet):
             cell_values = {
                 "S_NO": s_no,
                 "DATE": timezone.localdate().isoformat(),
-                "DUE_DATE": due_date.isoformat(),
+                "DUE_DATE": due_date.isoformat() if due_date else None,
                 "TASK_NAME": task_name,
                 "INITIAL_MAIL": "NO",
                 "ALERT_MAIL": "NO"

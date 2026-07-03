@@ -694,7 +694,7 @@ class TablesTestCase(TestCase):
 
         col_names = [col.name for col in table.columns.all()]
         self.assertIn("S_NO", col_names)
-        self.assertIn("ENQUIRY_NO", col_names)
+        self.assertIn("ENQUIRY_NO/QUOTATION_NO", col_names)
         self.assertIn("PID", col_names)
         self.assertIn("DUE_DATE_FLOW_FORCE", col_names)
         self.assertIn("INITIAL_MAIL", col_names)
@@ -705,7 +705,7 @@ class TablesTestCase(TestCase):
         request = factory.post("/tables/api/rows/", {
             "table": table.id,
             "cells": {
-                "ENQUIRY_NO": "ENQ-1234",
+                "ENQUIRY_NO/QUOTATION_NO": "ENQ-1234",
                 "PID": "PID-5678",
                 "DUE_DATE_FLOW_FORCE": "2026-07-20",
                 "QTY": "15"
@@ -719,7 +719,7 @@ class TablesTestCase(TestCase):
         row = Row.objects.get(id=row_id)
 
         # Check CellValues
-        self.assertEqual(CellValue.objects.get(row=row, column__name="ENQUIRY_NO").value, "ENQ-1234")
+        self.assertEqual(CellValue.objects.get(row=row, column__name="ENQUIRY_NO/QUOTATION_NO").value, "ENQ-1234")
         self.assertEqual(CellValue.objects.get(row=row, column__name="DUE_DATE_FLOW_FORCE").value, "2026-07-20")
         self.assertEqual(CellValue.objects.get(row=row, column__name="QTY").value, "15")
 
@@ -794,6 +794,10 @@ class TablesTestCase(TestCase):
         rows = Row.objects.filter(table=table)
         self.assertEqual(rows.count(), 3)
         for r in rows:
+            name_cell = CellValue.objects.filter(row=r, column__name="ENQUIRY_NO/QUOTATION_NO").first()
+            self.assertIsNotNone(name_cell)
+            self.assertTrue(name_cell.value.startswith("ENQ-"))
+
             date_cell = CellValue.objects.filter(row=r, column__name="DATE").first()
             due_ff_cell = CellValue.objects.filter(row=r, column__name="DUE_DATE_FLOW_FORCE").first()
             # Verify they are blank/None (safe_parse_date returned None, and they were not auto-assigned today)

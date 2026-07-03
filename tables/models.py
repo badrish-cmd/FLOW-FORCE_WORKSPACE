@@ -50,7 +50,7 @@ class Table(models.Model):
             elif self.job_type == "LIST_PID":
                 system_cols = [
                     ("S_NO", "NUMBER", 1),
-                    ("ENQUIRY_NO", "TEXT", 2),
+                    ("ENQUIRY_NO/QUOTATION_NO", "TEXT", 2),
                     ("PID", "TEXT", 3),
                     ("NEW_PID_NO", "TEXT", 4),
                     ("SALES_ORDER", "TEXT", 5),
