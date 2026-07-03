@@ -415,15 +415,15 @@
                 </select>
             </div>
 
-            <!-- Dynamic Dropdown Column Filters -->
-            <template x-for="col in columns.filter(c => c.data_type === 'DROPDOWN' && c.is_filterable)" :key="col.id">
+            <!-- Dynamic Column Filters (Dropdown and Non-Dropdown) -->
+            <template x-for="col in columns.filter(c => c.is_filterable)" :key="col.id">
                 <div class="flex items-center gap-2">
                     <label class="text-xs font-semibold text-gray-500" x-text="col.name + ':'"></label>
                     <select x-model="columnFilters[col.id]" 
                             @change="changeFilter()" 
                             class="bg-gray-50 border border-gray-300 text-gray-700 rounded-lg py-1.5 px-3 text-xs focus:ring-primary focus:border-primary font-medium">
                         <option value="" x-text="'-- All ' + col.name + ' --'"></option>
-                        <template x-for="opt in col.options.split(',').map(s => s.trim()).filter(Boolean)" :key="opt">
+                        <template x-for="opt in (uniqueColumnValues[col.id] || [])" :key="opt">
                             <option :value="opt" x-text="opt"></option>
                         </template>
                     </select>
@@ -1277,6 +1277,7 @@ comments: [],
             totalRows: 0,
             uniquePids: [],
             uniqueYears: [],
+            uniqueColumnValues: {},
             dashboardStats: {},
 
             startIndex() {
@@ -1620,6 +1621,7 @@ comments: [],
 
                         this.uniquePids = data.unique_pids || [];
                         this.uniqueYears = data.unique_years || [];
+                        this.uniqueColumnValues = data.unique_column_values || {};
                         this.dashboardStats = data.stats || {};
 
                         // Optimize: pre-map cells to a cells_dict lookup to avoid O(C) loops during render

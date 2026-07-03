@@ -988,12 +988,31 @@ class RowPagination(PageNumberPagination):
         table = get_object_or_404(Table, id=table_id)
         
         # Calculate statistics
-        # Unique PIDs
         unique_pids = list(CellValue.objects.filter(
             column__table=table,
             column__name='PID',
             row__is_archived=False
         ).exclude(value=None).values_list('value', flat=True).distinct().order_by('value'))
+
+        # Unique Column values for all filterable columns
+        filterable_cols = table.columns.filter(is_filterable=True)
+        unique_column_values = {}
+        for col in filterable_cols:
+            if col.data_type == 'DROPDOWN':
+                opts = [o.strip() for o in (col.options or '').split(',') if o.strip()]
+                unique_column_values[col.id] = opts
+            else:
+                unique_vals = list(CellValue.objects.filter(
+                    column=col,
+                    row__table=table,
+                    row__is_archived=False
+                ).exclude(
+                    value__isnull=True
+                ).exclude(
+                    value=""
+                ).values_list('value', flat=True).distinct().order_by('value'))
+                cleaned_vals = sorted(list(set(str(v).strip() for v in unique_vals if str(v).strip())))
+                unique_column_values[col.id] = cleaned_vals
         
         # Unique Years
         from django.db.models.functions import ExtractYear
@@ -1159,6 +1178,7 @@ class RowPagination(PageNumberPagination):
             'results': data,
             'unique_pids': unique_pids,
             'unique_years': unique_years,
+            'unique_column_values': unique_column_values,
             'stats': {
                 'status_counts': status_counts,
                 'priority_counts': priority_counts,
