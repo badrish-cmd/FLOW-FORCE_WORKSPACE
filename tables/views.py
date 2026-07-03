@@ -435,9 +435,15 @@ class TableViewSet(viewsets.ModelViewSet):
                 base_s_no = latest_cell.value
         
         resolved_users_cache = {}
+        list_pid_employees = []
+        if is_list_pid:
+            from tables.permissions import get_employees_with_table_access
+            list_pid_employees = list(get_employees_with_table_access(table))
         
-        created_rows = []
+        rows_to_create = []
+        row_temp_data = []
         row_import_idx = 1
+        
         for row_dict in reader:
             normalized_row = {}
             for original_key, val in row_dict.items():
@@ -483,12 +489,13 @@ class TableViewSet(viewsets.ModelViewSet):
                     status_val = v
                     break
 
-            # Create Row
-            row = Row.objects.create(table=table, created_by=request_user)
+            # Stage Row object creation (unsaved)
+            row = Row(table=table, created_by=request_user)
+            rows_to_create.append(row)
 
             # Auto compute S_NO (using pre-fetched base)
-            row_import_idx += 1
             s_no = base_s_no + row_import_idx
+            row_import_idx += 1
 
             # Parse and normalize other system fields
             csv_date_str = normalized_row.get("DATE")
@@ -557,30 +564,10 @@ class TableViewSet(viewsets.ModelViewSet):
                         else:
                             cell_values[col.name] = val
 
-            for name, val in cell_values.items():
-                col = None
-                if name in system_field_names:
-                    col = normalized_db_cols.get(name)
-                else:
-                    col = columns_by_name.get(name)
-                if col:
-                    CellValue.objects.create(row=row, column=col, value=val, updated_by=request_user)
-
             # Normalize priority and status for Task model
             norm_priority = str(priority).upper().strip().replace(" ", "_")
             if norm_priority not in [choice[0] for choice in Task.PRIORITY_CHOICES]:
                 norm_priority = "MEDIUM"
-
-            # Create Task
-            task = Task.objects.create(
-                row=row,
-                due_date=due_date,
-                priority=norm_priority,
-                status="PENDING",
-                assigned_by=request_user,
-                initial_mail_sent=(initial_mail_val == "YES"),
-                alert_mail_sent=(alert_mail_val == "YES")
-            )
 
             # Resolve assignee user if provided in any USER data_type column or header representation
             user_to_assign = None
@@ -613,11 +600,84 @@ class TableViewSet(viewsets.ModelViewSet):
                             resolved_users_cache[cache_key] = user_to_assign
                         break
 
-            if user_to_assign:
-                task.assigned_to.set([user_to_assign])
+            row_temp_data.append({
+                'cell_values': cell_values,
+                'due_date': due_date,
+                'norm_priority': norm_priority,
+                'initial_mail_val': initial_mail_val,
+                'alert_mail_val': alert_mail_val,
+                'user_to_assign': user_to_assign,
+                'system_field_names': system_field_names
+            })
 
-            created_rows.append(row)
-            row_import_idx += 1
+        # 1. Bulk Create Row records
+        created_rows = Row.objects.bulk_create(rows_to_create)
+
+        cells_to_create = []
+        tasks_to_create = []
+
+        # 2. Iterate through newly created rows to build unsaved CellValue and Task objects
+        for i, row in enumerate(created_rows):
+            temp = row_temp_data[i]
+            cell_values = temp['cell_values']
+            system_field_names = temp['system_field_names']
+
+            for name, val in cell_values.items():
+                col = None
+                if name in system_field_names:
+                    col = normalized_db_cols.get(name)
+                else:
+                    col = columns_by_name.get(name)
+                if col:
+                    cells_to_create.append(
+                        CellValue(row=row, column=col, value=val, updated_by=request_user)
+                    )
+
+            task = Task(
+                row=row,
+                due_date=temp['due_date'],
+                priority=temp['norm_priority'],
+                status="PENDING",
+                assigned_by=request_user,
+                initial_mail_sent=(temp['initial_mail_val'] == "YES"),
+                alert_mail_sent=(temp['alert_mail_val'] == "YES")
+            )
+            tasks_to_create.append(task)
+
+        # 3. Bulk insert CellValue and Task objects
+        CellValue.objects.bulk_create(cells_to_create, batch_size=5000)
+        created_tasks = Task.objects.bulk_create(tasks_to_create)
+
+        # 4. Map task assignees in bulk using join table ThroughModel
+        ThroughModel = Task.assigned_to.through
+        through_fields = ThroughModel._meta.fields
+        task_field = None
+        user_field = None
+        for f in through_fields:
+            if f.is_relation:
+                if f.related_model == Task:
+                    task_field = f.name
+                else:
+                    user_field = f.name
+
+        through_objs = []
+        for i, task in enumerate(created_tasks):
+            temp = row_temp_data[i]
+            user_to_assign = temp['user_to_assign']
+            assignees = [user_to_assign] if user_to_assign else []
+
+            if is_list_pid:
+                assignees = list_pid_employees
+
+            for employee in assignees:
+                kwargs = {
+                    task_field: task,
+                    user_field: employee
+                }
+                through_objs.append(ThroughModel(**kwargs))
+
+        if through_objs:
+            ThroughModel.objects.bulk_create(through_objs, batch_size=5000, ignore_conflicts=True)
 
         # After successfully importing and creating rows, analyze and setup filter for LIST_PID
         if is_list_pid:
