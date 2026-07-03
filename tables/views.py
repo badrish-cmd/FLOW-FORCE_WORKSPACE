@@ -104,16 +104,24 @@ class TableViewSet(viewsets.ModelViewSet):
 
         # Clone custom columns (excluding system columns as they are auto-created in save())
         for old_col in table.columns.filter(is_system_column=False):
-            new_col = Column.objects.create(
-                table=new_table,
-                name=old_col.name,
-                data_type=old_col.data_type,
-                is_mandatory=old_col.is_mandatory,
-                is_system_column=False,
-                position=old_col.position,
-                options=old_col.options
-            )
-            column_mapping[old_col.id] = new_col
+            existing_col = new_table.columns.filter(name=old_col.name).first()
+            if existing_col:
+                existing_col.options = old_col.options
+                existing_col.position = old_col.position
+                existing_col.is_mandatory = old_col.is_mandatory
+                existing_col.save()
+                column_mapping[old_col.id] = existing_col
+            else:
+                new_col = Column.objects.create(
+                    table=new_table,
+                    name=old_col.name,
+                    data_type=old_col.data_type,
+                    is_mandatory=old_col.is_mandatory,
+                    is_system_column=False,
+                    position=old_col.position,
+                    options=old_col.options
+                )
+                column_mapping[old_col.id] = new_col
 
         # Clone TableAccess
         for access in table.access_rules.all():
@@ -1327,24 +1335,51 @@ class RowViewSet(viewsets.ModelViewSet):
         )
 
         # Sync System Columns with Task Model if necessary
-        if column.is_system_column:
+        is_list_pid = (table.job_type == "LIST_PID")
+        if column.is_system_column or (is_list_pid and column.name.upper() in ["DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]):
             task = getattr(row, "task", None)
             if task:
-                if column.name in ["DUE_DATE", "FOLLOW_UP_DATE", "DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]:
-                    try:
-                        new_date = datetime.strptime(value.split("T")[0], "%Y-%m-%d").date()
-                        if task.due_date != new_date:
-                            task.due_date = new_date
-                            task.alert_mail_sent = False
-                            task.save(update_fields=["due_date", "alert_mail_sent"])
-                            from tasks.tasks import update_task_row_mail_columns
-                            update_task_row_mail_columns(task)
-                        else:
-                            task.due_date = new_date
-                            task.save(update_fields=["due_date"])
-                    except ValueError:
-                        return Response({"error": "Invalid date format"}, status=status.HTTP_400_BAD_REQUEST)
-                elif column.name in ["TASK_NAME", "CUSTOMER_NAME", "ENQUIRY_NO"]:
+                new_date = None
+                if is_list_pid:
+                    flow_force_col = Column.objects.filter(table=table, name__iexact="DUE_DATE_FLOW_FORCE").first()
+                    customer_col = Column.objects.filter(table=table, name__iexact="DUE_DATE_CUSTOMER").first()
+                    
+                    ff_val = CellValue.objects.filter(row=row, column=flow_force_col).first() if flow_force_col else None
+                    cust_val = CellValue.objects.filter(row=row, column=customer_col).first() if customer_col else None
+                    
+                    if ff_val and ff_val.value:
+                        try:
+                            new_date = datetime.strptime(str(ff_val.value).split("T")[0], "%Y-%m-%d").date()
+                        except ValueError:
+                            pass
+                    if not new_date and cust_val and cust_val.value:
+                        try:
+                            new_date = datetime.strptime(str(cust_val.value).split("T")[0], "%Y-%m-%d").date()
+                        except ValueError:
+                            pass
+                else:
+                    if column.name in ["DUE_DATE", "FOLLOW_UP_DATE", "DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]:
+                        try:
+                            new_date = datetime.strptime(str(value).split("T")[0], "%Y-%m-%d").date()
+                        except ValueError:
+                            return Response({"error": "Invalid date format"}, status=status.HTTP_400_BAD_REQUEST)
+
+                if new_date:
+                    if task.due_date != new_date:
+                        task.due_date = new_date
+                        task.alert_mail_sent = False
+                        task.save(update_fields=["due_date", "alert_mail_sent"])
+                        from tasks.tasks import update_task_row_mail_columns
+                        update_task_row_mail_columns(task)
+                    else:
+                        task.due_date = new_date
+                        task.save(update_fields=["due_date"])
+                elif not is_list_pid:
+                    return Response({"error": "Invalid date format"}, status=status.HTTP_400_BAD_REQUEST)
+            elif not is_list_pid:
+                # No task but system column
+                pass
+        elif column.name in ["TASK_NAME", "CUSTOMER_NAME", "ENQUIRY_NO"] and column.is_system_column:
                     # Activity log detail update
                     pass
 
@@ -1447,23 +1482,45 @@ class RowViewSet(viewsets.ModelViewSet):
             updated_columns.append(column.name)
 
             # Sync System Columns with Task Model if necessary
-            if column.is_system_column:
+            is_list_pid = (table.job_type == "LIST_PID")
+            if column.is_system_column or (is_list_pid and column.name.upper() in ["DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]):
                 task = getattr(row, "task", None)
                 if task:
-                    if column.name in ["DUE_DATE", "FOLLOW_UP_DATE", "DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]:
-                        try:
-                            new_date = datetime.strptime(str(value).split("T")[0], "%Y-%m-%d").date()
-                            if task.due_date != new_date:
-                                task.due_date = new_date
-                                task.alert_mail_sent = False
-                                task.save(update_fields=["due_date", "alert_mail_sent"])
-                                from tasks.tasks import update_task_row_mail_columns
-                                update_task_row_mail_columns(task)
-                            else:
-                                task.due_date = new_date
-                                task.save(update_fields=["due_date"])
-                        except ValueError:
-                            pass
+                    new_date = None
+                    if is_list_pid:
+                        flow_force_col = Column.objects.filter(table=table, name__iexact="DUE_DATE_FLOW_FORCE").first()
+                        customer_col = Column.objects.filter(table=table, name__iexact="DUE_DATE_CUSTOMER").first()
+                        
+                        ff_val = CellValue.objects.filter(row=row, column=flow_force_col).first() if flow_force_col else None
+                        cust_val = CellValue.objects.filter(row=row, column=customer_col).first() if customer_col else None
+                        
+                        if ff_val and ff_val.value:
+                            try:
+                                new_date = datetime.strptime(str(ff_val.value).split("T")[0], "%Y-%m-%d").date()
+                            except ValueError:
+                                pass
+                        if not new_date and cust_val and cust_val.value:
+                            try:
+                                new_date = datetime.strptime(str(cust_val.value).split("T")[0], "%Y-%m-%d").date()
+                            except ValueError:
+                                pass
+                    else:
+                        if column.name in ["DUE_DATE", "FOLLOW_UP_DATE", "DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]:
+                            try:
+                                new_date = datetime.strptime(str(value).split("T")[0], "%Y-%m-%d").date()
+                            except ValueError:
+                                pass
+
+                    if new_date:
+                        if task.due_date != new_date:
+                            task.due_date = new_date
+                            task.alert_mail_sent = False
+                            task.save(update_fields=["due_date", "alert_mail_sent"])
+                            from tasks.tasks import update_task_row_mail_columns
+                            update_task_row_mail_columns(task)
+                        else:
+                            task.due_date = new_date
+                            task.save(update_fields=["due_date"])
 
             # Sync with Task assigned_to if column data_type is USER or column name represents assignment
             col_name_upper = column.name.upper()

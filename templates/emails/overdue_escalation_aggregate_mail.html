@@ -42,7 +42,7 @@
             
             <div class="content">
                 <p class="greeting">Dear {{ recipient_name }},</p>
-                <p class="intro">You have task(s) that are exactly <strong>6 days overdue</strong> and require immediate action. Below is a summary grouped by table workspace:</p>
+                <p class="intro">You have task(s) that are exactly <strong>{{ overdue_days|default:"6" }} days overdue</strong> and require immediate action. Below is a summary grouped by table workspace:</p>
                 
                 {% for item in table_data %}
                 <div class="table-section">

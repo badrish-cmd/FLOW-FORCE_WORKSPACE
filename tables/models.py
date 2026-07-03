@@ -76,13 +76,14 @@ class Table(models.Model):
                     ("INITIAL_MAIL", "TEXT", 5),
                     ("ALERT_MAIL", "TEXT", 6),
                 ]
+            is_sys = (self.job_type != "LIST_PID")
             for name, dtype, pos in system_cols:
                 Column.objects.create(
                     table=self,
                     name=name,
                     data_type=dtype,
                     is_mandatory=True,
-                    is_system_column=True,
+                    is_system_column=is_sys,
                     position=pos
                 )
             if self.job_type == "ENGINEER":

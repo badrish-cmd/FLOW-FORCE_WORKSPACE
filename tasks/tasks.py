@@ -211,9 +211,12 @@ def send_initial_mail(task_id):
     except Task.DoesNotExist:
         return
 
-    # Check if assigned by an admin
-    if not task.assigned_by or task.assigned_by.role not in ["ADMIN", "SUPER_ADMIN", "DEPARTMENT_ADMIN"]:
-        return
+    is_list_pid = task.row.table.job_type == "LIST_PID"
+
+    # Check if assigned by an admin (skipped for LIST_PID)
+    if not is_list_pid:
+        if not task.assigned_by or task.assigned_by.role not in ["ADMIN", "SUPER_ADMIN", "DEPARTMENT_ADMIN"]:
+            return
 
     # Do not send if task is completed or approved
     if task.status in ["COMPLETED", "APPROVED"]:
@@ -230,12 +233,13 @@ def send_initial_mail(task_id):
             return
 
     for employee in task.assigned_to.all():
-        if task.assigned_by == employee:
-            continue
+        if not is_list_pid:
+            if task.assigned_by == employee:
+                continue
 
-        # Do not send email if assignee is admin or super admin
-        if employee.role in ["ADMIN", "SUPER_ADMIN"]:
-            continue
+            # Do not send email if assignee is admin or super admin
+            if employee.role in ["ADMIN", "SUPER_ADMIN"]:
+                continue
 
         if EmailLog.objects.filter(task=task, recipient_email=employee.email, email_type="INITIAL_MAIL").exists():
             continue
@@ -260,32 +264,74 @@ def send_daily_alert_mails():
     """
     Find active tasks due today, group by assignee, and send a single consolidated
     email and in-app notification summary to each employee.
+    For LIST_PID tables, we check the DUE_DATE_CUSTOMER and DUE_DATE_FLOW_FORCE columns.
     """
+    from datetime import datetime
     today = timezone.localdate()
-    tasks = Task.objects.filter(
-        due_date__lte=today
-    ).exclude(
+    
+    # Fetch tasks excluding COMPLETED/APPROVED, prefetching cells to avoid DB queries
+    tasks = Task.objects.exclude(
         status__in=['COMPLETED', 'APPROVED']
-    ).select_related('row', 'row__table', 'assigned_by').prefetch_related('assigned_to')
+    ).select_related('row', 'row__table', 'assigned_by').prefetch_related('assigned_to', 'row__cells', 'row__cells__column')
 
     # Group tasks by assigned employee
     employee_tasks = {}
     for task in tasks:
+        is_list_pid = task.row.table.job_type == "LIST_PID"
+        is_due = False
+        due_reasons = []
+
+        if is_list_pid:
+            # Check custom date columns DUE_DATE_CUSTOMER and DUE_DATE_FLOW_FORCE
+            due_cust_str = None
+            due_ff_str = None
+            for cell in task.row.cells.all():
+                cell_name_upper = cell.column.name.upper()
+                if cell_name_upper == "DUE_DATE_CUSTOMER":
+                    due_cust_str = cell.value
+                elif cell_name_upper == "DUE_DATE_FLOW_FORCE":
+                    due_ff_str = cell.value
+
+            if due_cust_str:
+                try:
+                    due_cust_date = datetime.strptime(str(due_cust_str).split("T")[0], "%Y-%m-%d").date()
+                    if due_cust_date == today:
+                        is_due = True
+                        due_reasons.append("Customer Due Date")
+                except ValueError:
+                    pass
+            if due_ff_str:
+                try:
+                    due_ff_date = datetime.strptime(str(due_ff_str).split("T")[0], "%Y-%m-%d").date()
+                    if due_ff_date == today:
+                        is_due = True
+                        due_reasons.append("Flow Force Due Date")
+                except ValueError:
+                    pass
+        else:
+            if task.due_date <= today:
+                is_due = True
+                due_reasons.append("Due Date")
+
+        if not is_due:
+            continue
+
         for employee in task.assigned_to.all():
-            # Skip alerts for admin users by default
-            if employee.role in ["ADMIN", "SUPER_ADMIN"]:
+            # For LIST_PID, we DO NOT skip admin/super_admin users!
+            if employee.role in ["ADMIN", "SUPER_ADMIN"] and not is_list_pid:
                 continue
             if employee not in employee_tasks:
                 employee_tasks[employee] = []
-            employee_tasks[employee].append(task)
+            employee_tasks[employee].append((task, due_reasons))
 
     for employee, tasks_list in employee_tasks.items():
         tasks_to_alert = []
-        for task in tasks_list:
-            is_sales = task.row.table.job_type in ["SALES", "LIST_PID"]
+        for task, due_reasons in tasks_list:
+            is_sales = task.row.table.job_type == "SALES"
+            is_list_pid = task.row.table.job_type == "LIST_PID"
             
-            if is_sales:
-                # For sales/list_pid, allow sending if no alert mail has been sent today
+            if is_sales or is_list_pid:
+                # For sales/list_pid, allow sending if no alert mail has been sent today to this employee for this task
                 if EmailLog.objects.filter(task=task, recipient_email=employee.email, email_type="ALERT_MAIL", created_at__date=today).exists():
                     continue
             else:
@@ -303,14 +349,23 @@ def send_daily_alert_mails():
                         task.save(update_fields=['alert_mail_sent'])
                         continue
 
-            tasks_to_alert.append(task)
+            tasks_to_alert.append((task, due_reasons))
 
         if not tasks_to_alert:
             continue
 
         # 1. Create in-app notifications separated by task type
-        sales_tasks = [t for t in tasks_to_alert if t.row.table.job_type in ["SALES", "LIST_PID"]]
-        other_tasks = [t for t in tasks_to_alert if t.row.table.job_type not in ["SALES", "LIST_PID"]]
+        list_pid_tasks = [t for t, _ in tasks_to_alert if t.row.table.job_type == "LIST_PID"]
+        sales_tasks = [t for t, _ in tasks_to_alert if t.row.table.job_type == "SALES"]
+        other_tasks = [t for t, _ in tasks_to_alert if t.row.table.job_type not in ["SALES", "LIST_PID"]]
+
+        if list_pid_tasks:
+            Notification.objects.create(
+                user=employee,
+                title="LIST_PID Tasks Due Today",
+                description=f"You have {len(list_pid_tasks)} List PID task(s) with due date today.",
+                type="DUE_TODAY"
+            )
 
         if sales_tasks:
             Notification.objects.create(
@@ -330,19 +385,24 @@ def send_daily_alert_mails():
 
         # 2. Build consolidated email log details
         task_items = []
-        for task in tasks_to_alert:
-            is_sales = task.row.table.job_type in ["SALES", "LIST_PID"]
+        for task, due_reasons in tasks_to_alert:
+            is_sales = task.row.table.job_type == "SALES"
+            is_list_pid = task.row.table.job_type == "LIST_PID"
             site_url = getattr(settings, 'SITE_URL', 'https://flowforceworkspace.cloud')
             task_link = f"{site_url}/tables/{task.row.table_id}/?open_task_id={task.id}"
             
-            # Fetch last follow-up discussion points for sales tasks
+            # Fetch last follow-up discussion points for sales/list_pid tasks
             last_discussion = None
-            if is_sales:
+            if is_sales or is_list_pid:
                 last_follow_up = task.follow_ups.first()
                 last_discussion = last_follow_up.discussed_points if last_follow_up else "No previous follow-ups logged."
 
+            name_display = task.task_name
+            if is_list_pid:
+                name_display = f"{task.task_name} ({', '.join(due_reasons)})"
+
             task_items.append({
-                'name': task.task_name,
+                'name': name_display,
                 'table_name': task.row.table.name,
                 'priority': task.priority,
                 'link': task_link,
@@ -363,17 +423,20 @@ def send_daily_alert_mails():
                 )
 
         # Build dynamic intro text for consolidated email
-        if sales_tasks and not other_tasks:
+        total_alert_count = len(tasks_to_alert)
+        if list_pid_tasks and not sales_tasks and not other_tasks:
+            email_intro = f"You have <strong>{len(list_pid_tasks)}</strong> List PID task(s) due today."
+        elif sales_tasks and not list_pid_tasks and not other_tasks:
             email_intro = f"You have <strong>{len(sales_tasks)}</strong> sales task(s) due today. Kindly log discussions and enter new follow up in the workspace."
-        elif other_tasks and not sales_tasks:
+        elif other_tasks and not sales_tasks and not list_pid_tasks:
             email_intro = f"You have <strong>{len(other_tasks)}</strong> tasks due today. Kindly check on them and update."
         else:
-            email_intro = f"You have <strong>{len(tasks_to_alert)}</strong> task(s) due today (<strong>{len(sales_tasks)}</strong> sales and <strong>{len(other_tasks)}</strong> other). Kindly check them and update in the workspace."
+            email_intro = f"You have <strong>{total_alert_count}</strong> task(s) due today ({len(list_pid_tasks)} List PID, {len(sales_tasks)} sales, {len(other_tasks)} other). Kindly check them and update in the workspace."
 
-        subject = f"Daily Alert Summary: {len(tasks_to_alert)} Task(s) Due Today"
+        subject = f"Daily Alert Summary: {total_alert_count} Task(s) Due Today"
         context = {
             'employee_name': employee.full_name or employee.email,
-            'task_count': len(tasks_to_alert),
+            'task_count': total_alert_count,
             'task_items': task_items,
             'email_intro': email_intro
         }
@@ -384,7 +447,7 @@ def send_daily_alert_mails():
             recipient_email=employee.email,
             subject=subject,
             body=html_message,
-            task=tasks_to_alert[0], # Link to first task in log
+            task=tasks_to_alert[0][0], # Link to first task in log
             email_type='ALERT_MAIL',
             status='PENDING',
             max_retries=2,
@@ -398,6 +461,7 @@ def send_alert_mail(task_id):
     """
     Trigger ALERT_MAIL for assigned employees.
     """
+    from datetime import datetime
     try:
         task = Task.objects.get(id=task_id)
     except Task.DoesNotExist:
@@ -407,35 +471,73 @@ def send_alert_mail(task_id):
     if task.status in ["COMPLETED", "APPROVED"]:
         return
 
-    # Do not send if alert mail was already sent
-    if task.alert_mail_sent:
-        return
+    is_list_pid = task.row.table.job_type == "LIST_PID"
+    
+    if not is_list_pid:
+        # For non-LIST_PID tasks, do not send if alert mail was already sent
+        if task.alert_mail_sent:
+            return
 
-    alert_mail_col = Column.objects.filter(table=task.row.table, name__iexact="ALERT_MAIL").first()
-    if alert_mail_col:
-        alert_cell = CellValue.objects.filter(row=task.row, column=alert_mail_col).first()
-        if alert_cell and str(alert_cell.value).upper() == "YES":
+        alert_mail_col = Column.objects.filter(table=task.row.table, name__iexact="ALERT_MAIL").first()
+        if alert_mail_col:
+            alert_cell = CellValue.objects.filter(row=task.row, column=alert_mail_col).first()
+            if alert_cell and str(alert_cell.value).upper() == "YES":
+                return
+
+    today = timezone.localdate()
+    due_reasons = []
+    
+    if is_list_pid:
+        # Identify reasons
+        due_cust_str = None
+        due_ff_str = None
+        for cell in task.row.cells.all():
+            cell_name_upper = cell.column.name.upper()
+            if cell_name_upper == "DUE_DATE_CUSTOMER":
+                due_cust_str = cell.value
+            elif cell_name_upper == "DUE_DATE_FLOW_FORCE":
+                due_ff_str = cell.value
+
+        if due_cust_str:
+            try:
+                due_cust_date = datetime.strptime(str(due_cust_str).split("T")[0], "%Y-%m-%d").date()
+                if due_cust_date == today:
+                    due_reasons.append("Customer Due Date")
+            except ValueError:
+                pass
+        if due_ff_str:
+            try:
+                due_ff_date = datetime.strptime(str(due_ff_str).split("T")[0], "%Y-%m-%d").date()
+                if due_ff_date == today:
+                    due_reasons.append("Flow Force Due Date")
+            except ValueError:
+                pass
+        
+        # If it is LIST_PID but neither due date matches today, do not send individual alert email
+        if not due_reasons:
             return
 
     for employee in task.assigned_to.all():
-        # Do not send email if assignee is admin or super admin
-        if employee.role in ["ADMIN", "SUPER_ADMIN"]:
+        # Do not send email if assignee is admin or super admin, UNLESS it's a LIST_PID task
+        if employee.role in ["ADMIN", "SUPER_ADMIN"] and not is_list_pid:
             continue
 
-        is_sales = task.row.table.job_type in ["SALES", "LIST_PID"]
+        is_sales = task.row.table.job_type == "SALES"
         
-        # If it is not a sales task, check if ALERT_MAIL has already been logged.
-        # For sales, rolling follow-ups require emails to be sent on every new follow-up date,
-        # so we check if ALERT_MAIL has already been logged *today* to avoid duplicate sending.
-        if is_sales:
-            if EmailLog.objects.filter(task=task, recipient_email=employee.email, email_type="ALERT_MAIL", created_at__date=timezone.localdate()).exists():
+        # If it is sales or list_pid, check if ALERT_MAIL has already been logged today.
+        if is_sales or is_list_pid:
+            if EmailLog.objects.filter(task=task, recipient_email=employee.email, email_type="ALERT_MAIL", created_at__date=today).exists():
                 continue
         else:
             if EmailLog.objects.filter(task=task, recipient_email=employee.email, email_type="ALERT_MAIL").exists():
                 continue
 
-        if is_sales:
-            subject = f"Follow-up Reminder: {task.task_name} - Follow-up Date: {task.due_date}"
+        if is_sales or is_list_pid:
+            if is_list_pid:
+                subject = f"Due Date Alert: {task.task_name} - {', '.join(due_reasons)}: {today}"
+            else:
+                subject = f"Follow-up Reminder: {task.task_name} - Follow-up Date: {task.due_date}"
+                
             last_follow_up = task.follow_ups.first()
             last_discussion = last_follow_up.discussed_points if last_follow_up else "No previous follow-ups logged."
             last_follow_up_date = last_follow_up.follow_up_date.strftime("%B %d, %Y") if last_follow_up else "N/A"
@@ -581,81 +683,149 @@ def check_overdue_escalations():
     today = timezone.localdate()
     all_overdue = Task.objects.filter(due_date__lt=today).exclude(status__in=['COMPLETED', 'APPROVED']).select_related('row', 'row__table', 'row__table__department').prefetch_related('assigned_to')
 
-    overdue_tasks = []
+    overdue_6d_tasks = []
+    overdue_1d_tasks = []
+
     for task in all_overdue:
-        if (today - task.due_date).days == 6:
-            overdue_tasks.append(task)
+        days_overdue = (today - task.due_date).days
+        if days_overdue == 6:
+            overdue_6d_tasks.append(task)
+        elif days_overdue == 1 and task.row.table.job_type == "LIST_PID":
+            overdue_1d_tasks.append(task)
 
-    if not overdue_tasks:
-        return
+    # 1. Process 6-day overdue tasks
+    if overdue_6d_tasks:
+        employee_table_tasks_6d = {}
+        for task in overdue_6d_tasks:
+            is_list_pid = task.row.table.job_type == "LIST_PID"
+            recipients = list(task.assigned_to.all())
+            for employee in recipients:
+                # Do not skip admin/super_admin for LIST_PID
+                if employee.role in ["ADMIN", "SUPER_ADMIN"] and not is_list_pid:
+                    continue
+                if employee not in employee_table_tasks_6d:
+                    employee_table_tasks_6d[employee] = {}
+                table = task.row.table
+                if table not in employee_table_tasks_6d[employee]:
+                    employee_table_tasks_6d[employee][table] = []
+                employee_table_tasks_6d[employee][table].append(task)
 
-    # Group tasks by employee -> table
-    employee_table_tasks = {}
-    for task in overdue_tasks:
-        recipients = list(task.assigned_to.all())
-        for employee in recipients:
-            if employee.role in ["ADMIN", "SUPER_ADMIN"]:
-                continue
-            if employee not in employee_table_tasks:
-                employee_table_tasks[employee] = {}
-            table = task.row.table
-            if table not in employee_table_tasks[employee]:
-                employee_table_tasks[employee][table] = []
-            employee_table_tasks[employee][table].append(task)
-
-    for employee, tables_dict in employee_table_tasks.items():
-        # Build template context
-        table_data = []
-        all_employee_tasks_for_log = []
-        
-        for table, tasks_list in tables_dict.items():
-            tasks_info = []
-            for task in tasks_list:
-                # Update task last escalation level in DB
-                task.last_escalation_level = 6
-                task.last_escalation_at = timezone.now()
-                task.save()
-                all_employee_tasks_for_log.append(task)
-
-                site_url = getattr(settings, 'SITE_URL', 'https://flowforceworkspace.cloud')
-                task_link = f"{site_url}/tables/{task.row.table_id}/?open_task_id={task.id}"
-                
-                tasks_info.append({
-                    'name': task.task_name,
-                    'due_date': str(task.due_date),
-                    'priority': task.priority,
-                    'status': task.status,
-                    'link': task_link
-                })
+        for employee, tables_dict in employee_table_tasks_6d.items():
+            table_data = []
+            all_employee_tasks_for_log = []
             
-            table_data.append({
-                'table_name': table.name,
-                'tasks': tasks_info
-            })
+            for table, tasks_list in tables_dict.items():
+                tasks_info = []
+                for task in tasks_list:
+                    task.last_escalation_level = 6
+                    task.last_escalation_at = timezone.now()
+                    task.save()
+                    all_employee_tasks_for_log.append(task)
 
-        if not table_data:
-            continue
+                    site_url = getattr(settings, 'SITE_URL', 'https://flowforceworkspace.cloud')
+                    task_link = f"{site_url}/tables/{task.row.table_id}/?open_task_id={task.id}"
+                    
+                    tasks_info.append({
+                        'name': task.task_name,
+                        'due_date': str(task.due_date),
+                        'priority': task.priority,
+                        'status': task.status,
+                        'link': task_link
+                    })
+                
+                table_data.append({
+                    'table_name': table.name,
+                    'tasks': tasks_info
+                })
 
-        subject = f"ESCALATION: Overdue Tasks Alert (6 days overdue)"
-        context = {
-            'recipient_name': employee.full_name or employee.email,
-            'table_data': table_data
-        }
+            if not table_data:
+                continue
 
-        html_message = render_to_string('emails/overdue_escalation_aggregate_mail.html', context)
+            subject = f"ESCALATION: Overdue Tasks Alert (6 days overdue)"
+            context = {
+                'recipient_name': employee.full_name or employee.email,
+                'table_data': table_data,
+                'overdue_days': 6
+            }
 
-        # Log and send aggregated email
-        email_log = EmailLog.objects.create(
-            recipient_email=employee.email,
-            subject=subject,
-            body=html_message,
-            task=all_employee_tasks_for_log[0], # Link to first task in log
-            email_type='OVERDUE_ESCALATION_MAIL',
-            status='PENDING',
-            max_retries=3,
-        )
+            html_message = render_to_string('emails/overdue_escalation_aggregate_mail.html', context)
 
-        send_email_log_task.delay(email_log.id)
+            email_log = EmailLog.objects.create(
+                recipient_email=employee.email,
+                subject=subject,
+                body=html_message,
+                task=all_employee_tasks_for_log[0],
+                email_type='OVERDUE_ESCALATION_MAIL',
+                status='PENDING',
+                max_retries=3,
+            )
+
+            send_email_log_task.delay(email_log.id)
+
+    # 2. Process 1-day overdue tasks (exclusive to LIST_PID)
+    if overdue_1d_tasks:
+        employee_table_tasks_1d = {}
+        for task in overdue_1d_tasks:
+            recipients = list(task.assigned_to.all())
+            for employee in recipients:
+                if employee not in employee_table_tasks_1d:
+                    employee_table_tasks_1d[employee] = {}
+                table = task.row.table
+                if table not in employee_table_tasks_1d[employee]:
+                    employee_table_tasks_1d[employee][table] = []
+                employee_table_tasks_1d[employee][table].append(task)
+
+        for employee, tables_dict in employee_table_tasks_1d.items():
+            table_data = []
+            all_employee_tasks_for_log = []
+            
+            for table, tasks_list in tables_dict.items():
+                tasks_info = []
+                for task in tasks_list:
+                    task.last_escalation_level = 1
+                    task.last_escalation_at = timezone.now()
+                    task.save()
+                    all_employee_tasks_for_log.append(task)
+
+                    site_url = getattr(settings, 'SITE_URL', 'https://flowforceworkspace.cloud')
+                    task_link = f"{site_url}/tables/{task.row.table_id}/?open_task_id={task.id}"
+                    
+                    tasks_info.append({
+                        'name': task.task_name,
+                        'due_date': str(task.due_date),
+                        'priority': task.priority,
+                        'status': task.status,
+                        'link': task_link
+                    })
+                
+                table_data.append({
+                    'table_name': table.name,
+                    'tasks': tasks_info
+                })
+
+            if not table_data:
+                continue
+
+            subject = f"ESCALATION: Overdue Tasks Alert (1 day overdue)"
+            context = {
+                'recipient_name': employee.full_name or employee.email,
+                'table_data': table_data,
+                'overdue_days': 1
+            }
+
+            html_message = render_to_string('emails/overdue_escalation_aggregate_mail.html', context)
+
+            email_log = EmailLog.objects.create(
+                recipient_email=employee.email,
+                subject=subject,
+                body=html_message,
+                task=all_employee_tasks_for_log[0],
+                email_type='OVERDUE_ESCALATION_MAIL',
+                status='PENDING',
+                max_retries=3,
+            )
+
+            send_email_log_task.delay(email_log.id)
 
 @shared_task
 def retry_failed_emails():

@@ -137,3 +137,34 @@ def get_column_access_level(user, column):
         if has_table_access(user, table, "EDIT"):
             return "EDITABLE"
         return "READ_ONLY"
+
+def get_employees_with_table_access(table):
+    """
+    Get all active employees who have access (VIEW, EDIT, or ADMIN) to the table.
+    For LIST_PID tables, this includes creators, departmental admins, super admins, 
+    and users matching explicit access rules.
+    """
+    from employee_management.models import EmployeeUser
+    from tables.models import TableAccess
+    from django.db.models import Q
+    
+    all_employees = EmployeeUser.objects.filter(is_active=True)
+    
+    q_filter = Q(role="SUPER_ADMIN")
+    
+    if table.created_by:
+        q_filter |= Q(id=table.created_by.id)
+        
+    if table.department:
+        q_filter |= Q(role__in=["ADMIN", "DEPARTMENT_ADMIN"], department=table.department)
+        
+    access_rules = TableAccess.objects.filter(table=table)
+    user_ids = access_rules.filter(user__isnull=False).values_list("user_id", flat=True)
+    dept_ids = access_rules.filter(department__isnull=False).values_list("department_id", flat=True)
+    
+    if user_ids:
+        q_filter |= Q(id__in=user_ids)
+    if dept_ids:
+        q_filter |= Q(department_id__in=dept_ids)
+        
+    return all_employees.filter(q_filter).distinct()

@@ -6,27 +6,33 @@ from .tasks import send_initial_mail, send_review_request_mail, send_approval_st
 
 def sync_task_assignments(task):
     """
-    Sync task assignments to all non-admin employees who have access to the table.
+    Sync task assignments to all employees who have access to the table.
+    For LIST_PID tables, this includes admins and super admins.
     """
     try:
         from auth_app.models import EmployeeUser
         from tables.models import TableAccess
+        from tables.permissions import get_employees_with_table_access
 
         table = task.row.table
         
-        # Non-admin employees who can access this table
-        employees = EmployeeUser.objects.filter(is_active=True).exclude(role__in=["ADMIN", "SUPER_ADMIN"])
-        
-        # Check TableAccess rules for the table
-        access_rules = TableAccess.objects.filter(table=table)
-        user_ids = access_rules.filter(user__isnull=False).values_list("user_id", flat=True)
-        dept_ids = access_rules.filter(department__isnull=False).values_list("department_id", flat=True)
-        
-        q_filter = Q(id__in=user_ids)
-        if dept_ids:
-            q_filter |= Q(department_id__in=dept_ids)
+        if table.job_type == "LIST_PID":
+            target_employees = get_employees_with_table_access(table)
+        else:
+            # Non-admin employees who can access this table
+            employees = EmployeeUser.objects.filter(is_active=True).exclude(role__in=["ADMIN", "SUPER_ADMIN"])
             
-        target_employees = employees.filter(q_filter).distinct()
+            # Check TableAccess rules for the table
+            access_rules = TableAccess.objects.filter(table=table)
+            user_ids = access_rules.filter(user__isnull=False).values_list("user_id", flat=True)
+            dept_ids = access_rules.filter(department__isnull=False).values_list("department_id", flat=True)
+            
+            q_filter = Q(id__in=user_ids)
+            if dept_ids:
+                q_filter |= Q(department_id__in=dept_ids)
+                
+            target_employees = employees.filter(q_filter).distinct()
+            
         task.assigned_to.set(target_employees)
     except Exception:
         pass
