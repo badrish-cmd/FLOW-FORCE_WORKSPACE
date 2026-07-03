@@ -574,7 +574,7 @@ def reports_view(request):
             table_stats[table_id]["name"] = tbl.name
         
         is_completed = t.status in ["COMPLETED", "APPROVED"]
-        is_overdue = (t.due_date < today) and not is_completed
+        is_overdue = t.due_date and (t.due_date < today) and not is_completed
         
         table_stats[table_id]["total"] += 1
         if is_completed:

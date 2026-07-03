@@ -309,7 +309,7 @@ def send_daily_alert_mails():
                 except ValueError:
                     pass
         else:
-            if task.due_date <= today:
+            if task.due_date and task.due_date <= today:
                 is_due = True
                 due_reasons.append("Due Date")
 

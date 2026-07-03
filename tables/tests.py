@@ -758,3 +758,54 @@ class TablesTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data["results"]), 1)
         self.assertEqual(response.data["results"][0]["id"], row1.id)
+
+    def test_list_pid_import_and_filtering(self):
+        from tables.views import TableViewSet
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        factory = APIRequestFactory()
+
+        table = Table.objects.create(name="LIST_PID Import Test Table", job_type="LIST_PID", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+
+        # Verify columns are is_system_column = False
+        for col in table.columns.all():
+            self.assertFalse(col.is_system_column)
+
+        # Create valid CSV data where DATE, DUE_DATE_CUSTOMER, and DUE_DATE_FLOW_FORCE are missing/blank
+        csv_lines = [
+            "S_NO,DATE,ENQUIRY_NO,DUE_DATE_FLOW_FORCE,DUE_DATE_CUSTOMER,COMPANY_NAME",
+            "1,,ENQ-1234,,,Company A",
+            "2,,ENQ-5678,,,Company B",
+            "3,,ENQ-9012,,,Company A"
+        ]
+        csv_data = "\n".join(csv_lines)
+        csv_file = SimpleUploadedFile("import_pid.csv", csv_data.encode("utf-8"), content_type="text/csv")
+
+        view = TableViewSet.as_view({'post': 'import_csv'})
+        request = factory.post(f"/tables/api/tables/{table.id}/import-csv/", {
+            "file": csv_file
+        }, format="multipart")
+        force_authenticate(request, user=self.admin)
+        response = view(request, pk=table.id)
+        self.assertEqual(response.status_code, 201)
+
+        # Check imported rows and blank dates
+        rows = Row.objects.filter(table=table)
+        self.assertEqual(rows.count(), 3)
+        for r in rows:
+            date_cell = CellValue.objects.filter(row=r, column__name="DATE").first()
+            due_ff_cell = CellValue.objects.filter(row=r, column__name="DUE_DATE_FLOW_FORCE").first()
+            # Verify they are blank/None (safe_parse_date returned None, and they were not auto-assigned today)
+            self.assertTrue(not date_cell or date_cell.value in [None, ""])
+            self.assertTrue(not due_ff_cell or due_ff_cell.value in [None, ""])
+
+            # Verify associated Task.due_date is None
+            self.assertIsNone(r.task.due_date)
+
+        # Verify company_name column became filterable DROPDOWN with analyzed company options
+        company_col = table.columns.get(name="COMPANY_NAME")
+        self.assertEqual(company_col.data_type, "DROPDOWN")
+        self.assertTrue(company_col.is_filterable)
+        # Options should be analyzed, sorted and distinct: "Company A,Company B"
+        self.assertEqual(company_col.options, "Company A,Company B")

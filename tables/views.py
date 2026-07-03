@@ -421,7 +421,7 @@ class TableViewSet(viewsets.ModelViewSet):
 
         if required_header not in csv_headers:
             return None, f"Required column for task name/customer name/enquiry no is missing in the CSV sheet headers. Expected one of: {required_header}"
-        if required_date not in csv_headers:
+        if not is_list_pid and required_date not in csv_headers:
             return None, f"Required column for due date/follow up date is missing in the CSV sheet headers. Expected one of: {required_date}"
 
         # Performance Optimizations: pre-map columns, pre-query S_NO base, and setup user cache
@@ -447,15 +447,28 @@ class TableViewSet(viewsets.ModelViewSet):
                 if normalized_key:
                     normalized_row[normalized_key] = val
 
-            if is_sales:
-                task_name = normalized_row.get("CUSTOMER_NAME")
-                due_date_str = normalized_row.get("FOLLOW_UP_DATE")
-            elif is_list_pid:
+            if is_list_pid:
                 task_name = normalized_row.get("ENQUIRY_NO") or normalized_row.get("PID") or "Unnamed"
-                due_date_str = normalized_row.get("DUE_DATE_FLOW_FORCE") or normalized_row.get("DUE_DATE_CUSTOMER")
+                if not task_name:
+                    continue
+                ff_date_str = normalized_row.get("DUE_DATE_FLOW_FORCE")
+                cust_date_str = normalized_row.get("DUE_DATE_CUSTOMER")
+                ff_date = self.safe_parse_date(ff_date_str) if ff_date_str else None
+                cust_date = self.safe_parse_date(cust_date_str) if cust_date_str else None
+                due_date = ff_date or cust_date
             else:
-                task_name = normalized_row.get("TASK_NAME")
-                due_date_str = normalized_row.get("DUE_DATE")
+                if is_sales:
+                    task_name = normalized_row.get("CUSTOMER_NAME")
+                    due_date_str = normalized_row.get("FOLLOW_UP_DATE")
+                else:
+                    task_name = normalized_row.get("TASK_NAME")
+                    due_date_str = normalized_row.get("DUE_DATE")
+
+                if not task_name or not due_date_str:
+                    continue
+                due_date = self.safe_parse_date(due_date_str)
+                if not due_date:
+                    continue
             
             # Support lowercase/mixed-case options
             priority = "MEDIUM"
@@ -470,17 +483,11 @@ class TableViewSet(viewsets.ModelViewSet):
                     status_val = v
                     break
 
-            if not task_name or not due_date_str:
-                continue
-
-            due_date = self.safe_parse_date(due_date_str)
-            if not due_date:
-                continue
-
             # Create Row
             row = Row.objects.create(table=table, created_by=request_user)
 
             # Auto compute S_NO (using pre-fetched base)
+            row_import_idx += 1
             s_no = base_s_no + row_import_idx
 
             # Parse and normalize other system fields
@@ -490,7 +497,7 @@ class TableViewSet(viewsets.ModelViewSet):
                 parsed_d = self.safe_parse_date(csv_date_str)
                 if parsed_d:
                     date_val = parsed_d.isoformat()
-            if not date_val:
+            if not date_val and not is_list_pid:
                 date_val = timezone.localdate().isoformat()
 
             initial_mail_val = normalized_row.get("INITIAL_MAIL", "NO")
@@ -514,7 +521,7 @@ class TableViewSet(viewsets.ModelViewSet):
                 cell_values = {
                     "S_NO": s_no,
                     "DATE": date_val,
-                    "FOLLOW_UP_DATE": due_date.isoformat(),
+                    "FOLLOW_UP_DATE": due_date.isoformat() if due_date else None,
                     "CUSTOMER_NAME": task_name,
                     "INITIAL_MAIL": initial_mail_val,
                     "ALERT_MAIL": alert_mail_val
@@ -525,7 +532,7 @@ class TableViewSet(viewsets.ModelViewSet):
                     "S_NO": s_no,
                     "DATE": date_val,
                     "ENQUIRY_NO": task_name,
-                    "DUE_DATE_FLOW_FORCE": due_date.isoformat(),
+                    "DUE_DATE_FLOW_FORCE": ff_date.isoformat() if ff_date else None,
                     "INITIAL_MAIL": initial_mail_val,
                     "ALERT_MAIL": alert_mail_val
                 }
@@ -534,7 +541,7 @@ class TableViewSet(viewsets.ModelViewSet):
                 cell_values = {
                     "S_NO": s_no,
                     "DATE": date_val,
-                    "DUE_DATE": due_date.isoformat(),
+                    "DUE_DATE": due_date.isoformat() if due_date else None,
                     "TASK_NAME": task_name,
                     "INITIAL_MAIL": initial_mail_val,
                     "ALERT_MAIL": alert_mail_val
@@ -545,7 +552,10 @@ class TableViewSet(viewsets.ModelViewSet):
                 if col_name not in system_field_names:
                     if col_name in db_col_names:
                         col = normalized_db_cols[col_name]
-                        cell_values[col.name] = val
+                        if is_list_pid and col.name == "DUE_DATE_CUSTOMER":
+                            cell_values[col.name] = cust_date.isoformat() if cust_date else None
+                        else:
+                            cell_values[col.name] = val
 
             for name, val in cell_values.items():
                 col = None
@@ -561,18 +571,12 @@ class TableViewSet(viewsets.ModelViewSet):
             if norm_priority not in [choice[0] for choice in Task.PRIORITY_CHOICES]:
                 norm_priority = "MEDIUM"
 
-            norm_status = str(status_val).upper().strip().replace(" ", "_")
-            if norm_status in ["COMPLETE", "COMPLETED"]:
-                norm_status = "COMPLETED"
-            elif norm_status not in [choice[0] for choice in Task.STATUS_CHOICES]:
-                norm_status = "PENDING"
-
             # Create Task
             task = Task.objects.create(
                 row=row,
                 due_date=due_date,
                 priority=norm_priority,
-                status=norm_status,
+                status="PENDING",
                 assigned_by=request_user,
                 initial_mail_sent=(initial_mail_val == "YES"),
                 alert_mail_sent=(alert_mail_val == "YES")
@@ -614,6 +618,27 @@ class TableViewSet(viewsets.ModelViewSet):
 
             created_rows.append(row)
             row_import_idx += 1
+
+        # After successfully importing and creating rows, analyze and setup filter for LIST_PID
+        if is_list_pid:
+            company_col = table.columns.filter(name__iexact="COMPANY_NAME").first()
+            if company_col:
+                unique_values = CellValue.objects.filter(
+                    column=company_col,
+                    row__table=table,
+                    row__is_archived=False
+                ).exclude(
+                    value__isnull=True
+                ).exclude(
+                    value=""
+                ).values_list("value", flat=True).distinct()
+                
+                cleaned_values = sorted(list(set(str(v).strip() for v in unique_values if str(v).strip())))
+                
+                company_col.data_type = "DROPDOWN"
+                company_col.is_filterable = True
+                company_col.options = ",".join(cleaned_values)
+                company_col.save()
 
         return created_rows, None
 

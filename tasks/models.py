@@ -41,7 +41,7 @@ class Task(models.Model):
         choices=STATUS_CHOICES,
         default="PENDING"
     )
-    due_date = models.DateField()
+    due_date = models.DateField(null=True, blank=True)
     priority = models.CharField(
         max_length=50,
         choices=PRIORITY_CHOICES,
