@@ -41,7 +41,7 @@
             
             <div class="content">
                 <p class="greeting">Dear {{ recipient_name }},</p>
-                <p class="intro">A task is <strong>{{ days }}</strong> days overdue and requires immediate attention.</p>
+                <p class="intro">{% if intro_html %}{{ intro_html|safe }}{% else %}A task is <strong>{{ days }}</strong> days overdue and requires immediate attention.{% endif %}</p>
                 
                 <div class="section-title">━━━━ TASK DETAILS ━━━━</div>
                 <table class="details-table">

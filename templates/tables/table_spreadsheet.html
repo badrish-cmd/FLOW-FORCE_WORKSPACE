@@ -737,11 +737,10 @@
                     <div x-show="newColumnType === 'DROPDOWN'">
                         <label class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Dropdown Options (Comma-separated)</label>
                         <textarea x-model="newColumnOptions" placeholder="e.g. Option A, Option B, Option C" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-sm" rows="3"></textarea>
-                        
-                        <div class="flex items-center gap-2 mt-3">
-                            <input type="checkbox" x-model="newColumnIsFilterable" id="newColumnIsFilterable" class="h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded">
-                            <label for="newColumnIsFilterable" class="text-xs font-semibold text-gray-700 cursor-pointer">Enable Filter dropdown for this column</label>
-                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 mt-3">
+                        <input type="checkbox" x-model="newColumnIsFilterable" id="newColumnIsFilterable" class="h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded">
+                        <label for="newColumnIsFilterable" class="text-xs font-semibold text-gray-700 cursor-pointer">Enable Filter dropdown for this column</label>
                     </div>
                 </div>
                 <div class="flex justify-end gap-3 mt-6">
@@ -783,11 +782,10 @@
                     <div x-show="editColumnType === 'DROPDOWN'">
                         <label class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Dropdown Options (Comma-separated)</label>
                         <textarea x-model="editColumnOptions" placeholder="e.g. Option A, Option B, Option C" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-sm" rows="3"></textarea>
-                        
-                        <div class="flex items-center gap-2 mt-3">
-                            <input type="checkbox" x-model="editColumnIsFilterable" id="editColumnIsFilterable" class="h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded">
-                            <label for="editColumnIsFilterable" class="text-xs font-semibold text-gray-700 cursor-pointer">Enable Filter dropdown for this column</label>
-                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 mt-3">
+                        <input type="checkbox" x-model="editColumnIsFilterable" id="editColumnIsFilterable" class="h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded">
+                        <label for="editColumnIsFilterable" class="text-xs font-semibold text-gray-700 cursor-pointer">Enable Filter dropdown for this column</label>
                     </div>
                 </div>
 

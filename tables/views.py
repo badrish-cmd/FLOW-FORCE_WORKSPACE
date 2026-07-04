@@ -200,16 +200,17 @@ class TableViewSet(viewsets.ModelViewSet):
             return Response({"error": "Only admins can trigger escalation emails"}, status=status.HTTP_403_FORBIDDEN)
 
         row_ids = request.data.get("row_ids")
+        today = timezone.localdate()
         if row_ids is None:
             rows = Row.objects.filter(table=table)
+            # Find all associated tasks that are overdue (due_date < today) and not completed/approved
+            tasks = Task.objects.filter(row__in=rows, due_date__lt=today).exclude(status__in=['COMPLETED', 'APPROVED'])
         else:
             if not isinstance(row_ids, list):
                 return Response({"error": "row_ids must be a list"}, status=status.HTTP_400_BAD_REQUEST)
             rows = Row.objects.filter(table=table, id__in=row_ids)
-
-        today = timezone.localdate()
-        # Find all associated tasks that are overdue (due_date < today) and not completed/approved
-        tasks = Task.objects.filter(row__in=rows, due_date__lt=today).exclude(status__in=['COMPLETED', 'APPROVED'])
+            # When rows are explicitly selected, we do not require the tasks to be overdue. We send for all selected tasks that are not completed/approved.
+            tasks = Task.objects.filter(row__in=rows).exclude(status__in=['COMPLETED', 'APPROVED'])
 
         from django.template.loader import render_to_string
         from tasks.models import EmailLog
@@ -218,7 +219,13 @@ class TableViewSet(viewsets.ModelViewSet):
 
         sent_count = 0
         for task in tasks:
-            days_overdue = (today - task.due_date).days
+            if task.due_date:
+                days_overdue = (today - task.due_date).days
+                if days_overdue < 0:
+                    days_overdue = 0
+            else:
+                days_overdue = 0
+
             recipients = list(task.assigned_to.all())
             unique_recipients = []
             seen_emails = set()
@@ -233,15 +240,22 @@ class TableViewSet(viewsets.ModelViewSet):
                 task.save()
 
                 for recipient in unique_recipients:
-                    subject = f"ESCALATION: Overdue Task - {task.task_name} ({days_overdue} days overdue)"
+                    if days_overdue > 0:
+                        subject = f"ESCALATION: Overdue Task - {task.task_name} ({days_overdue} days overdue)"
+                        intro_html = f"A task is <strong>{days_overdue}</strong> days overdue and requires immediate attention."
+                    else:
+                        subject = f"ESCALATION: Task Escalated - {task.task_name}"
+                        intro_html = "A task has been escalated and requires immediate attention."
+
                     site_url = getattr(settings, 'SITE_URL', 'https://flowforceworkspace.cloud')
                     task_link = f"{site_url}/tables/{task.row.table_id}/?open_task_id={task.id}"
 
                     context = {
                         'recipient_name': recipient.full_name,
                         'days': days_overdue,
+                        'intro_html': intro_html,
                         'task_name': task.task_name,
-                        'due_date': str(task.due_date),
+                        'due_date': str(task.due_date) if task.due_date else "Not Set",
                         'employee_name': ", ".join([u.full_name for u in task.assigned_to.all()]),
                         'department_name': task.row.table.department.name if task.row.table.department else "Global",
                         'status': task.status,
