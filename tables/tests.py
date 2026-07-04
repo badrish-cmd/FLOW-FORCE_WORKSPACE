@@ -649,6 +649,43 @@ class TablesTestCase(TestCase):
         task.refresh_from_db()
         self.assertEqual(task.last_escalation_level, 0)
 
+    def test_personal_job_type_creation_and_row_addition(self):
+        from tables.views import RowViewSet
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        factory = APIRequestFactory()
+
+        # 1. Create a PERSONAL table. It should have 0 columns automatically created.
+        table = Table.objects.create(name="My Personal Table", job_type="PERSONAL", created_by=self.admin)
+        self.assertEqual(table.columns.count(), 0)
+
+        # 2. Add a custom column to the table.
+        custom_col = Column.objects.create(table=table, name="My Task Header", data_type="TEXT", position=1)
+
+        # 3. Create a Row. It should bypass due date / task name mandatory validations.
+        view = RowViewSet.as_view({'post': 'create'})
+        
+        request = factory.post(f"/tables/api/rows/", {
+            "table": table.id,
+            "cells": {
+                "My Task Header": "Do gym workout"
+            }
+        }, format="json")
+        force_authenticate(request, user=self.admin)
+        response = view(request)
+        self.assertEqual(response.status_code, 201)
+
+        # 4. Verify Row and Cell value were saved.
+        row = Row.objects.filter(table=table).first()
+        self.assertIsNotNone(row)
+        cell = row.cells.filter(column=custom_col).first()
+        self.assertEqual(cell.value, "Do gym workout")
+
+        # 5. Verify the Task has default due_date=None, and task_name is guessed correctly.
+        task = getattr(row, "task", None)
+        self.assertIsNotNone(task)
+        self.assertIsNone(task.due_date)
+        self.assertEqual(task.task_name, "Do gym workout")
+
     def test_column_unique_name_validation(self):
         from tables.serializers import ColumnSerializer
         table = Table.objects.create(name="Col Unique Table", created_by=self.admin)

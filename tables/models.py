@@ -21,7 +21,7 @@ class Table(models.Model):
     is_active = models.BooleanField(default=True)
     job_type = models.CharField(
         max_length=50,
-        choices=[("SALES", "Sales"), ("GENERAL", "General"), ("ENGINEER", "Engineer"), ("LIST_PID", "List PID")],
+        choices=[("SALES", "Sales"), ("GENERAL", "General"), ("ENGINEER", "Engineer"), ("LIST_PID", "List PID"), ("PERSONAL", "Personal")],
         default="GENERAL"
     )
     created_at = models.DateTimeField(auto_now_add=True)
@@ -37,6 +37,8 @@ class Table(models.Model):
         is_new = self.pk is None
         super().save(*args, **kwargs)
         if is_new:
+            if self.job_type == "PERSONAL":
+                return
             # Create system columns dynamically based on job_type
             if self.job_type == "SALES":
                 system_cols = [

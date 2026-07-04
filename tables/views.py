@@ -1298,6 +1298,7 @@ class RowViewSet(viewsets.ModelViewSet):
         
         is_sales = table.job_type == "SALES"
         is_list_pid = table.job_type == "LIST_PID"
+        is_personal = table.job_type == "PERSONAL"
         
         # Verify DUE_DATE/FOLLOW_UP_DATE and TASK_NAME/CUSTOMER_NAME are present
         if is_sales:
@@ -1310,6 +1311,11 @@ class RowViewSet(viewsets.ModelViewSet):
             task_name = cells_data.get("ENQUIRY_NO/QUOTATION_NO") or cells_data.get("ENQUIRY_NO") or cells_data.get("PID") or "Unnamed"
             date_field_name = "DUE_DATE_FLOW_FORCE"
             name_field_name = "ENQUIRY_NO/QUOTATION_NO"
+        elif is_personal:
+            due_date_str = None
+            task_name = "Personal Task"
+            date_field_name = "DUE_DATE"
+            name_field_name = "TASK_NAME"
         else:
             due_date_str = cells_data.get("DUE_DATE")
             task_name = cells_data.get("TASK_NAME")
@@ -1324,7 +1330,7 @@ class RowViewSet(viewsets.ModelViewSet):
                 due_date = datetime.strptime(due_date_str.split("T")[0], "%Y-%m-%d").date()
             except ValueError:
                 return Response({"error": f"Invalid {date_field_name} format. Use YYYY-MM-DD"}, status=status.HTTP_400_BAD_REQUEST)
-        elif not is_list_pid:
+        elif not is_list_pid and not is_personal:
             return Response({"error": f"{date_field_name} is mandatory"}, status=status.HTTP_400_BAD_REQUEST)
 
         # 1. Create Row
@@ -1362,6 +1368,8 @@ class RowViewSet(viewsets.ModelViewSet):
                 "INITIAL_MAIL": "NO",
                 "ALERT_MAIL": "NO"
             }
+        elif is_personal:
+            cell_values = {}
         else:
             cell_values = {
                 "S_NO": s_no,

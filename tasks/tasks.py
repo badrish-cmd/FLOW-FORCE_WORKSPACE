@@ -211,6 +211,9 @@ def send_initial_mail(task_id):
     except Task.DoesNotExist:
         return
 
+    if task.row.table.job_type == "PERSONAL":
+        return
+
     is_list_pid = task.row.table.job_type == "LIST_PID"
 
     # Check if assigned by an admin (skipped for LIST_PID)
@@ -269,9 +272,11 @@ def send_daily_alert_mails():
     from datetime import datetime
     today = timezone.localdate()
     
-    # Fetch tasks excluding COMPLETED/APPROVED, prefetching cells to avoid DB queries
+    # Fetch tasks excluding COMPLETED/APPROVED and PERSONAL tables, prefetching cells to avoid DB queries
     tasks = Task.objects.exclude(
         status__in=['COMPLETED', 'APPROVED']
+    ).exclude(
+        row__table__job_type='PERSONAL'
     ).select_related('row', 'row__table', 'assigned_by').prefetch_related('assigned_to', 'row__cells', 'row__cells__column')
 
     # Group tasks by assigned employee
@@ -465,6 +470,9 @@ def send_alert_mail(task_id):
     try:
         task = Task.objects.get(id=task_id)
     except Task.DoesNotExist:
+        return
+
+    if task.row.table.job_type == "PERSONAL":
         return
 
     # Do not send if task is completed or approved
@@ -681,7 +689,7 @@ def check_overdue_escalations():
     Aggregated for each table the employee has access to and sent accordingly.
     """
     today = timezone.localdate()
-    all_overdue = Task.objects.filter(due_date__lt=today).exclude(status__in=['COMPLETED', 'APPROVED']).select_related('row', 'row__table', 'row__table__department').prefetch_related('assigned_to')
+    all_overdue = Task.objects.filter(due_date__lt=today).exclude(status__in=['COMPLETED', 'APPROVED']).exclude(row__table__job_type='PERSONAL').select_related('row', 'row__table', 'row__table__department').prefetch_related('assigned_to')
 
     overdue_6d_tasks = []
     overdue_1d_tasks = []

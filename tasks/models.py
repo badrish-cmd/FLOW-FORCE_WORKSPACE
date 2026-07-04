@@ -77,6 +77,11 @@ class Task(models.Model):
             if not name_cell:
                 name_cell = self.row.cells.filter(column__name="PID").first()
             return name_cell.value if name_cell else "Unnamed Task"
+        elif job_type == "PERSONAL":
+            name_cell = self.row.cells.filter(column__name__in=["TASK_NAME", "TASK NAME", "NAME", "TITLE", "SUBJECT", "TASK"]).first()
+            if not name_cell:
+                name_cell = self.row.cells.filter(column__data_type="TEXT").first()
+            return name_cell.value if name_cell else f"Personal Row {self.row.id}"
         else:
             name_cell = self.row.cells.filter(column__name="TASK_NAME").first()
             return name_cell.value if name_cell else "Unnamed Task"
