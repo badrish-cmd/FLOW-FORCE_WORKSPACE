@@ -486,7 +486,7 @@ class TableViewSet(viewsets.ModelViewSet):
                         break
                 if not task_name:
                     for col_name, val in normalized_row.items():
-                        col = columns_by_name.get(col_name)
+                        col = normalized_db_cols.get(col_name)
                         if col and col.data_type == "TEXT" and val:
                             task_name = val
                             break
@@ -739,84 +739,98 @@ class TableViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="import-csv")
     @transaction.atomic
     def import_csv(self, request, pk=None):
-        table = self.get_object_or_404(pk)
-        if not has_table_access(request.user, table, "EDIT"):
-            return Response({"error": "No edit access to this table"}, status=status.HTTP_403_FORBIDDEN)
-
-        csv_file = request.FILES.get("file")
-        if not csv_file:
-            return Response({"error": "No CSV file provided"}, status=status.HTTP_400_BAD_REQUEST)
-
         try:
-            file_data = csv_file.read().decode("utf-8")
-        except Exception:
-            return Response({"error": "Failed to decode CSV file. Make sure it is encoded in UTF-8."}, status=status.HTTP_400_BAD_REQUEST)
+            table = self.get_object_or_404(pk)
+            if not has_table_access(request.user, table, "EDIT"):
+                return Response({"error": "No edit access to this table"}, status=status.HTTP_403_FORBIDDEN)
 
-        header_row = request.data.get("header_row") or request.POST.get("header_row")
-        data_row = request.data.get("data_row") or request.POST.get("data_row")
-        try:
-            header_row = int(header_row) if header_row else None
-            data_row = int(data_row) if data_row else None
-        except ValueError:
-            return Response({"error": "header_row and data_row must be integers"}, status=status.HTTP_400_BAD_REQUEST)
+            csv_file = request.FILES.get("file")
+            if not csv_file:
+                return Response({"error": "No CSV file provided"}, status=status.HTTP_400_BAD_REQUEST)
 
-        created_rows, err = self._import_rows_from_csv_data(
-            file_data, table, request.user, header_row=header_row, data_row=data_row
-        )
-        if err:
-            return Response({"error": err}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                file_data = csv_file.read().decode("utf-8")
+            except Exception:
+                return Response({"error": "Failed to decode CSV file. Make sure it is encoded in UTF-8."}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({"message": f"Successfully imported {len(created_rows)} rows"}, status=status.HTTP_201_CREATED)
+            header_row = request.data.get("header_row") or request.POST.get("header_row")
+            data_row = request.data.get("data_row") or request.POST.get("data_row")
+            try:
+                header_row = int(header_row) if header_row else None
+                data_row = int(data_row) if data_row else None
+            except ValueError:
+                return Response({"error": "header_row and data_row must be integers"}, status=status.HTTP_400_BAD_REQUEST)
+
+            created_rows, err = self._import_rows_from_csv_data(
+                file_data, table, request.user, header_row=header_row, data_row=data_row
+            )
+            if err:
+                return Response({"error": err}, status=status.HTTP_400_BAD_REQUEST)
+
+            return Response({"message": f"Successfully imported {len(created_rows)} rows"}, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            import traceback
+            return Response({
+                "error": f"Internal Server Error during CSV import: {str(e)}",
+                "traceback": traceback.format_exc()
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=True, methods=["post"], url_path="import-google-sheet")
     @transaction.atomic
     def import_google_sheet(self, request, pk=None):
-        table = self.get_object_or_404(pk)
-        if not has_table_access(request.user, table, "EDIT"):
-            return Response({"error": "No edit access to this table"}, status=status.HTTP_403_FORBIDDEN)
-
-        sheet_url = request.data.get("url")
-        if not sheet_url:
-            return Response({"error": "No Google Sheet URL provided"}, status=status.HTTP_400_BAD_REQUEST)
-
-        import re
-        match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", sheet_url)
-        if not match:
-            return Response({"error": "Invalid Google Sheets URL format. Make sure it contains '/spreadsheets/d/[ID]'"}, status=status.HTTP_400_BAD_REQUEST)
-
-        spreadsheet_id = match.group(1)
-        gid_match = re.search(r"[#&?]gid=([0-9]+)", sheet_url)
-        if gid_match:
-            export_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=csv&gid={gid_match.group(1)}"
-        else:
-            export_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=csv"
-
-        import urllib.request
         try:
-            req = urllib.request.Request(
-                export_url,
-                headers={'User-Agent': 'Mozilla/5.0'}
+            table = self.get_object_or_404(pk)
+            if not has_table_access(request.user, table, "EDIT"):
+                return Response({"error": "No edit access to this table"}, status=status.HTTP_403_FORBIDDEN)
+
+            sheet_url = request.data.get("url")
+            if not sheet_url:
+                return Response({"error": "No Google Sheet URL provided"}, status=status.HTTP_400_BAD_REQUEST)
+
+            import re
+            match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", sheet_url)
+            if not match:
+                return Response({"error": "Invalid Google Sheets URL format. Make sure it contains '/spreadsheets/d/[ID]'"}, status=status.HTTP_400_BAD_REQUEST)
+
+            spreadsheet_id = match.group(1)
+            gid_match = re.search(r"[#&?]gid=([0-9]+)", sheet_url)
+            if gid_match:
+                export_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=csv&gid={gid_match.group(1)}"
+            else:
+                export_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=csv"
+
+            import urllib.request
+            try:
+                req = urllib.request.Request(
+                    export_url,
+                    headers={'User-Agent': 'Mozilla/5.0'}
+                )
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    content = response.read().decode('utf-8')
+            except Exception as e:
+                return Response({"error": f"Error fetching Google Sheet: {str(e)}. Ensure the spreadsheet is public or shared 'Anyone with the link can view'."}, status=status.HTTP_400_BAD_REQUEST)
+
+            header_row = request.data.get("header_row")
+            data_row = request.data.get("data_row")
+            try:
+                header_row = int(header_row) if header_row else None
+                data_row = int(data_row) if data_row else None
+            except ValueError:
+                return Response({"error": "header_row and data_row must be integers"}, status=status.HTTP_400_BAD_REQUEST)
+
+            created_rows, err = self._import_rows_from_csv_data(
+                content, table, request.user, header_row=header_row, data_row=data_row
             )
-            with urllib.request.urlopen(req, timeout=15) as response:
-                content = response.read().decode('utf-8')
+            if err:
+                return Response({"error": err}, status=status.HTTP_400_BAD_REQUEST)
+
+            return Response({"message": f"Successfully imported {len(created_rows)} rows from Google Sheets"}, status=status.HTTP_201_CREATED)
         except Exception as e:
-            return Response({"error": f"Error fetching Google Sheet: {str(e)}. Ensure the spreadsheet is public or shared 'Anyone with the link can view'."}, status=status.HTTP_400_BAD_REQUEST)
-
-        header_row = request.data.get("header_row")
-        data_row = request.data.get("data_row")
-        try:
-            header_row = int(header_row) if header_row else None
-            data_row = int(data_row) if data_row else None
-        except ValueError:
-            return Response({"error": "header_row and data_row must be integers"}, status=status.HTTP_400_BAD_REQUEST)
-
-        created_rows, err = self._import_rows_from_csv_data(
-            content, table, request.user, header_row=header_row, data_row=data_row
-        )
-        if err:
-            return Response({"error": err}, status=status.HTTP_400_BAD_REQUEST)
-
-        return Response({"message": f"Successfully imported {len(created_rows)} rows from Google Sheets"}, status=status.HTTP_201_CREATED)
+            import traceback
+            return Response({
+                "error": f"Internal Server Error during Google Sheet import: {str(e)}",
+                "traceback": traceback.format_exc()
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=True, methods=["post"], url_path="bulk-update")
     @transaction.atomic
