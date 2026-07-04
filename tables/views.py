@@ -326,6 +326,7 @@ class TableViewSet(viewsets.ModelViewSet):
         header_idx = -1
         is_sales = table.job_type == "SALES"
         is_list_pid = table.job_type == "LIST_PID"
+        is_personal = table.job_type == "PERSONAL"
         
         if header_row is not None and data_row is not None:
             try:
@@ -430,13 +431,14 @@ class TableViewSet(viewsets.ModelViewSet):
 
         # Strict validation has been changed to lenient/dynamic mapping as requested.
         # We only require that the primary task identifier and date columns are present.
-        required_header = "CUSTOMER_NAME" if is_sales else ("ENQUIRY_NO_QUOTATION_NO" if is_list_pid else "TASK_NAME")
-        required_date = "FOLLOW_UP_DATE" if is_sales else ("DUE_DATE_FLOW_FORCE" if is_list_pid else "DUE_DATE")
+        if not is_personal:
+            required_header = "CUSTOMER_NAME" if is_sales else ("ENQUIRY_NO_QUOTATION_NO" if is_list_pid else "TASK_NAME")
+            required_date = "FOLLOW_UP_DATE" if is_sales else ("DUE_DATE_FLOW_FORCE" if is_list_pid else "DUE_DATE")
 
-        if required_header not in csv_headers:
-            return None, f"Required column for task name/customer name/enquiry/quotation no is missing in the CSV sheet headers. Expected one of: {required_header}"
-        if not is_list_pid and required_date not in csv_headers:
-            return None, f"Required column for due date/follow up date is missing in the CSV sheet headers. Expected one of: {required_date}"
+            if required_header not in csv_headers:
+                return None, f"Required column for task name/customer name/enquiry/quotation no is missing in the CSV sheet headers. Expected one of: {required_header}"
+            if not is_list_pid and required_date not in csv_headers:
+                return None, f"Required column for due date/follow up date is missing in the CSV sheet headers. Expected one of: {required_date}"
 
         # Performance Optimizations: pre-map columns, pre-query S_NO base, and setup user cache
         columns_by_name = {c.name: c for c in table.columns.all()}
@@ -476,6 +478,21 @@ class TableViewSet(viewsets.ModelViewSet):
                 ff_date = self.safe_parse_date(ff_date_str) if ff_date_str else None
                 cust_date = self.safe_parse_date(cust_date_str) if cust_date_str else None
                 due_date = ff_date or cust_date
+            elif is_personal:
+                task_name = None
+                for col_name, val in normalized_row.items():
+                    if col_name in ["TASK_NAME", "TASK NAME", "NAME", "TITLE", "SUBJECT", "TASK"]:
+                        task_name = val
+                        break
+                if not task_name:
+                    for col_name, val in normalized_row.items():
+                        col = columns_by_name.get(col_name)
+                        if col and col.data_type == "TEXT" and val:
+                            task_name = val
+                            break
+                if not task_name:
+                    task_name = f"Personal Row {row_import_idx}"
+                due_date = None
             else:
                 if is_sales:
                     task_name = normalized_row.get("CUSTOMER_NAME")
@@ -557,6 +574,9 @@ class TableViewSet(viewsets.ModelViewSet):
                     "INITIAL_MAIL": initial_mail_val,
                     "ALERT_MAIL": alert_mail_val
                 }
+            elif is_personal:
+                system_field_names = []
+                cell_values = {}
             else:
                 system_field_names = ["S_NO", "DATE", "DUE_DATE", "TASK_NAME", "INITIAL_MAIL", "ALERT_MAIL"]
                 cell_values = {

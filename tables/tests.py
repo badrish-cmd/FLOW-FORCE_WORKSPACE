@@ -686,6 +686,53 @@ class TablesTestCase(TestCase):
         self.assertIsNone(task.due_date)
         self.assertEqual(task.task_name, "Do gym workout")
 
+    def test_personal_job_type_csv_import(self):
+        from unittest.mock import patch
+        from tables.views import TableViewSet
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        factory = APIRequestFactory()
+
+        # 1. Create a PERSONAL table and some custom columns.
+        table = Table.objects.create(name="My Personal Table CSV", job_type="PERSONAL", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+        
+        custom_col1 = Column.objects.create(table=table, name="My Task Header", data_type="TEXT", position=1)
+        custom_col2 = Column.objects.create(table=table, name="Note Info", data_type="TEXT", position=2)
+
+        # 2. Mock Google sheet import with personal columns (NO system columns like TASK_NAME, S_NO or DUE_DATE)
+        csv_lines = [
+            "My Task Header,Note Info",
+            "Gym workout,Focus on cardio and legs",
+            "Read book,Finish chapter 5"
+        ]
+        csv_data = "\n".join(csv_lines)
+
+        class MockUrlOpen:
+            def __init__(self, data):
+                self.data = data.encode('utf-8')
+            def __enter__(self):
+                return self
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                pass
+            def read(self):
+                return self.data
+
+        with patch("urllib.request.urlopen", return_value=MockUrlOpen(csv_data)) as mock_urlopen:
+            view = TableViewSet.as_view({'post': 'import_google_sheet'})
+            request = factory.post(f"/tables/api/tables/{table.id}/import-google-sheet/", {
+                "url": "https://docs.google.com/spreadsheets/d/1abc123_xyz/edit#gid=12"
+            }, format="json")
+            force_authenticate(request, user=self.admin)
+
+            response = view(request, pk=table.id)
+            self.assertEqual(response.status_code, 201)
+            self.assertEqual(Row.objects.filter(table=table).count(), 2)
+
+            # Verify task names resolved from the text columns
+            rows = Row.objects.filter(table=table).order_by("id")
+            self.assertEqual(rows[0].task.task_name, "Gym workout")
+            self.assertEqual(rows[1].task.task_name, "Read book")
+
     def test_column_unique_name_validation(self):
         from tables.serializers import ColumnSerializer
         table = Table.objects.create(name="Col Unique Table", created_by=self.admin)
