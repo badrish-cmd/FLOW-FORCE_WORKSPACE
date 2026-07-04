@@ -12,7 +12,6 @@ from .models import PasswordResetOTP
 
 from .services import generate_otp
 from .services import send_otp_email
-from task_tracker.services import get_dashboard_stats_for_user
 
 
 def home_view(request):

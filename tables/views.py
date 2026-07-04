@@ -1844,3 +1844,59 @@ def table_list_view(request):
         }
     )
 
+@login_required
+def tables_analytics_dashboard(request):
+    from tables.models import Table
+    from tables.permissions import get_accessible_tables
+    from tasks.models import Task
+    from django.utils import timezone
+
+    if request.user.role in ["SUPER_ADMIN", "ADMIN"]:
+        tables = Table.objects.filter(is_active=True)
+    else:
+        tables = get_accessible_tables(request.user)
+
+    tables_data = []
+    for table in tables:
+        tasks = Task.objects.filter(row__table=table, row__is_archived=False)
+        total = tasks.count()
+        pending = tasks.filter(status="PENDING").count()
+        in_progress = tasks.filter(status="IN_PROGRESS").count()
+        ready_for_review = tasks.filter(status="READY_FOR_REVIEW").count()
+        completed = tasks.filter(status__in=["COMPLETED", "APPROVED"]).count()
+
+        overdue = tasks.filter(due_date__lt=timezone.localdate()).exclude(status__in=["COMPLETED", "APPROVED"]).count()
+        due_today = tasks.filter(due_date=timezone.localdate()).count()
+
+        low = tasks.filter(priority="LOW").count()
+        medium = tasks.filter(priority="MEDIUM").count()
+        high = tasks.filter(priority="HIGH").count()
+        critical = tasks.filter(priority="CRITICAL").count()
+
+        completion_rate = int(completed * 100 / total) if total > 0 else 0
+
+        tables_data.append({
+            "table": table,
+            "total": total,
+            "pending": pending,
+            "in_progress": in_progress,
+            "ready_for_review": ready_for_review,
+            "completed": completed,
+            "overdue": overdue,
+            "due_today": due_today,
+            "low": low,
+            "medium": medium,
+            "high": high,
+            "critical": critical,
+            "completion_rate": completion_rate,
+        })
+
+    return render(
+        request,
+        "tables/analytics_dashboard.html",
+        {
+            "tables_data": tables_data,
+        },
+    )
+
+

@@ -24,12 +24,7 @@ urlpatterns = [
         )
     ),
 
-    path(
-        "trackers/",
-        include(
-            "task_tracker.urls"
-        )
-    ),
+
 
     path(
         "tables/",

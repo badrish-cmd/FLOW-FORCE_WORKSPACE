@@ -475,17 +475,7 @@ def notification_mark_read_view(request, notification_id):
                 return redirect(f"/tasks/{notification.task.id}/detail/")
         return redirect("/")
     except TasksNotification.DoesNotExist:
-        # Fallback to task_tracker app Notification
-        from task_tracker.models import Notification as TrackerNotification
-        try:
-            notification = TrackerNotification.objects.get(id=notification_id, user=request.user)
-            notification.read = True
-            notification.save(update_fields=["read"])
-            if notification.row:
-                return redirect("task_tracker:task_detail", tracker_id=notification.row.tracker.id, task_id=notification.row.id)
-            return redirect("task_tracker:tracker_dashboard")
-        except TrackerNotification.DoesNotExist:
-            pass
+        pass
     return redirect("/")
 
 from django.shortcuts import render

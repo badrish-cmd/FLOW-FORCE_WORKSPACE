@@ -842,3 +842,14 @@ def retry_failed_emails():
 
     for email_log in failed_emails:
         send_email_log_task.delay(email_log.id)
+
+@shared_task
+def send_otp_email_task(recipient_email, subject, message):
+    send_mail(
+        subject=subject,
+        message=message,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[recipient_email],
+        fail_silently=False,
+    )
+

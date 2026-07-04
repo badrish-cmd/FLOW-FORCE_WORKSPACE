@@ -28,9 +28,9 @@ If you did not request this reset, please ignore this email.
 Flow-Force Workspace
 """
 
-    from task_tracker.services import log_and_send_email
-    log_and_send_email(
+    from tasks.tasks import send_otp_email_task
+    send_otp_email_task.delay(
+        recipient_email=user.email,
         subject=subject,
         message=message,
-        recipient_list=[user.email],
     )

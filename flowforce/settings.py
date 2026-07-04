@@ -44,7 +44,6 @@ INSTALLED_APPS = [
     # Local Apps
     'auth_app',
     'employee_management',
-    'task_tracker',
     'rest_framework',
     'tables',
     'tasks',
