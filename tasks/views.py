@@ -538,70 +538,72 @@ def reports_view(request):
 
     tasks = tasks.distinct().order_by("-due_date")
 
-    # Calculate advanced analysis metrics
-    from django.utils import timezone
-    from collections import defaultdict
-    today = timezone.localdate()
-
-    table_stats = defaultdict(lambda: {
-        "name": "",
-        "total": 0,
-        "completed": 0,
-        "overdue": 0,
-        "pending": 0,
-    })
-    
-    employee_stats = defaultdict(lambda: {
-        "name": "",
-        "department": "",
-        "total": 0,
-        "completed": 0,
-        "overdue": 0,
-        "pending": 0,
-    })
-
-    # Pre-evaluate and optimize querysets to prevent redundant queries
-    tasks = tasks.select_related("row__table", "row__table__department", "assigned_by").prefetch_related("assigned_to", "row__cells__column")
-
-    for t in tasks:
-        tbl = t.row.table
-        table_id = tbl.id
-        if not table_stats[table_id]["name"]:
-            table_stats[table_id]["name"] = tbl.name
-        
-        is_completed = t.status in ["COMPLETED", "APPROVED"]
-        is_overdue = t.due_date and (t.due_date < today) and not is_completed
-        
-        table_stats[table_id]["total"] += 1
-        if is_completed:
-            table_stats[table_id]["completed"] += 1
-        else:
-            table_stats[table_id]["pending"] += 1
-        if is_overdue:
-            table_stats[table_id]["overdue"] += 1
-
-        for user in t.assigned_to.all():
-            user_id = user.id
-            if not employee_stats[user_id]["name"]:
-                employee_stats[user_id]["name"] = user.full_name
-                employee_stats[user_id]["department"] = user.department.name if user.department else "Global"
-            
-            employee_stats[user_id]["total"] += 1
-            if is_completed:
-                employee_stats[user_id]["completed"] += 1
-            else:
-                employee_stats[user_id]["pending"] += 1
-            if is_overdue:
-                employee_stats[user_id]["overdue"] += 1
-
-    for tid, stats in table_stats.items():
-        stats["rate"] = f"{round((stats['completed'] / stats['total'] * 100), 2)}%" if stats["total"] > 0 else "0.0%"
-
-    for uid, stats in employee_stats.items():
-        stats["rate"] = f"{round((stats['completed'] / stats['total'] * 100), 2)}%" if stats["total"] > 0 else "0.0%"
-
-    # Export formats
     export_format = request.GET.get("format")
+    table_stats = {}
+    employee_stats = {}
+
+    if export_format:
+        # Calculate advanced analysis metrics
+        from django.utils import timezone
+        from collections import defaultdict
+        today = timezone.localdate()
+
+        table_stats = defaultdict(lambda: {
+            "name": "",
+            "total": 0,
+            "completed": 0,
+            "overdue": 0,
+            "pending": 0,
+        })
+        
+        employee_stats = defaultdict(lambda: {
+            "name": "",
+            "department": "",
+            "total": 0,
+            "completed": 0,
+            "overdue": 0,
+            "pending": 0,
+        })
+
+        # Pre-evaluate and optimize querysets to prevent redundant queries
+        tasks_for_stats = tasks.select_related("row__table", "row__table__department", "assigned_by").prefetch_related("assigned_to", "row__cells__column")
+
+        for t in tasks_for_stats:
+            tbl = t.row.table
+            table_id = tbl.id
+            if not table_stats[table_id]["name"]:
+                table_stats[table_id]["name"] = tbl.name
+            
+            is_completed = t.status in ["COMPLETED", "APPROVED"]
+            is_overdue = t.due_date and (t.due_date < today) and not is_completed
+            
+            table_stats[table_id]["total"] += 1
+            if is_completed:
+                table_stats[table_id]["completed"] += 1
+            else:
+                table_stats[table_id]["pending"] += 1
+            if is_overdue:
+                table_stats[table_id]["overdue"] += 1
+    
+            for user in t.assigned_to.all():
+                user_id = user.id
+                if not employee_stats[user_id]["name"]:
+                    employee_stats[user_id]["name"] = user.full_name
+                    employee_stats[user_id]["department"] = user.department.name if user.department else "Global"
+                
+                employee_stats[user_id]["total"] += 1
+                if is_completed:
+                    employee_stats[user_id]["completed"] += 1
+                else:
+                    employee_stats[user_id]["pending"] += 1
+                if is_overdue:
+                    employee_stats[user_id]["overdue"] += 1
+
+        for tid, stats in table_stats.items():
+            stats["rate"] = f"{round((stats['completed'] / stats['total'] * 100), 2)}%" if stats["total"] > 0 else "0.0%"
+
+        for uid, stats in employee_stats.items():
+            stats["rate"] = f"{round((stats['completed'] / stats['total'] * 100), 2)}%" if stats["total"] > 0 else "0.0%"
     if export_format == "csv":
         response = HttpResponse(content_type="text/csv")
         response["Content-Disposition"] = 'attachment; filename="tasks_report.csv"'
@@ -802,9 +804,24 @@ def reports_view(request):
         doc.build(story)
         return response
 
+    # For HTML view, pre-evaluate and paginate the queryset
+    if not export_format:
+        tasks = tasks.select_related("row__table", "row__table__department", "assigned_by").prefetch_related("assigned_to", "row__cells__column")
+        from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
+        page = request.GET.get('page', 1)
+        paginator = Paginator(tasks, 50)
+        try:
+            paginated_tasks = paginator.page(page)
+        except PageNotAnInteger:
+            paginated_tasks = paginator.page(1)
+        except EmptyPage:
+            paginated_tasks = paginator.page(paginator.num_pages)
+    else:
+        paginated_tasks = tasks
+
     context = {
         "employees": employees,
-        "tasks": tasks,
+        "tasks": paginated_tasks,
         "workspace_tables": workspace_tables,
     }
     return render(request, "tasks/reports.html", context)

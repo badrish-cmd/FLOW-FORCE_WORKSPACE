@@ -156,6 +156,21 @@ class Row(models.Model):
     def __str__(self):
         return f"Row {self.id} in {self.table.name}"
 
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        from django.core.cache import cache
+        from django.utils import timezone
+        today_str = timezone.localdate().isoformat()
+        cache.delete(f"table_stats_{self.table_id}_{today_str}")
+
+    def delete(self, *args, **kwargs):
+        table_id = self.table_id
+        super().delete(*args, **kwargs)
+        from django.core.cache import cache
+        from django.utils import timezone
+        today_str = timezone.localdate().isoformat()
+        cache.delete(f"table_stats_{table_id}_{today_str}")
+
 class CellValue(models.Model):
     row = models.ForeignKey(
         Row,
@@ -183,6 +198,30 @@ class CellValue(models.Model):
 
     def __str__(self):
         return f"Cell {self.row_id}:{self.column_id} = {self.value}"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        from django.core.cache import cache
+        from django.utils import timezone
+        today_str = timezone.localdate().isoformat()
+        if self.row_id:
+            try:
+                table_id = self.row.table_id
+                cache.delete(f"table_stats_{table_id}_{today_str}")
+            except Exception:
+                pass
+
+    def delete(self, *args, **kwargs):
+        try:
+            table_id = self.row.table_id
+        except Exception:
+            table_id = None
+        super().delete(*args, **kwargs)
+        if table_id:
+            from django.core.cache import cache
+            from django.utils import timezone
+            today_str = timezone.localdate().isoformat()
+            cache.delete(f"table_stats_{table_id}_{today_str}")
 
 class TableAccess(models.Model):
     ACCESS_LEVEL_CHOICES = [

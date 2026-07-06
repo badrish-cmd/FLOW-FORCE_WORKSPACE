@@ -142,6 +142,64 @@
                 </tbody>
             </table>
         </div>
+
+        <!-- Pagination Section -->
+        {% if tasks.has_other_pages %}
+        <div class="px-6 py-4 border-t border-gray-100 bg-gray-50 flex items-center justify-between">
+            <div class="flex-1 flex justify-between sm:hidden">
+                {% if tasks.has_previous %}
+                    <a href="?page={{ tasks.previous_page_number }}&{{ request.GET.urlencode }}" class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                        Previous
+                    </a>
+                {% endif %}
+                {% if tasks.has_next %}
+                    <a href="?page={{ tasks.next_page_number }}&{{ request.GET.urlencode }}" class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                        Next
+                    </a>
+                {% endif %}
+            </div>
+            <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                <div>
+                    <p class="text-sm text-gray-700">
+                        Showing page <span class="font-medium">{{ tasks.number }}</span> of <span class="font-medium">{{ tasks.paginator.num_pages }}</span> pages
+                    </p>
+                </div>
+                <div>
+                    <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                        {% if tasks.has_previous %}
+                            <a href="?page=1&{{ request.GET.urlencode }}" class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                                <span class="sr-only">First</span>
+                                <i class="fas fa-angle-double-left text-xs"></i>
+                            </a>
+                            <a href="?page={{ tasks.previous_page_number }}&{{ request.GET.urlencode }}" class="relative inline-flex items-center px-2 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                                <span class="sr-only">Previous</span>
+                                <i class="fas fa-angle-left text-xs"></i>
+                            </a>
+                        {% endif %}
+
+                        {% for num in tasks.paginator.page_range %}
+                            {% if tasks.number == num %}
+                                <span class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-gray-800 text-sm font-medium text-white">{{ num }}</span>
+                            {% elif num > tasks.number|add:'-3' and num < tasks.number|add:'3' %}
+                                <a href="?page={{ num }}&{{ request.GET.urlencode }}" class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50">{{ num }}</a>
+                            {% endif %}
+                        {% endfor %}
+
+                        {% if tasks.has_next %}
+                            <a href="?page={{ tasks.next_page_number }}&{{ request.GET.urlencode }}" class="relative inline-flex items-center px-2 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                                <span class="sr-only">Next</span>
+                                <i class="fas fa-angle-right text-xs"></i>
+                            </a>
+                            <a href="?page={{ tasks.paginator.num_pages }}&{{ request.GET.urlencode }}" class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                                <span class="sr-only">Last</span>
+                                <i class="fas fa-angle-double-right text-xs"></i>
+                            </a>
+                        {% endif %}
+                    </nav>
+                </div>
+            </div>
+        </div>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

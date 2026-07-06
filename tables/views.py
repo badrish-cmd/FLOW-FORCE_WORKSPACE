@@ -1049,12 +1049,31 @@ class RowPagination(PageNumberPagination):
         week_actuals = {'calls': 0, 'visits': 0, 'enquiries': 0, 'quotes': 0, 'orders': 0, 'achievementPercent': 0.0}
 
         if include_stats:
-            # Calculate statistics
-            unique_pids = list(CellValue.objects.filter(
-                column__table=table,
-                column__name='PID',
-                row__is_archived=False
-            ).exclude(value=None).values_list('value', flat=True).distinct().order_by('value'))
+            from django.core.cache import cache
+            from django.utils import timezone
+            today_str = timezone.localdate().isoformat()
+            cache_key = f"table_stats_{table.id}_{today_str}"
+            
+            cached_data = cache.get(cache_key)
+            if cached_data:
+                unique_pids = cached_data.get('unique_pids', [])
+                unique_column_values = cached_data.get('unique_column_values', {})
+                unique_years = cached_data.get('unique_years', [])
+                status_counts = cached_data.get('status_counts', {})
+                priority_counts = cached_data.get('priority_counts', {'Urgent': 0, 'High': 0, 'Med': 0, 'Low': 0})
+                project_counts = cached_data.get('project_counts', {})
+                due_today_count = cached_data.get('due_today_count', 0)
+                overdue_count = cached_data.get('overdue_count', 0)
+                total_qty = cached_data.get('total_qty', 0.0)
+                completion_stats = cached_data.get('completion_stats', {'completed': 0, 'total': 0, 'percent': 0})
+                week_actuals = cached_data.get('week_actuals', {'calls': 0, 'visits': 0, 'enquiries': 0, 'quotes': 0, 'orders': 0, 'achievementPercent': 0.0})
+            else:
+                # Calculate statistics
+                unique_pids = list(CellValue.objects.filter(
+                    column__table=table,
+                    column__name='PID',
+                    row__is_archived=False
+                ).exclude(value=None).values_list('value', flat=True).distinct().order_by('value'))
 
             # Unique Column values for all filterable columns
             filterable_cols = table.columns.filter(is_filterable=True)
@@ -1234,6 +1253,21 @@ class RowPagination(PageNumberPagination):
                 'orders': orders,
                 'achievementPercent': achievement_percent
             }
+            
+            cache_data = {
+                'unique_pids': unique_pids,
+                'unique_column_values': unique_column_values,
+                'unique_years': unique_years,
+                'status_counts': status_counts,
+                'priority_counts': priority_counts,
+                'project_counts': project_counts,
+                'due_today_count': due_today_count,
+                'overdue_count': overdue_count,
+                'total_qty': total_qty,
+                'completion_stats': completion_stats,
+                'week_actuals': week_actuals,
+            }
+            cache.set(cache_key, cache_data, 86400)
             
         return Response({
             'count': self.page.paginator.count,

@@ -62,6 +62,30 @@ class Task(models.Model):
     def __str__(self):
         return f"Task for Row {self.row_id} ({self.status})"
 
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        from django.core.cache import cache
+        from django.utils import timezone
+        today_str = timezone.localdate().isoformat()
+        if self.row_id:
+            try:
+                table_id = self.row.table_id
+                cache.delete(f"table_stats_{table_id}_{today_str}")
+            except Exception:
+                pass
+
+    def delete(self, *args, **kwargs):
+        try:
+            table_id = self.row.table_id
+        except Exception:
+            table_id = None
+        super().delete(*args, **kwargs)
+        if table_id:
+            from django.core.cache import cache
+            from django.utils import timezone
+            today_str = timezone.localdate().isoformat()
+            cache.delete(f"table_stats_{table_id}_{today_str}")
+
     @property
     def is_overdue(self):
         from django.utils import timezone
