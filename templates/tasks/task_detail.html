@@ -45,7 +45,7 @@
                 </div>
                 <div>
                     <span class="text-gray-400 font-medium block mb-0.5">Due Date</span>
-                    <span class="font-semibold text-gray-800 block">{{ task.due_date|date:"F d, Y" }}</span>
+                    <span class="font-semibold {% if task.is_overdue %}text-red-600 font-bold{% else %}text-gray-800{% endif %} block">{{ task.due_date|date:"F d, Y" }}</span>
                 </div>
                 <div>
                     <span class="text-gray-400 font-medium block mb-0.5">Priority</span>

@@ -63,6 +63,15 @@ class Task(models.Model):
         return f"Task for Row {self.row_id} ({self.status})"
 
     @property
+    def is_overdue(self):
+        from django.utils import timezone
+        if self.status in ["COMPLETED", "APPROVED"]:
+            return False
+        if not self.due_date:
+            return False
+        return self.due_date < timezone.localdate()
+
+    @property
     def task_name(self):
         job_type = self.row.table.job_type
         if job_type == "SALES":

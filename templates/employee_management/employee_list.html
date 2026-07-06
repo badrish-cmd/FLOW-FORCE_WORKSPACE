@@ -83,30 +83,85 @@
                 </div>
 
                 {% if not limited_view %}
-                <div class="col-md-2">
-                    <select class="form-select" name="role">
-                        <option value="">All Roles</option>
-                        {% for value, label in roles %}
-                        <option value="{{ value }}" {% if filters.role == value %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
+                <!-- Role Filter -->
+                <div class="col-md-2 relative" x-data="{ open: false, search: '', selected: '{{ filters.role }}', selectedLabel: '{% if filters.role %}{% for value, label in roles %}{% if filters.role == value %}{{ label }}{% endif %}{% endfor %}{% else %}All Roles{% endif %}' }" @click.away="open = false">
+                    <input type="hidden" name="role" :value="selected">
+                    <button type="button" @click="open = !open" class="form-select text-start flex justify-between items-center bg-white border border-gray-300 rounded-lg py-2 px-3 text-sm font-normal text-gray-700 w-full">
+                        <span x-text="selectedLabel"></span>
+                    </button>
+                    <div x-show="open" x-transition class="absolute left-0 mt-1 w-56 rounded-lg shadow-xl bg-white border border-gray-200 z-50 p-2 space-y-2" style="display: none;">
+                        <div class="relative">
+                            <input type="text" x-model="search" placeholder="Search role..." class="w-full bg-gray-50 border border-gray-300 rounded-md py-1 px-2.5 text-xs focus:ring-primary focus:border-primary">
+                            <i class="fas fa-search absolute right-2.5 top-2 text-gray-400 text-[10px]"></i>
+                        </div>
+                        <ul class="max-h-48 overflow-y-auto divide-y divide-gray-100 text-xs">
+                            <li @click="selected = ''; selectedLabel = 'All Roles'; open = false; $nextTick(() => $el.closest('form').submit())" class="py-1.5 px-2 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-500">
+                                All Roles
+                            </li>
+                            {% for value, label in roles %}
+                            <li x-show="!search || '{{ label }}'.toLowerCase().includes(search.toLowerCase())"
+                                @click="selected = '{{ value }}'; selectedLabel = '{{ label }}'; open = false; $nextTick(() => $el.closest('form').submit())"
+                                class="py-1.5 px-2 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700">
+                                {{ label }}
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
                 </div>
 
-                <div class="col-md-2">
-                    <select class="form-select" name="status">
-                        <option value="">All Approval Status</option>
-                        {% for value, label in statuses %}
-                        <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
+                <!-- Status Filter -->
+                <div class="col-md-2 relative" x-data="{ open: false, search: '', selected: '{{ filters.status }}', selectedLabel: '{% if filters.status %}{% for value, label in statuses %}{% if filters.status == value %}{{ label }}{% endif %}{% endfor %}{% else %}All Statuses{% endif %}' }" @click.away="open = false">
+                    <input type="hidden" name="status" :value="selected">
+                    <button type="button" @click="open = !open" class="form-select text-start flex justify-between items-center bg-white border border-gray-300 rounded-lg py-2 px-3 text-sm font-normal text-gray-700 w-full">
+                        <span x-text="selectedLabel"></span>
+                    </button>
+                    <div x-show="open" x-transition class="absolute left-0 mt-1 w-56 rounded-lg shadow-xl bg-white border border-gray-200 z-50 p-2 space-y-2" style="display: none;">
+                        <div class="relative">
+                            <input type="text" x-model="search" placeholder="Search status..." class="w-full bg-gray-50 border border-gray-300 rounded-md py-1 px-2.5 text-xs focus:ring-primary focus:border-primary">
+                            <i class="fas fa-search absolute right-2.5 top-2 text-gray-400 text-[10px]"></i>
+                        </div>
+                        <ul class="max-h-48 overflow-y-auto divide-y divide-gray-100 text-xs">
+                            <li @click="selected = ''; selectedLabel = 'All Approval Status'; open = false; $nextTick(() => $el.closest('form').submit())" class="py-1.5 px-2 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-500">
+                                All Approval Status
+                            </li>
+                            {% for value, label in statuses %}
+                            <li x-show="!search || '{{ label }}'.toLowerCase().includes(search.toLowerCase())"
+                                @click="selected = '{{ value }}'; selectedLabel = '{{ label }}'; open = false; $nextTick(() => $el.closest('form').submit())"
+                                class="py-1.5 px-2 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700">
+                                {{ label }}
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
                 </div>
 
-                <div class="col-md-2">
-                    <select class="form-select" name="active">
-                        <option value="">All Activation Status</option>
-                        <option value="yes" {% if filters.active == 'yes' %}selected{% endif %}>Active</option>
-                        <option value="no" {% if filters.active == 'no' %}selected{% endif %}>Inactive</option>
-                    </select>
+                <!-- Active Status Filter -->
+                <div class="col-md-2 relative" x-data="{ open: false, search: '', selected: '{{ filters.active }}', selectedLabel: '{% if filters.active == 'yes' %}Active{% elif filters.active == 'no' %}Inactive{% else %}All Activation Status{% endif %}' }" @click.away="open = false">
+                    <input type="hidden" name="active" :value="selected">
+                    <button type="button" @click="open = !open" class="form-select text-start flex justify-between items-center bg-white border border-gray-300 rounded-lg py-2 px-3 text-sm font-normal text-gray-700 w-full">
+                        <span x-text="selectedLabel"></span>
+                    </button>
+                    <div x-show="open" x-transition class="absolute left-0 mt-1 w-56 rounded-lg shadow-xl bg-white border border-gray-200 z-50 p-2 space-y-2" style="display: none;">
+                        <div class="relative">
+                            <input type="text" x-model="search" placeholder="Search status..." class="w-full bg-gray-50 border border-gray-300 rounded-md py-1 px-2.5 text-xs focus:ring-primary focus:border-primary">
+                            <i class="fas fa-search absolute right-2.5 top-2 text-gray-400 text-[10px]"></i>
+                        </div>
+                        <ul class="max-h-48 overflow-y-auto divide-y divide-gray-100 text-xs">
+                            <li @click="selected = ''; selectedLabel = 'All Activation Status'; open = false; $nextTick(() => $el.closest('form').submit())" class="py-1.5 px-2 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-500">
+                                All Activation Status
+                            </li>
+                            <li x-show="!search || 'active'.includes(search.toLowerCase())"
+                                @click="selected = 'yes'; selectedLabel = 'Active'; open = false; $nextTick(() => $el.closest('form').submit())"
+                                class="py-1.5 px-2 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700">
+                                Active
+                            </li>
+                            <li x-show="!search || 'inactive'.includes(search.toLowerCase())"
+                                @click="selected = 'no'; selectedLabel = 'Inactive'; open = false; $nextTick(() => $el.closest('form').submit())"
+                                class="py-1.5 px-2 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700">
+                                Inactive
+                            </li>
+                        </ul>
+                    </div>
                 </div>
                 {% endif %}
             </form>
