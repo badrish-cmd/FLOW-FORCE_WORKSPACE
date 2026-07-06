@@ -936,3 +936,43 @@ class TablesTestCase(TestCase):
         self.assertTrue(company_col.is_filterable)
         # Options should be analyzed, sorted and distinct: "Company A,Company B"
         self.assertEqual(company_col.options, "Company A,Company B")
+
+    def test_row_search_case_and_space_insensitive(self):
+        from tables.views import RowViewSet
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        factory = APIRequestFactory()
+
+        table = Table.objects.create(name="Search Test Table", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+
+        col = Column.objects.create(table=table, name="Test Column", data_type="TEXT", position=7)
+        row1 = Row.objects.create(table=table, created_by=self.employee)
+        row2 = Row.objects.create(table=table, created_by=self.employee)
+
+        CellValue.objects.create(row=row1, column=col, value="Esih Ayu Lisa", updated_by=self.admin)
+        CellValue.objects.create(row=row2, column=col, value="Tri Pirmansyah", updated_by=self.admin)
+
+        view = RowViewSet.as_view({'get': 'list'})
+
+        # Test case & space insensitive search: "esihayulisa" -> should match row1
+        request = factory.get(f"/tables/api/rows/?table={table.id}&search=esihayulisa")
+        force_authenticate(request, user=self.admin)
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['id'], row1.id)
+
+        # Test another search: " TRIPIRMANSYAH " -> should match row2
+        request = factory.get(f"/tables/api/rows/?table={table.id}&search=  TRIPIRMANSYAH ")
+        force_authenticate(request, user=self.admin)
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['id'], row2.id)
+
+        # Test non-matching search: "unknown" -> should match 0 rows
+        request = factory.get(f"/tables/api/rows/?table={table.id}&search=unknown")
+        force_authenticate(request, user=self.admin)
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['results']), 0)

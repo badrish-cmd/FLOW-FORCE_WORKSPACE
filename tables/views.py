@@ -1317,6 +1317,35 @@ class RowViewSet(viewsets.ModelViewSet):
         task_id = self.request.query_params.get("task_id")
         if task_id:
             queryset = queryset.filter(task__id=task_id)
+            
+        # General Row Search Filter (irrespective of case-sensitivity and inline spaces)
+        search = self.request.query_params.get("search")
+        if search:
+            from django.db.models import Q, Value, TextField
+            from django.db.models.functions import Cast, Lower, Replace
+            
+            clean_search = search.lower().replace(" ", "")
+            
+            matching_rows = CellValue.objects.filter(
+                row__table=table,
+                row__is_archived=False
+            ).annotate(
+                text_val=Cast('value', TextField())
+            ).annotate(
+                clean_val=Lower(Replace('text_val', Value(' '), Value(''), output_field=TextField()))
+            ).filter(
+                clean_val__contains=clean_search
+            ).values_list('row_id', flat=True)
+            
+            queryset = queryset.annotate(
+                clean_task_status=Lower(Replace('task__status', Value(' '), Value(''), output_field=TextField())),
+                clean_task_priority=Lower(Replace('task__priority', Value(' '), Value(''), output_field=TextField()))
+            ).filter(
+                Q(id__in=matching_rows) |
+                Q(clean_task_status__contains=clean_search) |
+                Q(clean_task_priority__contains=clean_search)
+            )
+
         # Custom dynamic column filters
         for key, val in self.request.query_params.items():
             if key.startswith("col_") and val:

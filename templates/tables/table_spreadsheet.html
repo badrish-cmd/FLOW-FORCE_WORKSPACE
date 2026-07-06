@@ -353,6 +353,17 @@
                 </span>
             </div>
 
+            <!-- Row Data Search Control -->
+            <div class="flex items-center gap-2 border-l border-gray-200 pl-4">
+                <div class="relative">
+                    <input type="text" x-model="searchQuery" @keydown.enter="changeFilter()" placeholder="Search in table..." class="bg-gray-50 border border-gray-300 text-gray-900 rounded-lg pl-8 pr-3 py-1.5 text-xs focus:ring-primary focus:border-primary min-w-[200px] font-semibold">
+                    <i class="fas fa-search absolute left-2.5 top-2.5 text-gray-400 text-xs"></i>
+                </div>
+                <button @click="changeFilter()" class="bg-primary hover:bg-blue-700 text-white font-medium rounded-lg text-xs px-3.5 py-1.5 transition duration-150 ease-in-out shadow-sm">
+                    Search
+                </button>
+            </div>
+
             <!-- PID Filter (only if PID column exists or job_type is ENGINEER / LIST_PID) -->
             {% if table.job_type == 'ENGINEER' or table.job_type == 'LIST_PID' %}
             <div class="relative inline-block text-left" x-data="{ open: false, search: '' }" @click.away="open = false">
@@ -1249,6 +1260,7 @@
             selectedMonthFilter: '',
             selectedDueFilter: '',
             columnFilters: {},
+            searchQuery: '',
 
             listPidStatusChartInstance: null,
             listPidProjectChartInstance: null,
@@ -1424,6 +1436,7 @@ comments: [],
                 this.selectedMonthFilter = '';
                 this.selectedDueFilter = '';
                 this.columnFilters = {};
+                this.searchQuery = '';
 
                 this.currentPage = 1;
                 this.fetchRows();
@@ -1668,6 +1681,7 @@ comments: [],
                 if (this.selectedYearFilter) params.append('year', this.selectedYearFilter);
                 if (this.selectedMonthFilter) params.append('month', this.selectedMonthFilter);
                 if (this.selectedDueFilter) params.append('due', this.selectedDueFilter);
+                if (this.searchQuery) params.append('search', this.searchQuery);
 
                 // Append custom column filters
                 Object.keys(this.columnFilters).forEach(colId => {
