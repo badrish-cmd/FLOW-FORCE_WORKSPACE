@@ -1154,16 +1154,20 @@ class RowPagination(PageNumberPagination):
                 due_date__lt=timezone.localdate()
             ).exclude(status__in=['COMPLETED', 'APPROVED', 'COMPLETE']).count()
             
-            # Total QTY
-            from django.db.models.functions import Cast
-            from django.db.models import FloatField, Sum
-            total_qty = CellValue.objects.filter(
+            # Total QTY (computed in Python to prevent database-specific JSONB casting crashes in PostgreSQL)
+            qty_cells = CellValue.objects.filter(
                 column__table=table,
                 column__name='QTY',
                 row__is_archived=False
-            ).annotate(
-                num_val=Cast('value', FloatField())
-            ).aggregate(total=Sum('num_val'))['total'] or 0.0
+            ).exclude(value=None).values_list('value', flat=True)
+            
+            total_qty = 0.0
+            for val in qty_cells:
+                try:
+                    if val is not None and str(val).strip():
+                        total_qty += float(str(val).strip())
+                except ValueError:
+                    pass
                     
             # Completion stats
             total_tasks = Task.objects.filter(row__table=table, row__is_archived=False).count()
