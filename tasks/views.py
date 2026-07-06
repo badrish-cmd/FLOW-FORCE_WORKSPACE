@@ -510,14 +510,20 @@ def reports_view(request):
         else:
             tasks = Task.objects.all()
 
+    from tables.permissions import get_accessible_tables
+    workspace_tables = get_accessible_tables(request.user)
+
     # Apply filters
     employee_id = request.GET.get("employee")
     month = request.GET.get("month")
     date_from = request.GET.get("date_from")
     date_to = request.GET.get("date_to")
+    table_id = request.GET.get("table")
 
     if employee_id:
         tasks = tasks.filter(assigned_to__id=employee_id)
+    if table_id:
+        tasks = tasks.filter(row__table_id=table_id)
     if month:
         # Format: YYYY-MM
         try:
@@ -799,6 +805,7 @@ def reports_view(request):
     context = {
         "employees": employees,
         "tasks": tasks,
+        "workspace_tables": workspace_tables,
     }
     return render(request, "tasks/reports.html", context)
 

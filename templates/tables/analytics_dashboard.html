@@ -12,6 +12,22 @@
         </div>
     </div>
 
+    <!-- Search Bar -->
+    <div class="max-w-md mb-6">
+        <div class="flex gap-2">
+            <div class="relative flex-grow">
+                <span class="absolute inset-y-0 left-0 flex items-center pl-3">
+                    <i class="fas fa-search text-slate-400"></i>
+                </span>
+                <input type="text" id="analyticsSearchInput" placeholder="Search tables in analytics..." 
+                       class="w-full pl-10 pr-4 py-2 bg-white text-sm border border-slate-200 rounded-lg shadow-sm focus:outline-none focus:border-blue-500 transition-all duration-200">
+            </div>
+            <button type="button" onclick="filterAnalytics()" class="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow transition-all duration-200">
+                Search
+            </button>
+        </div>
+    </div>
+
     <!-- Analytics Card Grid -->
     <div class="grid grid-cols-1 xl:grid-cols-2 gap-8">
         {% for item in tables_data %}
@@ -237,6 +253,58 @@
                 })();
             {% endif %}
         {% endfor %}
+        const analyticsSearchInput = document.getElementById('analyticsSearchInput');
+        if (analyticsSearchInput) {
+            analyticsSearchInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    filterAnalytics();
+                }
+            });
+        }
     });
+
+    function filterAnalytics() {
+        const query = document.getElementById('analyticsSearchInput').value.toLowerCase().trim();
+        const cards = document.querySelectorAll('.grid > div');
+        let visibleCount = 0;
+        
+        cards.forEach(card => {
+            const heading = card.querySelector('h2 a');
+            if (heading) {
+                const tableName = heading.textContent.toLowerCase();
+                const descElem = card.querySelector('p.text-slate-500, p.text-slate-400');
+                const tableDesc = descElem ? descElem.textContent.toLowerCase() : '';
+                if (tableName.includes(query) || tableDesc.includes(query)) {
+                    card.style.display = '';
+                    visibleCount++;
+                } else {
+                    card.style.display = 'none';
+                }
+            }
+        });
+        
+        const noResults = document.getElementById('noAnalyticsResults');
+        if (visibleCount === 0 && query !== '') {
+            if (!noResults) {
+                const container = document.querySelector('.grid');
+                const div = document.createElement('div');
+                div.id = 'noAnalyticsResults';
+                div.className = 'col-span-full bg-white rounded-2xl border border-slate-100 p-12 text-center shadow-sm';
+                div.innerHTML = `
+                    <div class="w-16 h-16 bg-slate-50 text-slate-400 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                        <i class="fas fa-search text-2xl"></i>
+                    </div>
+                    <h3 class="text-lg font-bold text-slate-800">No matching analytics found</h3>
+                    <p class="text-slate-500 text-sm mt-1">Try checking your spelling or adjusting search query.</p>
+                `;
+                container.appendChild(div);
+            } else {
+                noResults.style.display = '';
+            }
+        } else if (noResults) {
+            noResults.style.display = 'none';
+        }
+    }
 </script>
 {% endblock %}
