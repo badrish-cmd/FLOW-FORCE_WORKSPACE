@@ -120,9 +120,7 @@ if DB_NAME:
             'PASSWORD': DB_PASSWORD,
             'HOST': DB_HOST,
             'PORT': DB_PORT,
-            'OPTIONS': {
-                'conn_max_age': 600,
-            }
+            'CONN_MAX_AGE': 600,
         }
     }
 else:
