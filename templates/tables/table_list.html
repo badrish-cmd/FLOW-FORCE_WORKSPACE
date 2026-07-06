@@ -21,13 +21,18 @@
     </div>
 
     <!-- Search Bar -->
-    <div class="max-w-md">
-        <div class="relative">
-            <span class="absolute inset-y-0 left-0 flex items-center pl-3">
-                <i class="fas fa-search text-slate-400"></i>
-            </span>
-            <input type="text" id="tableSearchInput" oninput="filterTables()" placeholder="Search tables by name or description..." 
-                   class="w-full pl-10 pr-4 py-2 bg-white text-sm border border-slate-200 rounded-lg shadow-sm focus:outline-none focus:border-blue-500 transition-all duration-200">
+    <div class="max-w-md mb-6">
+        <div class="flex gap-2">
+            <div class="relative flex-grow">
+                <span class="absolute inset-y-0 left-0 flex items-center pl-3">
+                    <i class="fas fa-search text-slate-400"></i>
+                </span>
+                <input type="text" id="tableSearchInput" placeholder="Search tables by name or description..." 
+                       class="w-full pl-10 pr-4 py-2 bg-white text-sm border border-slate-200 rounded-lg shadow-sm focus:outline-none focus:border-blue-500 transition-all duration-200">
+            </div>
+            <button type="button" onclick="filterTables()" class="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow transition-all duration-200">
+                Search
+            </button>
         </div>
     </div>
 
@@ -228,6 +233,18 @@
 {% endif %}
 
 <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const searchInput = document.getElementById('tableSearchInput');
+        if (searchInput) {
+            searchInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    filterTables();
+                }
+            });
+        }
+    });
+
     function filterTables() {
         const query = document.getElementById('tableSearchInput').value.toLowerCase().trim();
         const cards = document.querySelectorAll('.grid > div');
