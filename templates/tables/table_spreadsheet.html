@@ -482,6 +482,52 @@
                 </div>
             </div>
 
+            <!-- Sort Options -->
+            <div class="relative inline-block text-left" x-data="{ open: false }" @click.away="open = false">
+                <div class="flex items-center gap-2">
+                    <label class="text-xs font-semibold text-gray-500">Sort By:</label>
+                    <button type="button" @click="open = !open" class="bg-gray-50 border border-gray-300 text-gray-700 rounded-lg py-1.5 px-3 text-xs focus:ring-primary focus:border-primary font-medium flex items-center justify-between min-w-[160px]">
+                        <span x-text="getSortLabel()"></span>
+                        <i class="fas fa-chevron-down text-[10px] ml-2 text-gray-400"></i>
+                    </button>
+                </div>
+                <div x-show="open" x-transition class="origin-top-left absolute left-0 mt-1 w-52 rounded-lg shadow-xl bg-white border border-gray-200 z-50 p-2 space-y-1" style="display: none;">
+                    <ul class="text-xs space-y-1">
+                        <li @click="setSort('due_date', 'asc'); open = false" class="py-1.5 px-2.5 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700 flex items-center justify-between">
+                            <span>Due Date (Ascending)</span>
+                            <i class="fas fa-sort-amount-up text-[10px] text-gray-400"></i>
+                        </li>
+                        <li @click="setSort('due_date', 'desc'); open = false" class="py-1.5 px-2.5 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700 flex items-center justify-between">
+                            <span>Due Date (Descending)</span>
+                            <i class="fas fa-sort-amount-down text-[10px] text-gray-400"></i>
+                        </li>
+                        <hr class="border-gray-100 my-1">
+                        <li @click="setSort('follow_up_date', 'asc'); open = false" class="py-1.5 px-2.5 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700 flex items-center justify-between">
+                            <span>Follow-up Date (Ascending)</span>
+                            <i class="fas fa-sort-amount-up text-[10px] text-gray-400"></i>
+                        </li>
+                        <li @click="setSort('follow_up_date', 'desc'); open = false" class="py-1.5 px-2.5 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700 flex items-center justify-between">
+                            <span>Follow-up Date (Descending)</span>
+                            <i class="fas fa-sort-amount-down text-[10px] text-gray-400"></i>
+                        </li>
+                        <hr class="border-gray-100 my-1">
+                        <li @click="setSort('date_assigned', 'asc'); open = false" class="py-1.5 px-2.5 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700 flex items-center justify-between">
+                            <span>Date Assigned (Ascending)</span>
+                            <i class="fas fa-sort-amount-up text-[10px] text-gray-400"></i>
+                        </li>
+                        <li @click="setSort('date_assigned', 'desc'); open = false" class="py-1.5 px-2.5 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700 flex items-center justify-between">
+                            <span>Date Assigned (Descending)</span>
+                            <i class="fas fa-sort-amount-down text-[10px] text-gray-400"></i>
+                        </li>
+                        <hr class="border-gray-100 my-1">
+                        <li @click="setSort('', ''); open = false" class="py-1.5 px-2.5 hover:bg-gray-150 cursor-pointer rounded font-medium text-gray-500 flex items-center justify-between">
+                            <span>Default (No Sort)</span>
+                            <i class="fas fa-times text-[10px]"></i>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
             <!-- Dynamic Column Filters (Dropdown and Non-Dropdown) -->
             <template x-for="col in columns.filter(c => c.is_filterable)" :key="col.id">
                 <div class="relative inline-block text-left" x-data="{ open: false, search: '' }" @click.away="open = false">
@@ -1261,6 +1307,8 @@
             selectedDueFilter: '',
             columnFilters: {},
             searchQuery: '',
+            sortBy: '',
+            sortDir: 'asc',
 
             listPidStatusChartInstance: null,
             listPidProjectChartInstance: null,
@@ -1437,7 +1485,26 @@ comments: [],
                 this.selectedDueFilter = '';
                 this.columnFilters = {};
                 this.searchQuery = '';
+                this.sortBy = '';
+                this.sortDir = 'asc';
 
+                this.currentPage = 1;
+                this.fetchRows();
+            },
+
+            getSortLabel() {
+                if (!this.sortBy) return '-- Default Sort --';
+                let fieldLabel = '';
+                if (this.sortBy === 'due_date') fieldLabel = 'Due Date';
+                else if (this.sortBy === 'follow_up_date') fieldLabel = 'Follow-up Date';
+                else if (this.sortBy === 'date_assigned') fieldLabel = 'Date Assigned';
+                
+                return `${fieldLabel} (${this.sortDir === 'asc' ? 'Asc' : 'Desc'})`;
+            },
+
+            setSort(field, direction) {
+                this.sortBy = field;
+                this.sortDir = direction;
                 this.currentPage = 1;
                 this.fetchRows();
             },
@@ -1682,6 +1749,10 @@ comments: [],
                 if (this.selectedMonthFilter) params.append('month', this.selectedMonthFilter);
                 if (this.selectedDueFilter) params.append('due', this.selectedDueFilter);
                 if (this.searchQuery) params.append('search', this.searchQuery);
+                if (this.sortBy) {
+                    params.append('sort_by', this.sortBy);
+                    params.append('sort_dir', this.sortDir);
+                }
 
                 // Append custom column filters
                 Object.keys(this.columnFilters).forEach(colId => {

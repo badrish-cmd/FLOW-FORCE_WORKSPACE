@@ -1378,6 +1378,57 @@ class RowViewSet(viewsets.ModelViewSet):
                 sunday = monday + datetime.timedelta(days=6)
                 queryset = queryset.filter(task__due_date__range=[monday, sunday])
                 
+        # Apply Sorting
+        sort_by = self.request.query_params.get("sort_by")
+        sort_dir = self.request.query_params.get("sort_dir", "asc")
+        if sort_by:
+            if sort_by == 'due_date':
+                if sort_dir == 'desc':
+                    queryset = queryset.order_by('-task__due_date', '-id')
+                else:
+                    queryset = queryset.order_by('task__due_date', 'id')
+            elif sort_by == 'follow_up_date':
+                from django.db.models import Max, DateField
+                from django.db.models.functions import Coalesce
+                queryset = queryset.annotate(
+                    latest_follow_up=Max('task__follow_ups__follow_up_date')
+                ).annotate(
+                    sorted_follow_up=Coalesce('latest_follow_up', 'task__due_date', output_field=DateField())
+                )
+                if sort_dir == 'desc':
+                    queryset = queryset.order_by('-sorted_follow_up', '-id')
+                else:
+                    queryset = queryset.order_by('sorted_follow_up', 'id')
+            elif sort_by == 'date_assigned':
+                from django.db.models import Subquery, OuterRef, DateField, TextField, Value
+                from django.db.models.functions import Coalesce, Cast, Replace
+                date_col = Column.objects.filter(table=table, name__iexact="DATE").first()
+                if date_col:
+                    cell_subquery = Subquery(
+                        CellValue.objects.filter(row=OuterRef('pk'), column=date_col).values('value')[:1]
+                    )
+                    queryset = queryset.annotate(
+                        date_assigned_val=Cast(
+                            Replace(
+                                Cast(cell_subquery, output_field=TextField()),
+                                Value('"'),
+                                Value(''),
+                                output_field=TextField()
+                            ),
+                            output_field=DateField()
+                        )
+                    ).annotate(
+                        sorted_date_assigned=Coalesce('date_assigned_val', Cast('created_at', output_field=DateField()), output_field=DateField())
+                    )
+                else:
+                    queryset = queryset.annotate(
+                        sorted_date_assigned=Cast('created_at', output_field=DateField())
+                    )
+                if sort_dir == 'desc':
+                    queryset = queryset.order_by('-sorted_date_assigned', '-id')
+                else:
+                    queryset = queryset.order_by('sorted_date_assigned', 'id')
+
         return queryset
 
     def destroy(self, request, *args, **kwargs):

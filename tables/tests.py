@@ -976,3 +976,87 @@ class TablesTestCase(TestCase):
         response = view(request)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data['results']), 0)
+
+    def test_row_sorting_options(self):
+        from tables.views import RowViewSet
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from tasks.models import Task, TaskFollowUp
+        import datetime
+        factory = APIRequestFactory()
+
+        table = Table.objects.create(name="Sort Test Table", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+
+        date_col = table.columns.get(name="DATE")
+        
+        row1 = Row.objects.create(table=table, created_by=self.employee)
+        row2 = Row.objects.create(table=table, created_by=self.employee)
+        row3 = Row.objects.create(table=table, created_by=self.employee)
+
+        # 1. Populate Date Assigned (via DATE column)
+        CellValue.objects.create(row=row1, column=date_col, value="2026-07-02", updated_by=self.admin)
+        CellValue.objects.create(row=row2, column=date_col, value="2026-07-01", updated_by=self.admin)
+        CellValue.objects.create(row=row3, column=date_col, value="2026-07-03", updated_by=self.admin)
+
+        # 2. Create Tasks for due date sorting
+        task1 = Task.objects.create(row=row1, due_date=datetime.date(2026, 8, 15), status="PENDING")
+        task2 = Task.objects.create(row=row2, due_date=datetime.date(2026, 8, 10), status="PENDING")
+        task3 = Task.objects.create(row=row3, due_date=datetime.date(2026, 8, 20), status="PENDING")
+
+        # 3. Create Follow-up dates
+        # task1 has follow up on 2026-09-02
+        TaskFollowUp.objects.create(task=task1, follow_up_date=datetime.date(2026, 9, 2), discussed_points="points 1")
+        # task2 has follow up on 2026-09-03
+        TaskFollowUp.objects.create(task=task2, follow_up_date=datetime.date(2026, 9, 3), discussed_points="points 2")
+        # task3 has no follow ups (should fallback to due_date: 2026-08-20, which is earlier than 2026-09-02)
+
+        view = RowViewSet.as_view({'get': 'list'})
+
+        # Test Sort by due_date Ascending: row2 (Aug 10), row1 (Aug 15), row3 (Aug 20)
+        request = factory.get(f"/tables/api/rows/?table={table.id}&sort_by=due_date&sort_dir=asc")
+        force_authenticate(request, user=self.admin)
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        row_ids = [r['id'] for r in response.data['results']]
+        self.assertEqual(row_ids, [row2.id, row1.id, row3.id])
+
+        # Test Sort by due_date Descending: row3 (Aug 20), row1 (Aug 15), row2 (Aug 10)
+        request = factory.get(f"/tables/api/rows/?table={table.id}&sort_by=due_date&sort_dir=desc")
+        force_authenticate(request, user=self.admin)
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        row_ids = [r['id'] for r in response.data['results']]
+        self.assertEqual(row_ids, [row3.id, row1.id, row2.id])
+
+        # Test Sort by follow_up_date Ascending:
+        # row3 (fallback to due_date: Aug 20), row1 (follow-up: Sept 2), row2 (follow-up: Sept 3)
+        request = factory.get(f"/tables/api/rows/?table={table.id}&sort_by=follow_up_date&sort_dir=asc")
+        force_authenticate(request, user=self.admin)
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        row_ids = [r['id'] for r in response.data['results']]
+        self.assertEqual(row_ids, [row3.id, row1.id, row2.id])
+
+        # Test Sort by follow_up_date Descending: row2 (Sept 3), row1 (Sept 2), row3 (Aug 20)
+        request = factory.get(f"/tables/api/rows/?table={table.id}&sort_by=follow_up_date&sort_dir=desc")
+        force_authenticate(request, user=self.admin)
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        row_ids = [r['id'] for r in response.data['results']]
+        self.assertEqual(row_ids, [row2.id, row1.id, row3.id])
+
+        # Test Sort by date_assigned Ascending: row2 (July 1), row1 (July 2), row3 (July 3)
+        request = factory.get(f"/tables/api/rows/?table={table.id}&sort_by=date_assigned&sort_dir=asc")
+        force_authenticate(request, user=self.admin)
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        row_ids = [r['id'] for r in response.data['results']]
+        self.assertEqual(row_ids, [row2.id, row1.id, row3.id])
+
+        # Test Sort by date_assigned Descending: row3 (July 3), row1 (July 2), row2 (July 1)
+        request = factory.get(f"/tables/api/rows/?table={table.id}&sort_by=date_assigned&sort_dir=desc")
+        force_authenticate(request, user=self.admin)
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        row_ids = [r['id'] for r in response.data['results']]
+        self.assertEqual(row_ids, [row3.id, row1.id, row2.id])
