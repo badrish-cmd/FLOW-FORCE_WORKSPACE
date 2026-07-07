@@ -493,15 +493,19 @@
                 </div>
                 <div x-show="open" x-transition class="origin-top-left absolute left-0 mt-1 w-52 rounded-lg shadow-xl bg-white border border-gray-200 z-50 p-2 space-y-1" style="display: none;">
                     <ul class="text-xs space-y-1">
+                        {% if table.job_type == 'GENERAL' or table.job_type == 'ENGINEER' or table.job_type == 'LIST_PID' %}
                         <li @click="setSort('due_date', 'asc'); open = false" class="py-1.5 px-2.5 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700 flex items-center justify-between">
-                            <span>Due Date (Ascending)</span>
+                            <span>{% if table.job_type == 'LIST_PID' %}Due Date (Flow Force){% else %}Due Date{% endif %} (Ascending)</span>
                             <i class="fas fa-sort-amount-up text-[10px] text-gray-400"></i>
                         </li>
                         <li @click="setSort('due_date', 'desc'); open = false" class="py-1.5 px-2.5 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700 flex items-center justify-between">
-                            <span>Due Date (Descending)</span>
+                            <span>{% if table.job_type == 'LIST_PID' %}Due Date (Flow Force){% else %}Due Date{% endif %} (Descending)</span>
                             <i class="fas fa-sort-amount-down text-[10px] text-gray-400"></i>
                         </li>
                         <hr class="border-gray-100 my-1">
+                        {% endif %}
+
+                        {% if table.job_type == 'SALES' %}
                         <li @click="setSort('follow_up_date', 'asc'); open = false" class="py-1.5 px-2.5 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700 flex items-center justify-between">
                             <span>Follow-up Date (Ascending)</span>
                             <i class="fas fa-sort-amount-up text-[10px] text-gray-400"></i>
@@ -511,6 +515,8 @@
                             <i class="fas fa-sort-amount-down text-[10px] text-gray-400"></i>
                         </li>
                         <hr class="border-gray-100 my-1">
+                        {% endif %}
+
                         <li @click="setSort('date_assigned', 'asc'); open = false" class="py-1.5 px-2.5 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700 flex items-center justify-between">
                             <span>Date Assigned (Ascending)</span>
                             <i class="fas fa-sort-amount-up text-[10px] text-gray-400"></i>
@@ -1495,7 +1501,9 @@ comments: [],
             getSortLabel() {
                 if (!this.sortBy) return '-- Default Sort --';
                 let fieldLabel = '';
-                if (this.sortBy === 'due_date') fieldLabel = 'Due Date';
+                if (this.sortBy === 'due_date') {
+                    fieldLabel = ('{{ table.job_type }}' === 'LIST_PID') ? 'Due Date (Flow Force)' : 'Due Date';
+                }
                 else if (this.sortBy === 'follow_up_date') fieldLabel = 'Follow-up Date';
                 else if (this.sortBy === 'date_assigned') fieldLabel = 'Date Assigned';
                 

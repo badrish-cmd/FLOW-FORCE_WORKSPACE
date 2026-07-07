@@ -1382,12 +1382,41 @@ class RowViewSet(viewsets.ModelViewSet):
         sort_by = self.request.query_params.get("sort_by")
         sort_dir = self.request.query_params.get("sort_dir", "asc")
         if sort_by:
-            if sort_by == 'due_date':
-                if sort_dir == 'desc':
-                    queryset = queryset.order_by('-task__due_date', '-id')
+            if sort_by == 'due_date' and table.job_type in ['GENERAL', 'ENGINEER', 'LIST_PID']:
+                if table.job_type == 'LIST_PID':
+                    from django.db.models import Subquery, OuterRef, DateField, TextField, Value
+                    from django.db.models.functions import Coalesce, Cast, Replace
+                    due_col = Column.objects.filter(table=table, name__iexact="DUE_DATE_FLOW_FORCE").first()
+                    if due_col:
+                        cell_subquery = Subquery(
+                            CellValue.objects.filter(row=OuterRef('pk'), column=due_col).values('value')[:1]
+                        )
+                        queryset = queryset.annotate(
+                            due_date_val=Cast(
+                                Replace(
+                                    Cast(cell_subquery, output_field=TextField()),
+                                    Value('"'),
+                                    Value(''),
+                                    output_field=TextField()
+                                ),
+                                output_field=DateField()
+                            )
+                        )
+                        if sort_dir == 'desc':
+                            queryset = queryset.order_by('-due_date_val', '-id')
+                        else:
+                            queryset = queryset.order_by('due_date_val', 'id')
+                    else:
+                        if sort_dir == 'desc':
+                            queryset = queryset.order_by('-task__due_date', '-id')
+                        else:
+                            queryset = queryset.order_by('task__due_date', 'id')
                 else:
-                    queryset = queryset.order_by('task__due_date', 'id')
-            elif sort_by == 'follow_up_date':
+                    if sort_dir == 'desc':
+                        queryset = queryset.order_by('-task__due_date', '-id')
+                    else:
+                        queryset = queryset.order_by('task__due_date', 'id')
+            elif sort_by == 'follow_up_date' and table.job_type == 'SALES':
                 from django.db.models import Max, DateField
                 from django.db.models.functions import Coalesce
                 queryset = queryset.annotate(
