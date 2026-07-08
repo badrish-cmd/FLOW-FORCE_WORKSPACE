@@ -771,7 +771,7 @@
                                         </template>
                                     </select>
                                 {% else %}
-                                    <input type="text" x-model="newRowCells['{{ col.name }}']" placeholder="{% if table.job_type == 'SALES' %}Customer Name{% elif table.job_type == 'LIST_PID' %}Enquiry No{% else %}Task Name{% endif %} (Required)" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
+                                    <input type="text" x-model="newRowCells['{{ col.name }}']" placeholder="{% if table.job_type == 'SALES' %}Customer Name{% elif table.job_type == 'LIST_PID' %}Enquiry No{% else %}Task Name{% endif %}{% if table.job_type != 'PERSONAL' %} (Required){% endif %}" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
                                 {% endif %}
                             {% elif col.name == 'DUE_DATE' or col.name == 'FOLLOW_UP_DATE' or col.name == 'DUE_DATE_FLOW_FORCE' or col.name == 'DUE_DATE_CUSTOMER' %}
                                 <input type="date" x-model="newRowCells['{{ col.name }}']" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
@@ -1343,6 +1343,7 @@
                 STATUS: '',
                 INITIAL_MAIL: '',
                 ALERT_MAIL: ''
+            } : ('{{ table.job_type }}' === 'PERSONAL') ? {
             } : {
                 TASK_NAME: '',
                 DUE_DATE: ''
@@ -2117,6 +2118,7 @@ comments: [],
             submitInlineRow() {
                 const isSales = '{{ table.job_type }}' === 'SALES';
                 const isListPid = '{{ table.job_type }}' === 'LIST_PID';
+                const isPersonal = '{{ table.job_type }}' === 'PERSONAL';
                 const nameVal = isSales ? this.newRowCells.CUSTOMER_NAME : (isListPid ? (this.newRowCells['ENQUIRY_NO/QUOTATION_NO'] || this.newRowCells.ENQUIRY_NO) : this.newRowCells.TASK_NAME);
                 const dateVal = isSales ? this.newRowCells.FOLLOW_UP_DATE : (isListPid ? this.newRowCells.DUE_DATE_FLOW_FORCE : this.newRowCells.DUE_DATE);
                 
@@ -2125,6 +2127,8 @@ comments: [],
                     isInvalid = !nameVal || !dateVal;
                 } else if (isListPid) {
                     isInvalid = !nameVal;
+                } else if (isPersonal) {
+                    isInvalid = false;
                 } else {
                     isInvalid = !nameVal || !dateVal;
                 }
@@ -2186,6 +2190,8 @@ comments: [],
                                 INITIAL_MAIL: '',
                                 ALERT_MAIL: ''
                             };
+                        } else if (isPersonal) {
+                            this.newRowCells = {};
                         } else {
                             this.newRowCells = {
                                 TASK_NAME: '',
