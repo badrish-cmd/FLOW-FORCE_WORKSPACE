@@ -59,6 +59,21 @@
                         <tr>
                             <td class="task-name">
                                 {{ item.name }}
+                                {% if item.pid %}
+                                <div style="font-size: 11px; color: #6b7280; font-weight: normal; margin-top: 2px;">
+                                    <strong>PID:</strong> {{ item.pid }}
+                                </div>
+                                {% endif %}
+                                {% if item.customer_name and item.customer_name != item.name %}
+                                <div style="font-size: 11px; color: #6b7280; font-weight: normal; margin-top: 2px;">
+                                    <strong>Customer:</strong> {{ item.customer_name }}
+                                </div>
+                                {% endif %}
+                                {% if item.task_name_val and item.task_name_val != item.name %}
+                                <div style="font-size: 11px; color: #6b7280; font-weight: normal; margin-top: 2px;">
+                                    <strong>Task Name:</strong> {{ item.task_name_val }}
+                                </div>
+                                {% endif %}
                                 {% if item.last_discussion %}
                                 <div style="font-size: 12px; color: #6b7280; font-weight: normal; margin-top: 4px;">
                                     <strong>Last Discussion:</strong> {{ item.last_discussion }}

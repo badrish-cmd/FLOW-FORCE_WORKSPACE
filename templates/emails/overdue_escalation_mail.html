@@ -73,6 +73,24 @@
                         <td class="details-label">Priority</td>
                         <td class="details-value">{{ priority }}</td>
                     </tr>
+                    {% if pid_data %}
+                    <tr>
+                        <td class="details-label">PID</td>
+                        <td class="details-value">{{ pid_data }}</td>
+                    </tr>
+                    {% endif %}
+                    {% if customer_name_data and customer_name_data != task_name %}
+                    <tr>
+                        <td class="details-label">Customer Name</td>
+                        <td class="details-value">{{ customer_name_data }}</td>
+                    </tr>
+                    {% endif %}
+                    {% if task_name_data and task_name_data != task_name %}
+                    <tr>
+                        <td class="details-label">Task Name Column</td>
+                        <td class="details-value">{{ task_name_data }}</td>
+                    </tr>
+                    {% endif %}
                 </table>
                 
                 <div class="escalation-history">

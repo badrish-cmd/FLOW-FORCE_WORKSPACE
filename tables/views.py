@@ -261,6 +261,9 @@ class TableViewSet(viewsets.ModelViewSet):
                         'status': task.status,
                         'priority': task.priority,
                         'task_link': task_link,
+                        'pid_data': task.pid_data,
+                        'customer_name_data': task.customer_name_data,
+                        'task_name_data': task.task_name_data,
                     }
 
                     html_message = render_to_string('emails/overdue_escalation_mail.html', context)

@@ -120,6 +120,21 @@ class Task(models.Model):
             return name_cell.value if name_cell else "Unnamed Task"
 
     @property
+    def pid_data(self):
+        cell = self.row.cells.filter(column__name__iexact="PID").first()
+        return cell.value if (cell and cell.value) else None
+
+    @property
+    def customer_name_data(self):
+        cell = self.row.cells.filter(column__name__in=["CUSTOMER_NAME", "CUSTOMER NAME", "CUSTOMER"]).first()
+        return cell.value if (cell and cell.value) else None
+
+    @property
+    def task_name_data(self):
+        cell = self.row.cells.filter(column__name__in=["TASK_NAME", "TASK NAME"]).first()
+        return cell.value if (cell and cell.value) else None
+
+    @property
     def table_name(self):
         return self.row.table.name
 

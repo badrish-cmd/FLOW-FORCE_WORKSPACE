@@ -63,7 +63,24 @@
                             <tbody>
                                 {% for task in item.tasks %}
                                 <tr>
-                                    <td><strong>{{ task.name }}</strong></td>
+                                    <td>
+                                        <strong>{{ task.name }}</strong>
+                                        {% if task.pid %}
+                                        <div style="font-size: 11px; color: #6b7280; margin-top: 2px;">
+                                            <strong>PID:</strong> {{ task.pid }}
+                                        </div>
+                                        {% endif %}
+                                        {% if task.customer_name and task.customer_name != task.name %}
+                                        <div style="font-size: 11px; color: #6b7280; margin-top: 2px;">
+                                            <strong>Customer:</strong> {{ task.customer_name }}
+                                        </div>
+                                        {% endif %}
+                                        {% if task.task_name_val and task.task_name_val != task.name %}
+                                        <div style="font-size: 11px; color: #6b7280; margin-top: 2px;">
+                                            <strong>Task Name:</strong> {{ task.task_name_val }}
+                                        </div>
+                                        {% endif %}
+                                    </td>
                                     <td>{{ task.due_date }}</td>
                                     <td>
                                         <span class="priority-badge 

@@ -248,12 +248,27 @@ def send_initial_mail(task_id):
             continue
 
         subject = f"Task: {task.task_name} - Due Date: {task.due_date}"
-        body = f"Task Name: {task.task_name}\nDue Date: {task.due_date}"
+        site_url = getattr(settings, 'SITE_URL', 'https://flowforceworkspace.cloud')
+        task_link = f"{site_url}/tables/{task.row.table_id}/?open_task_id={task.id}"
+
+        context = {
+            'employee_name': employee.full_name or employee.email,
+            'task_name': task.task_name,
+            'due_date': str(task.due_date) if task.due_date else "Not Set",
+            'priority': task.priority,
+            'assigned_by': task.assigned_by.full_name if task.assigned_by else 'System',
+            'department': task.row.table.department.name if task.row.table.department else 'Global',
+            'task_link': task_link,
+            'pid_data': task.pid_data,
+            'customer_name_data': task.customer_name_data,
+            'task_name_data': task.task_name_data,
+        }
+        html_message = render_to_string('emails/initial_mail.html', context)
 
         email_log = EmailLog.objects.create(
             recipient_email=employee.email,
             subject=subject,
-            body=body,
+            body=html_message,
             task=task,
             email_type='INITIAL_MAIL',
             status='PENDING',
@@ -411,7 +426,10 @@ def send_daily_alert_mails():
                 'table_name': task.row.table.name,
                 'priority': task.priority,
                 'link': task_link,
-                'last_discussion': last_discussion
+                'last_discussion': last_discussion,
+                'pid': task.pid_data,
+                'customer_name': task.customer_name_data,
+                'task_name_val': task.task_name_data,
             })
 
             # Update the task status to alert_mail_sent = True in DB
@@ -563,6 +581,8 @@ def send_alert_mail(task_id):
                 'assigned_by': task.assigned_by.full_name if task.assigned_by else 'System',
                 'department': task.row.table.department.name if task.row.table.department else 'Global',
                 'task_link': task_link,
+                'pid_data': task.pid_data,
+                'task_name_data': task.task_name_data,
             }
             
             html_message = render_to_string('emails/sales_alert_mail.html', context)
@@ -578,12 +598,28 @@ def send_alert_mail(task_id):
             )
         else:
             subject = f"Task: {task.task_name} - Due Date: {task.due_date}"
-            body = f"Task Name: {task.task_name}\nDue Date: {task.due_date}"
+            site_url = getattr(settings, 'SITE_URL', 'https://flowforceworkspace.cloud')
+            task_link = f"{site_url}/tables/{task.row.table_id}/?open_task_id={task.id}"
+            
+            context = {
+                'employee_name': employee.full_name or employee.email,
+                'task_name': task.task_name,
+                'due_date': str(task.due_date) if task.due_date else "Not Set",
+                'status': task.status,
+                'priority': task.priority,
+                'assigned_by': task.assigned_by.full_name if task.assigned_by else 'System',
+                'department': task.row.table.department.name if task.row.table.department else 'Global',
+                'task_link': task_link,
+                'pid_data': task.pid_data,
+                'customer_name_data': task.customer_name_data,
+                'task_name_data': task.task_name_data,
+            }
+            html_message = render_to_string('emails/alert_mail.html', context)
 
             email_log = EmailLog.objects.create(
                 recipient_email=employee.email,
                 subject=subject,
-                body=body,
+                body=html_message,
                 task=task,
                 email_type='ALERT_MAIL',
                 status='PENDING',
@@ -738,7 +774,10 @@ def check_overdue_escalations():
                         'due_date': str(task.due_date),
                         'priority': task.priority,
                         'status': task.status,
-                        'link': task_link
+                        'link': task_link,
+                        'pid': task.pid_data,
+                        'customer_name': task.customer_name_data,
+                        'task_name_val': task.task_name_data,
                     })
                 
                 table_data.append({
@@ -803,7 +842,10 @@ def check_overdue_escalations():
                         'due_date': str(task.due_date),
                         'priority': task.priority,
                         'status': task.status,
-                        'link': task_link
+                        'link': task_link,
+                        'pid': task.pid_data,
+                        'customer_name': task.customer_name_data,
+                        'task_name_val': task.task_name_data,
                     })
                 
                 table_data.append({
