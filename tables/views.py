@@ -1306,15 +1306,31 @@ class RowViewSet(viewsets.ModelViewSet):
         if not table_id:
             if self.action in ["retrieve", "update", "partial_update", "destroy"]:
                 from .permissions import get_accessible_tables
+                from django.db.models import Prefetch
                 accessible_tables = get_accessible_tables(self.request.user)
-                return Row.objects.filter(table__in=accessible_tables, is_archived=False).select_related('created_by', 'task', 'task__assigned_by').prefetch_related('cells', 'cells__column', 'task__assigned_to')
+                return Row.objects.filter(
+                    table__in=accessible_tables, is_archived=False
+                ).select_related(
+                    'created_by', 'task', 'task__assigned_by'
+                ).prefetch_related(
+                    Prefetch('cells', queryset=CellValue.objects.select_related('column', 'updated_by')),
+                    'task__assigned_to'
+                )
             return Row.objects.none()
             
         table = get_object_or_404(Table, id=table_id)
         if not has_table_access(self.request.user, table, "VIEW"):
             return Row.objects.none()
             
-        queryset = Row.objects.filter(table=table, is_archived=False).select_related('created_by', 'task', 'task__assigned_by').prefetch_related('cells', 'cells__column', 'task__assigned_to')
+        from django.db.models import Prefetch
+        queryset = Row.objects.filter(
+            table=table, is_archived=False
+        ).select_related(
+            'created_by', 'task', 'task__assigned_by'
+        ).prefetch_related(
+            Prefetch('cells', queryset=CellValue.objects.select_related('column', 'updated_by')),
+            'task__assigned_to'
+        )
         
         # Apply Query Params Filters
         task_id = self.request.query_params.get("task_id")
@@ -2094,38 +2110,42 @@ def tables_analytics_dashboard(request):
     else:
         tables = get_accessible_tables(request.user)
 
+    from django.db.models import Count, Q
+    today = timezone.localdate()
+
+    annotated_tables = tables.annotate(
+        total_tasks=Count('rows__task', filter=Q(rows__is_archived=False)),
+        pending_tasks=Count('rows__task', filter=Q(rows__is_archived=False, rows__task__status="PENDING")),
+        in_progress_tasks=Count('rows__task', filter=Q(rows__is_archived=False, rows__task__status="IN_PROGRESS")),
+        ready_for_review_tasks=Count('rows__task', filter=Q(rows__is_archived=False, rows__task__status="READY_FOR_REVIEW")),
+        completed_tasks=Count('rows__task', filter=Q(rows__is_archived=False, rows__task__status__in=["COMPLETED", "APPROVED"])),
+        overdue_tasks=Count('rows__task', filter=Q(rows__is_archived=False, rows__task__due_date__lt=today) & ~Q(rows__task__status__in=["COMPLETED", "APPROVED"])),
+        due_today_tasks=Count('rows__task', filter=Q(rows__is_archived=False, rows__task__due_date=today)),
+        low_tasks=Count('rows__task', filter=Q(rows__is_archived=False, rows__task__priority="LOW")),
+        medium_tasks=Count('rows__task', filter=Q(rows__is_archived=False, rows__task__priority="MEDIUM")),
+        high_tasks=Count('rows__task', filter=Q(rows__is_archived=False, rows__task__priority="HIGH")),
+        critical_tasks=Count('rows__task', filter=Q(rows__is_archived=False, rows__task__priority="CRITICAL"))
+    )
+
     tables_data = []
-    for table in tables:
-        tasks = Task.objects.filter(row__table=table, row__is_archived=False)
-        total = tasks.count()
-        pending = tasks.filter(status="PENDING").count()
-        in_progress = tasks.filter(status="IN_PROGRESS").count()
-        ready_for_review = tasks.filter(status="READY_FOR_REVIEW").count()
-        completed = tasks.filter(status__in=["COMPLETED", "APPROVED"]).count()
-
-        overdue = tasks.filter(due_date__lt=timezone.localdate()).exclude(status__in=["COMPLETED", "APPROVED"]).count()
-        due_today = tasks.filter(due_date=timezone.localdate()).count()
-
-        low = tasks.filter(priority="LOW").count()
-        medium = tasks.filter(priority="MEDIUM").count()
-        high = tasks.filter(priority="HIGH").count()
-        critical = tasks.filter(priority="CRITICAL").count()
-
+    for table in annotated_tables:
+        total = table.total_tasks
+        completed = table.completed_tasks
         completion_rate = int(completed * 100 / total) if total > 0 else 0
 
         tables_data.append({
             "table": table,
             "total": total,
-            "pending": pending,
-            "in_progress": in_progress,
-            "ready_for_review": ready_for_review,
+            "pending": table.pending_tasks,
+            "in_progress": table.in_progress_tasks,
+            "ready_for_review": table.ready_for_review_tasks,
             "completed": completed,
-            "overdue": overdue,
-            "due_today": due_today,
-            "low": low,
-            "medium": medium,
-            "high": high,
-            "critical": critical,
+            "overdue": table.overdue_tasks,
+            "due_today": table.due_today_tasks,
+            "low": table.low_tasks,
+            "medium": table.medium_tasks,
+            "high": table.high_tasks,
+            "critical": table.critical_tasks,
             "completion_rate": completion_rate,
         })
 
