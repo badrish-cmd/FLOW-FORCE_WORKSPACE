@@ -482,57 +482,7 @@
                 </div>
             </div>
 
-            <!-- Sort Options -->
-            <div class="relative inline-block text-left" x-data="{ open: false }" @click.away="open = false">
-                <div class="flex items-center gap-2">
-                    <label class="text-xs font-semibold text-gray-500">Sort By:</label>
-                    <button type="button" @click="open = !open" class="bg-gray-50 border border-gray-300 text-gray-700 rounded-lg py-1.5 px-3 text-xs focus:ring-primary focus:border-primary font-medium flex items-center justify-between min-w-[160px]">
-                        <span x-text="getSortLabel()"></span>
-                        <i class="fas fa-chevron-down text-[10px] ml-2 text-gray-400"></i>
-                    </button>
-                </div>
-                <div x-show="open" x-transition class="origin-top-left absolute left-0 mt-1 w-52 rounded-lg shadow-xl bg-white border border-gray-200 z-50 p-2 space-y-1" style="display: none;">
-                    <ul class="text-xs space-y-1">
-                        {% if table.job_type == 'GENERAL' or table.job_type == 'ENGINEER' or table.job_type == 'LIST_PID' %}
-                        <li @click="setSort('due_date', 'asc'); open = false" class="py-1.5 px-2.5 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700 flex items-center justify-between">
-                            <span>{% if table.job_type == 'LIST_PID' %}Due Date (Flow Force){% else %}Due Date{% endif %} (Ascending)</span>
-                            <i class="fas fa-sort-amount-up text-[10px] text-gray-400"></i>
-                        </li>
-                        <li @click="setSort('due_date', 'desc'); open = false" class="py-1.5 px-2.5 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700 flex items-center justify-between">
-                            <span>{% if table.job_type == 'LIST_PID' %}Due Date (Flow Force){% else %}Due Date{% endif %} (Descending)</span>
-                            <i class="fas fa-sort-amount-down text-[10px] text-gray-400"></i>
-                        </li>
-                        <hr class="border-gray-100 my-1">
-                        {% endif %}
 
-                        {% if table.job_type == 'SALES' %}
-                        <li @click="setSort('follow_up_date', 'asc'); open = false" class="py-1.5 px-2.5 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700 flex items-center justify-between">
-                            <span>Follow-up Date (Ascending)</span>
-                            <i class="fas fa-sort-amount-up text-[10px] text-gray-400"></i>
-                        </li>
-                        <li @click="setSort('follow_up_date', 'desc'); open = false" class="py-1.5 px-2.5 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700 flex items-center justify-between">
-                            <span>Follow-up Date (Descending)</span>
-                            <i class="fas fa-sort-amount-down text-[10px] text-gray-400"></i>
-                        </li>
-                        <hr class="border-gray-100 my-1">
-                        {% endif %}
-
-                        <li @click="setSort('date_assigned', 'asc'); open = false" class="py-1.5 px-2.5 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700 flex items-center justify-between">
-                            <span>Date Assigned (Ascending)</span>
-                            <i class="fas fa-sort-amount-up text-[10px] text-gray-400"></i>
-                        </li>
-                        <li @click="setSort('date_assigned', 'desc'); open = false" class="py-1.5 px-2.5 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700 flex items-center justify-between">
-                            <span>Date Assigned (Descending)</span>
-                            <i class="fas fa-sort-amount-down text-[10px] text-gray-400"></i>
-                        </li>
-                        <hr class="border-gray-100 my-1">
-                        <li @click="setSort('', ''); open = false" class="py-1.5 px-2.5 hover:bg-gray-150 cursor-pointer rounded font-medium text-gray-500 flex items-center justify-between">
-                            <span>Default (No Sort)</span>
-                            <i class="fas fa-times text-[10px]"></i>
-                        </li>
-                    </ul>
-                </div>
-            </div>
 
             <!-- Dynamic Column Filters (Dropdown and Non-Dropdown) -->
             <template x-for="col in columns.filter(c => c.is_filterable)" :key="col.id">
@@ -581,6 +531,28 @@
                                 <div class="flex items-center gap-1.5">
                                     <span class="font-bold text-gray-800">{{ col.name }}</span>
                                     <span class="text-[9px] text-gray-400 lowercase">({{ col.data_type }})</span>
+                                    
+                                    {% if col.name|upper == "DATE" %}
+                                    <div class="flex flex-col ml-1 cursor-pointer" @click.stop="toggleSort('date')" title="Sort by Date">
+                                        <i class="fas fa-caret-up text-[10px]" :class="sortBy === 'date' && sortDir === 'asc' ? 'text-blue-600 font-bold' : 'text-gray-300'"></i>
+                                        <i class="fas fa-caret-down text-[10px] -mt-1" :class="sortBy === 'date' && sortDir === 'desc' ? 'text-blue-600 font-bold' : 'text-gray-300'"></i>
+                                    </div>
+                                    {% elif col.name|upper == "DUE_DATE" or col.name|upper == "DUE_DATE_FLOW_FORCE" or col.name|upper == "DUE_DATE_CUSTOMER" %}
+                                    <div class="flex flex-col ml-1 cursor-pointer" @click.stop="toggleSort('due_date')" title="Sort by Due Date">
+                                        <i class="fas fa-caret-up text-[10px]" :class="sortBy === 'due_date' && sortDir === 'asc' ? 'text-blue-600 font-bold' : 'text-gray-300'"></i>
+                                        <i class="fas fa-caret-down text-[10px] -mt-1" :class="sortBy === 'due_date' && sortDir === 'desc' ? 'text-blue-600 font-bold' : 'text-gray-300'"></i>
+                                    </div>
+                                    {% elif col.name|upper == "FOLLOW_UP_DATE" %}
+                                    <div class="flex flex-col ml-1 cursor-pointer" @click.stop="toggleSort('follow_up_date')" title="Sort by Follow-up Date">
+                                        <i class="fas fa-caret-up text-[10px]" :class="sortBy === 'follow_up_date' && sortDir === 'asc' ? 'text-blue-600 font-bold' : 'text-gray-300'"></i>
+                                        <i class="fas fa-caret-down text-[10px] -mt-1" :class="sortBy === 'follow_up_date' && sortDir === 'desc' ? 'text-blue-600 font-bold' : 'text-gray-300'"></i>
+                                    </div>
+                                    {% elif col.name|upper == "ENQUIRY_NO/QUOTATION_NO" or col.name|upper == "ENQUIRY_NO" or col.name|upper == "QUOTATION_NO" %}
+                                    <div class="flex flex-col ml-1 cursor-pointer" @click.stop="toggleSort('enquiry_no')" title="Sort by Enquiry No">
+                                        <i class="fas fa-caret-up text-[10px]" :class="sortBy === 'enquiry_no' && sortDir === 'asc' ? 'text-blue-600 font-bold' : 'text-gray-300'"></i>
+                                        <i class="fas fa-caret-down text-[10px] -mt-1" :class="sortBy === 'enquiry_no' && sortDir === 'desc' ? 'text-blue-600 font-bold' : 'text-gray-300'"></i>
+                                    </div>
+                                    {% endif %}
                                 </div>
                                 <div class="flex items-center gap-1 ml-2">
                                     {% if user.role in 'SUPER_ADMIN,ADMIN,DEPARTMENT_ADMIN' %}
@@ -1514,6 +1486,22 @@ comments: [],
             setSort(field, direction) {
                 this.sortBy = field;
                 this.sortDir = direction;
+                this.currentPage = 1;
+                this.fetchRows();
+            },
+
+            toggleSort(field) {
+                if (this.sortBy === field) {
+                    if (this.sortDir === 'asc') {
+                        this.sortDir = 'desc';
+                    } else {
+                        this.sortBy = '';
+                        this.sortDir = 'asc';
+                    }
+                } else {
+                    this.sortBy = field;
+                    this.sortDir = 'asc';
+                }
                 this.currentPage = 1;
                 this.fetchRows();
             },

@@ -1107,3 +1107,31 @@ class TablesTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         row_ids = [r['id'] for r in response.data['results']]
         self.assertEqual(row_ids, [p_row2.id, p_row1.id, p_row3.id])
+
+        # Test Sort by date (normalized to date_assigned) on GENERAL table
+        request = factory.get(f"/tables/api/rows/?table={table.id}&sort_by=date&sort_dir=asc")
+        force_authenticate(request, user=self.admin)
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        row_ids = [r['id'] for r in response.data['results']]
+        self.assertEqual(row_ids, [row2.id, row1.id, row3.id])
+
+        # Test Sort by enquiry_no on LIST_PID table
+        enquiry_col = pid_table.columns.get(name="ENQUIRY_NO/QUOTATION_NO")
+        CellValue.objects.create(row=p_row1, column=enquiry_col, value="ENQ-002", updated_by=self.admin)
+        CellValue.objects.create(row=p_row2, column=enquiry_col, value="ENQ-001", updated_by=self.admin)
+        CellValue.objects.create(row=p_row3, column=enquiry_col, value="ENQ-003", updated_by=self.admin)
+
+        request = factory.get(f"/tables/api/rows/?table={pid_table.id}&sort_by=enquiry_no&sort_dir=asc")
+        force_authenticate(request, user=self.admin)
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        row_ids = [r['id'] for r in response.data['results']]
+        self.assertEqual(row_ids, [p_row2.id, p_row1.id, p_row3.id])
+
+        request = factory.get(f"/tables/api/rows/?table={pid_table.id}&sort_by=enquiry_no&sort_dir=desc")
+        force_authenticate(request, user=self.admin)
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        row_ids = [r['id'] for r in response.data['results']]
+        self.assertEqual(row_ids, [p_row3.id, p_row1.id, p_row2.id])

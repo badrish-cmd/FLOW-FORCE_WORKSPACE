@@ -148,8 +148,17 @@ class EmployeeManagementTests(TestCase):
             created_by=self.admin
         )
         TableAccess.objects.create(table=table2, user=self.employee, access_level="EDIT")
+
+        # 3. Create a PERSONAL table by employee
+        table_personal = Table.objects.create(
+            name="Personal Table",
+            description="Personal Table",
+            job_type="PERSONAL",
+            created_by=self.employee
+        )
+        TableAccess.objects.create(table=table_personal, user=self.employee, access_level="ADMIN")
         
-        # Employee has access to table1 and table2.
+        # Employee has access to table1, table2, and table_personal.
         # Initially, neither table has row created today by employee.
         # Log in as admin to view global activity logs
         self.client.login(username=self.admin.email, password="testpassword123")
@@ -162,8 +171,13 @@ class EmployeeManagementTests(TestCase):
         not_done_pairs = [(item["table_name"], item["holder_name"]) for item in not_done]
         self.assertIn(("Table 1", self.employee.full_name), not_done_pairs)
         self.assertIn(("Table 2", self.employee.full_name), not_done_pairs)
+        # Verify PERSONAL table is NOT in the dashboard lists
+        self.assertNotIn(("Personal Table", self.employee.full_name), not_done_pairs)
+        # Verify ADMIN user (self.admin) is NOT in the dashboard lists
+        not_done_holders = [item["holder_name"] for item in not_done]
+        self.assertNotIn(self.admin.full_name, not_done_holders)
         
-        # 3. Create a row in table1 by employee today
+        # 4. Create a row in table1 by employee today
         Row.objects.create(table=table1, created_by=self.employee)
         
         response = self.client.get(url)
@@ -173,6 +187,11 @@ class EmployeeManagementTests(TestCase):
         done = response.context["done_changes_today"]
         done_pairs = [(item["table_name"], item["holder_name"]) for item in done]
         self.assertIn(("Table 1", self.employee.full_name), done_pairs)
+        # Verify PERSONAL table is NOT in done changes
+        self.assertNotIn(("Personal Table", self.employee.full_name), done_pairs)
+        # Verify ADMIN user is NOT in done changes
+        done_holders = [item["holder_name"] for item in done]
+        self.assertNotIn(self.admin.full_name, done_holders)
         
         not_done = response.context["not_done_changes_today"]
         not_done_pairs = [(item["table_name"], item["holder_name"]) for item in not_done]

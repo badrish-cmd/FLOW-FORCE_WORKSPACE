@@ -1385,7 +1385,39 @@ class RowViewSet(viewsets.ModelViewSet):
         sort_by = self.request.query_params.get("sort_by")
         sort_dir = self.request.query_params.get("sort_dir", "asc")
         if sort_by:
-            if sort_by == 'due_date' and table.job_type in ['GENERAL', 'ENGINEER', 'LIST_PID']:
+            if sort_by.lower() == 'date':
+                sort_by = 'date_assigned'
+            elif sort_by.lower() in ['enquiry_no', 'enquiry_number', 'enquiry_no/quotation_no']:
+                sort_by = 'enquiry_no'
+            
+            if sort_by == 'enquiry_no':
+                from django.db.models import Subquery, OuterRef, TextField, Value
+                from django.db.models.functions import Cast, Replace
+                enquiry_col = Column.objects.filter(table=table, name__iexact="ENQUIRY_NO/QUOTATION_NO").first()
+                if not enquiry_col:
+                    enquiry_col = Column.objects.filter(table=table, name__icontains="ENQUIRY").first()
+                if enquiry_col:
+                    cell_subquery = Subquery(
+                        CellValue.objects.filter(row=OuterRef('pk'), column=enquiry_col).values('value')[:1]
+                    )
+                    queryset = queryset.annotate(
+                        enquiry_val=Cast(
+                            Replace(
+                                Cast(cell_subquery, output_field=TextField()),
+                                Value('"'),
+                                Value(''),
+                                output_field=TextField()
+                            ),
+                            output_field=TextField()
+                        )
+                    )
+                    if sort_dir == 'desc':
+                        queryset = queryset.order_by('-enquiry_val', '-id')
+                    else:
+                        queryset = queryset.order_by('enquiry_val', 'id')
+                else:
+                    queryset = queryset.order_by('id')
+            elif sort_by == 'due_date' and table.job_type in ['GENERAL', 'ENGINEER', 'LIST_PID']:
                 if table.job_type == 'LIST_PID':
                     from django.db.models import Subquery, OuterRef, DateField, TextField, Value
                     from django.db.models.functions import Coalesce, Cast, Replace

@@ -950,11 +950,11 @@ def global_activity_logs(request):
 
     today = timezone.localdate()
 
-    # Get all active tables
-    active_tables = Table.objects.filter(is_active=True).prefetch_related('created_by', 'department')
+    # Get all active tables (excluding PERSONAL ones)
+    active_tables = Table.objects.filter(is_active=True).exclude(job_type="PERSONAL").prefetch_related('created_by', 'department')
     
-    # Get active non-superadmin employees
-    active_employees = EmployeeUser.objects.filter(is_active=True).exclude(role="SUPER_ADMIN").select_related('department')
+    # Get active non-admin, non-superadmin employees
+    active_employees = EmployeeUser.objects.filter(is_active=True).exclude(role__in=["SUPER_ADMIN", "ADMIN"]).select_related('department')
 
     # Get row creations today
     today_rows = Row.objects.filter(
