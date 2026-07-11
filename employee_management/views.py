@@ -945,37 +945,79 @@ def global_activity_logs(request):
 
     # Daily activity status calculations
     from django.utils import timezone
-    from django.db.models import Count, Max
-    from tables.models import CellValue
+    from django.db.models import Max
+    from tables.models import Table, Row, TableAccess
 
     today = timezone.localdate()
 
-    # Done changes today / Not done changes today in tables
-    today_changes = CellValue.objects.filter(
-        updated_at__date=today,
-        updated_by__isnull=False
-    ).values("updated_by").annotate(
-        cnt=Count("id"),
-        last_time=Max("updated_at")
-    )
+    # Get all active tables
+    active_tables = Table.objects.filter(is_active=True).prefetch_related('created_by', 'department')
+    
+    # Get active non-superadmin employees
+    active_employees = EmployeeUser.objects.filter(is_active=True).exclude(role="SUPER_ADMIN").select_related('department')
 
-    changes_map = {c["updated_by"]: {"count": c["cnt"], "last_time": c["last_time"]} for c in today_changes}
+    # Get row creations today
+    today_rows = Row.objects.filter(
+        created_at__date=today,
+        created_by__isnull=False
+    ).values("table_id", "created_by").annotate(
+        last_time=Max("created_at")
+    )
+    rows_map = {(r["table_id"], r["created_by"]): r["last_time"] for r in today_rows}
+
+    # Fetch EDIT/ADMIN access rules
+    access_rules = TableAccess.objects.filter(
+        table__is_active=True,
+        access_level__in=["EDIT", "ADMIN"]
+    ).select_related('user', 'department')
+
+    # Map table holders
+    rules_by_table = {}
+    for rule in access_rules:
+        rules_by_table.setdefault(rule.table_id, []).append(rule)
 
     done_changes_today = []
     not_done_changes_today = []
 
-    for emp in employees:
-        if emp.is_active:
-            if emp.id in changes_map:
-                emp.today_changes_count = changes_map[emp.id]["count"]
-                emp.last_change_time = changes_map[emp.id]["last_time"]
-                done_changes_today.append(emp)
+    for table in active_tables:
+        table_rules = rules_by_table.get(table.id, [])
+        for emp in active_employees:
+            is_holder = False
+            
+            # 1. Creator of the table
+            if table.created_by_id == emp.id:
+                is_holder = True
+            # 2. Dept Admin / Admin for the table's department
+            elif emp.role in ["ADMIN", "DEPARTMENT_ADMIN"] and table.department_id and emp.department_id == table.department_id:
+                is_holder = True
+            # 3. Explicit TableAccess
             else:
-                emp.today_changes_count = 0
-                emp.last_change_time = None
-                not_done_changes_today.append(emp)
+                for rule in table_rules:
+                    if rule.user_id == emp.id:
+                        is_holder = True
+                        break
+                    if rule.department_id and emp.department_id == rule.department_id:
+                        is_holder = True
+                        break
 
-    done_changes_today.sort(key=lambda x: x.today_changes_count, reverse=True)
+            if is_holder:
+                key = (table.id, emp.id)
+                if key in rows_map:
+                    done_changes_today.append({
+                        "table_name": table.name,
+                        "holder_name": emp.full_name or emp.email,
+                        "last_change_time": rows_map[key]
+                    })
+                else:
+                    not_done_changes_today.append({
+                        "table_name": table.name,
+                        "holder_name": emp.full_name or emp.email,
+                    })
+
+    # Sort done changes by last change time descending
+    done_changes_today.sort(key=lambda x: x["last_change_time"], reverse=True)
+    # Sort pending changes alphabetically by holder name and table name
+    not_done_changes_today.sort(key=lambda x: (x["holder_name"].lower(), x["table_name"].lower()))
 
     # Populate employees_activity summary list
     employees_activity = [

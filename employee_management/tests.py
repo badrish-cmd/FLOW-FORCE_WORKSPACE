@@ -127,3 +127,54 @@ class EmployeeManagementTests(TestCase):
         # Should fail validation
         self.assertEqual(response.status_code, 200)
         self.assertFormError(response, "form", "role", "Select a valid choice. ADMIN is not one of the available choices.")
+
+    def test_global_activity_logs_per_table_holder_calculation(self):
+        from tables.models import Table, Row, TableAccess
+        
+        # 1. Create a table created by employee (so employee is holder)
+        table1 = Table.objects.create(
+            name="Table 1",
+            description="Test Table 1",
+            job_type="GENERAL",
+            created_by=self.employee
+        )
+        TableAccess.objects.create(table=table1, user=self.employee, access_level="ADMIN")
+        
+        # 2. Create another table shared with employee with EDIT access
+        table2 = Table.objects.create(
+            name="Table 2",
+            description="Test Table 2",
+            job_type="GENERAL",
+            created_by=self.admin
+        )
+        TableAccess.objects.create(table=table2, user=self.employee, access_level="EDIT")
+        
+        # Employee has access to table1 and table2.
+        # Initially, neither table has row created today by employee.
+        # Log in as admin to view global activity logs
+        self.client.login(username=self.admin.email, password="testpassword123")
+        url = reverse("global_activity_logs")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        
+        # Verify both table1 and table2 are in not_done_changes_today for employee
+        not_done = response.context["not_done_changes_today"]
+        not_done_pairs = [(item["table_name"], item["holder_name"]) for item in not_done]
+        self.assertIn(("Table 1", self.employee.full_name), not_done_pairs)
+        self.assertIn(("Table 2", self.employee.full_name), not_done_pairs)
+        
+        # 3. Create a row in table1 by employee today
+        Row.objects.create(table=table1, created_by=self.employee)
+        
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        
+        # Now Table 1 should be in done_changes_today, and Table 2 should remain in not_done_changes_today
+        done = response.context["done_changes_today"]
+        done_pairs = [(item["table_name"], item["holder_name"]) for item in done]
+        self.assertIn(("Table 1", self.employee.full_name), done_pairs)
+        
+        not_done = response.context["not_done_changes_today"]
+        not_done_pairs = [(item["table_name"], item["holder_name"]) for item in not_done]
+        self.assertNotIn(("Table 1", self.employee.full_name), not_done_pairs)
+        self.assertIn(("Table 2", self.employee.full_name), not_done_pairs)

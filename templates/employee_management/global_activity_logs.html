@@ -32,16 +32,17 @@
                         <div class="col-6 border-end border-slate-100">
                             <span class="text-xs font-bold text-primary uppercase tracking-wider d-block mb-3"><i class="fas fa-pen-fancy me-1"></i> Made Changes ({{ done_changes_today|length }})</span>
                             <div class="overflow-y-auto" style="max-height: 220px; display: flex; flex-direction: column; gap: 8px;">
-                                {% for emp in done_changes_today %}
+                                {% for item in done_changes_today %}
                                     <div class="d-flex align-items-center gap-2 bg-light p-2 rounded border border-light">
                                         <div class="bg-primary text-white rounded-circle flex items-center justify-center font-bold text-xs" style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                                            {{ emp.full_name|slice:":2"|upper }}
+                                            {{ item.holder_name|slice:":2"|upper }}
                                         </div>
                                         <div style="min-width: 0; flex-grow: 1;">
                                             <div class="d-flex justify-content-between align-items-center">
-                                                <span class="fw-bold text-dark text-xs text-truncate" title="{{ emp.full_name }}">{{ emp.full_name }}</span>
+                                                <span class="fw-bold text-dark text-xs text-truncate" title="{{ item.holder_name }}">{{ item.holder_name }}</span>
                                             </div>
-                                            <span class="text-muted d-block" style="font-size: 10px;">Last: {{ emp.last_change_time|date:"g:i A" }}</span>
+                                            <span class="text-slate-600 d-block text-truncate" style="font-size: 11px;"><strong>Table:</strong> {{ item.table_name }}</span>
+                                            <span class="text-muted d-block" style="font-size: 10px;">Last: {{ item.last_change_time|date:"g:i A" }}</span>
                                         </div>
                                     </div>
                                 {% empty %}
@@ -53,14 +54,15 @@
                         <div class="col-6">
                             <span class="text-xs font-bold text-warning uppercase tracking-wider d-block mb-3"><i class="fas fa-exclamation-triangle me-1"></i> No Changes Today ({{ not_done_changes_today|length }})</span>
                             <div class="overflow-y-auto" style="max-height: 220px; display: flex; flex-direction: column; gap: 8px;">
-                                {% for emp in not_done_changes_today %}
+                                {% for item in not_done_changes_today %}
                                     <div class="d-flex align-items-center gap-2 bg-light p-2 rounded border border-light">
                                         <div class="bg-warning text-dark rounded-circle flex items-center justify-center font-bold text-xs" style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                                            {{ emp.full_name|slice:":2"|upper }}
+                                            {{ item.holder_name|slice:":2"|upper }}
                                         </div>
                                         <div style="min-width: 0; flex-grow: 1;">
-                                            <span class="fw-bold text-slate-600 text-xs d-block text-truncate" title="{{ emp.full_name }}">{{ emp.full_name }}</span>
-                                            <span class="text-muted d-block" style="font-size: 10px;">No edits today</span>
+                                            <span class="fw-bold text-slate-600 text-xs d-block text-truncate" title="{{ item.holder_name }}">{{ item.holder_name }}</span>
+                                            <span class="text-slate-600 d-block text-truncate" style="font-size: 11px;"><strong>Table:</strong> {{ item.table_name }}</span>
+                                            <span class="text-danger d-block" style="font-size: 10px; font-weight: 500;">Pending row creation</span>
                                         </div>
                                     </div>
                                 {% empty %}
