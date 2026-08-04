@@ -8,14 +8,14 @@ def get_accessible_tables(user):
     if not user.is_authenticated:
         return Table.objects.none()
 
-    if user.role == "SUPER_ADMIN":
+    if user.role in ["SUPER_ADMIN", "ADMIN"]:
         return Table.objects.filter(is_active=True)
 
     # Base query for active tables
     qs = Table.objects.filter(is_active=True)
 
-    # For ADMIN and DEPARTMENT_ADMIN
-    if user.role in ["ADMIN", "DEPARTMENT_ADMIN"]:
+    # For DEPARTMENT_ADMIN
+    if user.role == "DEPARTMENT_ADMIN":
         shared_filters = Q(user=user)
         if user.department:
             shared_filters |= Q(department=user.department)
@@ -49,15 +49,15 @@ def has_table_access(user, table, required_level="VIEW"):
     if not user.is_authenticated:
         return False
 
-    if user.role == "SUPER_ADMIN":
+    if user.role in ["SUPER_ADMIN", "ADMIN"]:
         return True
 
     # If the user is the owner/creator of the table
     if table.created_by == user:
         return True
 
-    # Admin and Dept Admin have admin level access in their department
-    if user.role in ["ADMIN", "DEPARTMENT_ADMIN"] and user.department and table.department == user.department:
+    # Dept Admin have admin level access in their department
+    if user.role == "DEPARTMENT_ADMIN" and user.department and table.department == user.department:
         return True
 
     # Check explicit access rules
@@ -94,7 +94,7 @@ def get_column_access_level(user, column):
     if not user.is_authenticated:
         return "HIDDEN"
 
-    if user.role == "SUPER_ADMIN":
+    if user.role in ["SUPER_ADMIN", "ADMIN"]:
         return "EDITABLE"
 
     # If the user is table creator or department admin for this table
@@ -102,7 +102,7 @@ def get_column_access_level(user, column):
     if table.created_by == user:
         return "EDITABLE"
 
-    if user.role in ["ADMIN", "DEPARTMENT_ADMIN"] and user.department and table.department == user.department:
+    if user.role == "DEPARTMENT_ADMIN" and user.department and table.department == user.department:
         return "EDITABLE"
 
     # System columns default to read-only for employees or editable based on context
@@ -150,13 +150,13 @@ def get_employees_with_table_access(table):
     
     all_employees = EmployeeUser.objects.filter(is_active=True)
     
-    q_filter = Q(role="SUPER_ADMIN")
+    q_filter = Q(role__in=["SUPER_ADMIN", "ADMIN"])
     
     if table.created_by:
         q_filter |= Q(id=table.created_by.id)
         
     if table.department:
-        q_filter |= Q(role__in=["ADMIN", "DEPARTMENT_ADMIN"], department=table.department)
+        q_filter |= Q(role="DEPARTMENT_ADMIN", department=table.department)
         
     access_rules = TableAccess.objects.filter(table=table)
     user_ids = access_rules.filter(user__isnull=False).values_list("user_id", flat=True)
@@ -168,3 +168,4 @@ def get_employees_with_table_access(table):
         q_filter |= Q(department_id__in=dept_ids)
         
     return all_employees.filter(q_filter).distinct()
+

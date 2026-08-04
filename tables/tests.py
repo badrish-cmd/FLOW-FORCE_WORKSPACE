@@ -1135,3 +1135,51 @@ class TablesTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         row_ids = [r['id'] for r in response.data['results']]
         self.assertEqual(row_ids, [p_row3.id, p_row1.id, p_row2.id])
+
+    def test_employee_promoted_to_admin_table_access(self):
+        from tables.permissions import get_accessible_tables, has_table_access, get_column_access_level
+        from employee_management.services import EmployeeService
+
+        # Create another department and table created by superadmin in that department
+        other_dept = Department.objects.create(name="Sales Dept", slug="sales-dept")
+        super_admin = User.objects.create_user(
+            email="superadmin@flow-force.com",
+            password="testpassword",
+            full_name="Super Admin",
+            role="SUPER_ADMIN",
+            status="APPROVED"
+        )
+        table_other = Table.objects.create(name="Global Sales Table", created_by=super_admin, department=other_dept)
+
+        # 1. Employee originally in Tables Engineering Dept
+        emp = User.objects.create_user(
+            email="promoted_emp@flow-force.com",
+            password="testpassword",
+            full_name="Promoted Employee",
+            role="EMPLOYEE",
+            department=self.dept,
+            status="APPROVED"
+        )
+
+        # As an employee, table_other is NOT accessible
+        accessible_before = get_accessible_tables(emp)
+        self.assertNotIn(table_other, accessible_before)
+        self.assertFalse(has_table_access(emp, table_other, "VIEW"))
+
+        # 2. Promote employee to ADMIN
+        EmployeeService.update_employee(emp, role="ADMIN", updated_by=self.admin)
+        emp.refresh_from_db()
+        self.assertEqual(emp.role, "ADMIN")
+        self.assertTrue(emp.is_staff)
+
+        # As an ADMIN, all active tables are accessible regardless of department or creator
+        accessible_after = get_accessible_tables(emp)
+        self.assertIn(table_other, accessible_after)
+        self.assertTrue(has_table_access(emp, table_other, "VIEW"))
+        self.assertTrue(has_table_access(emp, table_other, "EDIT"))
+        self.assertTrue(has_table_access(emp, table_other, "ADMIN"))
+
+        # Column permissions check
+        sys_col = table_other.columns.first()
+        self.assertEqual(get_column_access_level(emp, sys_col), "EDITABLE")
+

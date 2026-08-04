@@ -19,7 +19,7 @@ class TaskViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         # Users see tasks belonging to accessible tables
         user = self.request.user
-        if user.role == "SUPER_ADMIN":
+        if user.role in ["SUPER_ADMIN", "ADMIN"]:
             qs = Task.objects.all()
         else:
             # Get rows in user's accessible tables
@@ -496,15 +496,15 @@ def reports_view(request):
 
     from auth_app.models import EmployeeUser
     # Filter users based on department
-    if request.user.role in ["ADMIN", "DEPARTMENT_ADMIN"] and request.user.department:
+    if request.user.role == "DEPARTMENT_ADMIN" and request.user.department:
         employees = EmployeeUser.objects.filter(department=request.user.department)
     else:
         employees = EmployeeUser.objects.all()
 
     # Query tasks
-    if request.user.role == "SUPER_ADMIN":
+    if request.user.role in ["SUPER_ADMIN", "ADMIN"]:
         tasks = Task.objects.all()
-    elif request.user.role in ["ADMIN", "DEPARTMENT_ADMIN"]:
+    elif request.user.role == "DEPARTMENT_ADMIN":
         if request.user.department:
             tasks = Task.objects.filter(row__table__department=request.user.department)
         else:
