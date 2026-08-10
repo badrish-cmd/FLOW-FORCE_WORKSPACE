@@ -1,0 +1,527 @@
+{% extends "base.html" %}
+
+{% block title %}PID Executive Dashboard - Flow-Force Workspace{% endblock %}
+
+{% block content %}
+<div class="space-y-8 animate-fade-in pb-12">
+    <!-- Executive Header Area -->
+    <div class="bg-gradient-to-r from-slate-900 via-slate-800 to-blue-900 rounded-2xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden">
+        <div class="absolute -right-10 -bottom-10 opacity-10 pointer-events-none">
+            <i class="fas fa-layer-group text-[220px]"></i>
+        </div>
+        <div class="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+            <div>
+                <div class="flex items-center gap-3">
+                    <span class="px-3 py-1 bg-blue-500/20 text-blue-300 border border-blue-400/30 rounded-full text-xs font-semibold uppercase tracking-wider">
+                        <i class="fas fa-shield-alt me-1"></i> Management & GM View
+                    </span>
+                    <span class="text-xs text-slate-400">Real-time Tracker</span>
+                </div>
+                <h1 class="text-3xl sm:text-4xl font-extrabold tracking-tight mt-2 text-white">PID Executive Dashboard</h1>
+                <p class="text-slate-300 text-sm sm:text-base mt-2 max-w-3xl leading-relaxed">
+                    Comprehensive overview of all PID project tables. Track PID details, Quotation/Enquiry numbers, Current & Last status, PO/SO numbers, and Customer/Flow Force due dates across departments.
+                </p>
+            </div>
+            <div class="flex flex-wrap items-center gap-3">
+                <button onclick="window.location.reload();" 
+                        class="inline-flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-xl text-xs font-semibold transition-all backdrop-blur-sm shadow">
+                    <i class="fas fa-sync-alt"></i> Refresh Data
+                </button>
+                <a href="{% url 'tables:table_list' %}" 
+                   class="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold transition-all shadow-lg shadow-blue-900/40">
+                    <i class="fas fa-table me-1"></i> All Workspace Tables
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Executive KPI Metrics Bar -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+        <!-- Total PIDs -->
+        <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm flex flex-col justify-between hover:shadow-md transition-all">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Total PIDs</span>
+                <div class="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                    <i class="fas fa-cubes text-sm"></i>
+                </div>
+            </div>
+            <div class="mt-4">
+                <span class="text-3xl font-extrabold text-slate-900">{{ overall_total }}</span>
+                <span class="text-xs text-slate-500 block mt-1">Across all PID tables</span>
+            </div>
+        </div>
+
+        <!-- In Progress -->
+        <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm flex flex-col justify-between hover:shadow-md transition-all">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-amber-600 uppercase tracking-wider">In Progress</span>
+                <div class="w-9 h-9 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
+                    <i class="fas fa-spinner fa-spin text-sm"></i>
+                </div>
+            </div>
+            <div class="mt-4">
+                <span class="text-3xl font-extrabold text-amber-700">{{ overall_in_progress }}</span>
+                <span class="text-xs text-amber-600/80 block mt-1">Active PID workflows</span>
+            </div>
+        </div>
+
+        <!-- Completed -->
+        <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm flex flex-col justify-between hover:shadow-md transition-all">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-emerald-600 uppercase tracking-wider">Completed</span>
+                <div class="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+                    <i class="fas fa-check-circle text-sm"></i>
+                </div>
+            </div>
+            <div class="mt-4">
+                <span class="text-3xl font-extrabold text-emerald-700">{{ overall_completed }}</span>
+                <span class="text-xs text-emerald-600/80 block mt-1">Finalized & Approved</span>
+            </div>
+        </div>
+
+        <!-- Overdue -->
+        <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm flex flex-col justify-between hover:shadow-md transition-all">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-rose-600 uppercase tracking-wider">Overdue</span>
+                <div class="w-9 h-9 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center font-bold">
+                    <i class="fas fa-exclamation-triangle text-sm"></i>
+                </div>
+            </div>
+            <div class="mt-4">
+                <span class="text-3xl font-extrabold text-rose-700">{{ overall_overdue }}</span>
+                <span class="text-xs text-rose-600/80 block mt-1">Requires GM attention</span>
+            </div>
+        </div>
+
+        <!-- Due Today -->
+        <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm flex flex-col justify-between hover:shadow-md transition-all">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-indigo-600 uppercase tracking-wider">Due Today</span>
+                <div class="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
+                    <i class="fas fa-calendar-day text-sm"></i>
+                </div>
+            </div>
+            <div class="mt-4">
+                <span class="text-3xl font-extrabold text-indigo-700">{{ overall_due_today }}</span>
+                <span class="text-xs text-indigo-600/80 block mt-1">Milestone today</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search & Filter Controls Toolbar -->
+    <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm space-y-4">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <!-- Global PID Search Bar with Search Button -->
+            <div class="flex-grow max-w-2xl">
+                <label for="pidSearchInput" class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                    <i class="fas fa-search me-1"></i> Search PID Records
+                </label>
+                <div class="flex gap-2">
+                    <div class="relative flex-grow">
+                        <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                            <i class="fas fa-search text-sm"></i>
+                        </span>
+                        <input type="text" id="pidSearchInput" 
+                               placeholder="Search by PID No, Quotation/Enquiry No, PO, SO, Customer name..."
+                               onkeyup="handleKeySearch(event)"
+                               class="w-full pl-10 pr-4 py-2.5 bg-slate-50 text-slate-800 text-sm border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium">
+                        <button type="button" onclick="clearPidSearch()" id="clearSearchBtn" 
+                                class="hidden absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600">
+                            <i class="fas fa-times-circle"></i>
+                        </button>
+                    </div>
+                    <button type="button" onclick="executePidSearch()" 
+                            class="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-xl shadow-md shadow-blue-500/20 transition-all flex items-center gap-2 shrink-0">
+                        <i class="fas fa-search text-xs"></i>
+                        Search
+                    </button>
+                </div>
+            </div>
+
+            <!-- Table Segregation Selector -->
+            <div class="w-full md:w-72">
+                <label for="tableFilterSelect" class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                    <i class="fas fa-filter me-1"></i> Filter by PID Table
+                </label>
+                <select id="tableFilterSelect" onchange="filterPidTables()" 
+                        class="w-full px-3.5 py-2.5 bg-slate-50 text-slate-800 text-sm border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-semibold">
+                    <option value="ALL">All Segregated PID Tables ({{ tables_pid_data|length }})</option>
+                    {% for tbl_data in tables_pid_data %}
+                        <option value="table-sec-{{ tbl_data.table.id }}">{{ tbl_data.table.name }} ({{ tbl_data.total }} PIDs)</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <!-- Quick Status Filter Chips -->
+        <div class="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
+            <span class="text-xs font-bold text-slate-400 me-2 uppercase tracking-wider">Quick Status Filter:</span>
+            <button onclick="setStatusFilter('ALL')" id="filter-chip-ALL" 
+                    class="status-chip px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 text-white transition-all shadow-sm">
+                All PIDs
+            </button>
+            <button onclick="setStatusFilter('IN_PROGRESS')" id="filter-chip-IN_PROGRESS" 
+                    class="status-chip px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 text-slate-600 hover:bg-amber-50 hover:text-amber-700 transition-all">
+                <i class="fas fa-circle text-[8px] text-amber-500 me-1"></i> In Progress / Pending
+            </button>
+            <button onclick="setStatusFilter('COMPLETED')" id="filter-chip-COMPLETED" 
+                    class="status-chip px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 transition-all">
+                <i class="fas fa-circle text-[8px] text-emerald-500 me-1"></i> Completed
+            </button>
+            <button onclick="setStatusFilter('OVERDUE')" id="filter-chip-OVERDUE" 
+                    class="status-chip px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 text-slate-600 hover:bg-rose-50 hover:text-rose-700 transition-all">
+                <i class="fas fa-circle text-[8px] text-rose-500 me-1"></i> Overdue Attention
+            </button>
+        </div>
+    </div>
+
+    <!-- Segregated PID Tables Section Container -->
+    <div class="space-y-8" id="pidTablesContainer">
+        {% for tbl_data in tables_pid_data %}
+            <div id="table-sec-{{ tbl_data.table.id }}" class="pid-table-card bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden transition-all duration-300">
+                <!-- Table Segregation Header -->
+                <div class="p-5 sm:p-6 bg-slate-50/70 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold shadow-md shadow-blue-500/20">
+                            <i class="fas fa-list-alt text-base"></i>
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <h2 class="text-xl font-bold text-slate-800">{{ tbl_data.table.name }}</h2>
+                                <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                                    {{ tbl_data.table.department.name|default:"General PID" }}
+                                </span>
+                            </div>
+                            <p class="text-slate-500 text-xs mt-0.5">
+                                {{ tbl_data.table.description|default:"Segregated PID Table Workflow Tracker" }}
+                            </p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <div class="text-right text-xs font-semibold text-slate-500 bg-white px-3 py-1.5 rounded-xl border border-slate-200">
+                            <span class="text-slate-800 font-bold me-1">{{ tbl_data.total }}</span> PIDs Total
+                            <span class="text-slate-300 mx-1.5">|</span>
+                            <span class="text-emerald-600 font-bold me-1">{{ tbl_data.completed }}</span> Done
+                        </div>
+                        <a href="{% url 'tables:table_spreadsheet' tbl_data.table.id %}" 
+                           class="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors border border-blue-200/60"
+                           title="Open Spreadsheet View">
+                            <i class="fas fa-external-link-alt text-[10px]"></i>
+                            Open Spreadsheet
+                        </a>
+                    </div>
+                </div>
+
+                <!-- PID Table Details Content -->
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse pid-data-table">
+                        <thead>
+                            <tr class="bg-slate-100/70 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                                <th class="py-3.5 px-4">PID No / Details</th>
+                                <th class="py-3.5 px-4">Enquiry / Quotation No</th>
+                                <th class="py-3.5 px-4">Customer Name</th>
+                                <th class="py-3.5 px-4">Current & Last Status</th>
+                                <th class="py-3.5 px-4">PO & SO Numbers</th>
+                                <th class="py-3.5 px-4">Due Date (Customer)</th>
+                                <th class="py-3.5 px-4">Due Date (Flow Force)</th>
+                                <th class="py-3.5 px-4 text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                            {% for item in tbl_data.pids %}
+                                <tr class="pid-row hover:bg-slate-50/80 transition-colors"
+                                    data-pid="{{ item.pid }}"
+                                    data-newpid="{{ item.new_pid }}"
+                                    data-quotation="{{ item.quotation_no }}"
+                                    data-customer="{{ item.customer_name }}"
+                                    data-po="{{ item.po_number }}"
+                                    data-so="{{ item.so_number }}"
+                                    data-status="{{ item.current_status }}"
+                                    data-overdue="{% if item.is_overdue %}true{% else %}false{% endif %}">
+                                    
+                                    <!-- PID No / Details -->
+                                    <td class="py-3.5 px-4">
+                                        <div class="font-bold text-slate-900 text-sm flex items-center gap-1.5">
+                                            <i class="fas fa-hashtag text-[10px] text-blue-500"></i>
+                                            <span>{{ item.pid }}</span>
+                                        </div>
+                                        {% if item.new_pid and item.new_pid != item.pid %}
+                                            <div class="text-[11px] text-slate-500 mt-0.5">
+                                                New PID: <span class="font-semibold text-slate-700">{{ item.new_pid }}</span>
+                                            </div>
+                                        {% endif %}
+                                        {% if item.project %}
+                                            <div class="text-[11px] text-slate-400 truncate max-w-[180px]" title="{{ item.project }}">
+                                                Proj: {{ item.project }}
+                                            </div>
+                                        {% endif %}
+                                    </td>
+
+                                    <!-- Enquiry / Quotation No -->
+                                    <td class="py-3.5 px-4">
+                                        <span class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200">
+                                            {{ item.quotation_no }}
+                                        </span>
+                                    </td>
+
+                                    <!-- Customer Name -->
+                                    <td class="py-3.5 px-4">
+                                        <div class="font-semibold text-slate-800 truncate max-w-[160px]" title="{{ item.customer_name }}">
+                                            {{ item.customer_name }}
+                                        </div>
+                                    </td>
+
+                                    <!-- Current & Last Status -->
+                                    <td class="py-3.5 px-4 space-y-1">
+                                        <div>
+                                            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider me-1">Current:</span>
+                                            {% if item.current_status == "COMPLETED" or item.current_status == "APPROVED" %}
+                                                <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                                    <i class="fas fa-check-circle text-[10px]"></i> Completed
+                                                </span>
+                                            {% elif item.is_overdue %}
+                                                <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200 animate-pulse">
+                                                    <i class="fas fa-exclamation-triangle text-[10px]"></i> Overdue ({{ item.current_status }})
+                                                </span>
+                                            {% elif item.current_status == "IN_PROGRESS" %}
+                                                <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                                                    <i class="fas fa-sync fa-spin text-[10px]"></i> In Progress
+                                                </span>
+                                            {% elif item.current_status == "READY_FOR_REVIEW" %}
+                                                <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
+                                                    <i class="fas fa-glasses text-[10px]"></i> Ready for Review
+                                                </span>
+                                            {% else %}
+                                                <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                                                    <i class="fas fa-clock text-[10px]"></i> {{ item.current_status }}
+                                                </span>
+                                            {% endif %}
+                                        </div>
+                                        <div class="text-[11px] text-slate-500">
+                                            <span class="text-slate-400">Last Status:</span> 
+                                            <span class="font-semibold text-slate-600">{{ item.last_status }}</span>
+                                        </div>
+                                    </td>
+
+                                    <!-- PO & SO Numbers -->
+                                    <td class="py-3.5 px-4 space-y-0.5">
+                                        <div class="text-xs">
+                                            <span class="text-slate-400 text-[10px] font-bold uppercase">PO:</span> 
+                                            <span class="font-semibold text-slate-800">{{ item.po_number }}</span>
+                                        </div>
+                                        <div class="text-xs">
+                                            <span class="text-slate-400 text-[10px] font-bold uppercase">SO:</span> 
+                                            <span class="font-semibold text-blue-700">{{ item.so_number }}</span>
+                                        </div>
+                                    </td>
+
+                                    <!-- Due Date (Customer) -->
+                                    <td class="py-3.5 px-4">
+                                        <span class="inline-flex items-center gap-1 text-slate-700 font-semibold bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200">
+                                            <i class="far fa-calendar-alt text-slate-400 text-[11px]"></i>
+                                            {{ item.due_date_customer }}
+                                        </span>
+                                    </td>
+
+                                    <!-- Due Date (Flow Force) -->
+                                    <td class="py-3.5 px-4">
+                                        {% if item.is_overdue %}
+                                            <span class="inline-flex items-center gap-1 text-rose-700 font-bold bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-200">
+                                                <i class="fas fa-calendar-times text-rose-500 text-[11px]"></i>
+                                                {{ item.due_date_flow_force }}
+                                            </span>
+                                        {% elif item.is_due_today %}
+                                            <span class="inline-flex items-center gap-1 text-indigo-700 font-bold bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-200">
+                                                <i class="fas fa-bell text-indigo-500 text-[11px]"></i>
+                                                {{ item.due_date_flow_force }} (Today)
+                                            </span>
+                                        {% else %}
+                                            <span class="inline-flex items-center gap-1 text-slate-700 font-semibold bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200">
+                                                <i class="far fa-calendar-check text-slate-400 text-[11px]"></i>
+                                                {{ item.due_date_flow_force }}
+                                            </span>
+                                        {% endif %}
+                                    </td>
+
+                                    <!-- Action Link -->
+                                    <td class="py-3.5 px-4 text-right">
+                                        <a href="{% url 'tables:table_spreadsheet' tbl_data.table.id %}?row={{ item.row_id }}" 
+                                           class="inline-flex items-center justify-center p-2 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                                           title="Jump to Row in Spreadsheet">
+                                            <i class="fas fa-external-link-alt text-sm"></i>
+                                        </a>
+                                    </td>
+                                </tr>
+                            {% empty %}
+                                <tr>
+                                    <td colspan="8" class="py-8 text-center text-slate-400 italic">
+                                        No PID records found in this table.
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        {% empty %}
+            <!-- Overall Empty State -->
+            <div class="bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-sm max-w-xl mx-auto">
+                <div class="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl shadow-inner">
+                    <i class="fas fa-layer-group"></i>
+                </div>
+                <h3 class="text-xl font-bold text-slate-800">No PID Tables Accessible</h3>
+                <p class="text-slate-500 text-sm mt-2">
+                    No active tables configured with job type <strong>LIST_PID</strong> were found in your accessible tables.
+                </p>
+                {% if user.role in "SUPER_ADMIN,ADMIN" %}
+                    <a href="{% url 'tables:table_create' %}" class="inline-flex items-center gap-2 px-5 py-2.5 mt-6 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-md transition-all">
+                        <i class="fas fa-plus"></i> Create LIST_PID Table
+                    </a>
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+
+    <!-- No Search Results Found Banner (Hidden by default) -->
+    <div id="noSearchResults" class="hidden bg-white rounded-2xl border border-slate-200 p-10 text-center shadow-sm">
+        <i class="fas fa-search text-4xl text-slate-300 mb-3 block"></i>
+        <h3 class="text-lg font-bold text-slate-800">No Matching PID Records</h3>
+        <p class="text-slate-500 text-sm mt-1">Try adjusting your search keywords or status filter.</p>
+        <button onclick="clearPidSearch()" class="mt-4 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl transition-all">
+            Clear Search Filter
+        </button>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let activeStatusFilter = 'ALL';
+
+    function executePidSearch() {
+        const query = document.getElementById('pidSearchInput').value.toLowerCase().trim();
+        const clearBtn = document.getElementById('clearSearchBtn');
+        
+        if (query.length > 0) {
+            clearBtn.classList.remove('hidden');
+        } else {
+            clearBtn.classList.add('hidden');
+        }
+
+        applyFilters();
+    }
+
+    function handleKeySearch(event) {
+        if (event.key === 'Enter') {
+            executePidSearch();
+        } else {
+            executePidSearch(); // Real-time as user types
+        }
+    }
+
+    function clearPidSearch() {
+        document.getElementById('pidSearchInput').value = '';
+        document.getElementById('clearSearchBtn').classList.add('hidden');
+        applyFilters();
+    }
+
+    function setStatusFilter(status) {
+        activeStatusFilter = status;
+        document.querySelectorAll('.status-chip').forEach(btn => {
+            btn.className = 'status-chip px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all';
+        });
+        const activeChip = document.getElementById('filter-chip-' + status);
+        if (activeChip) {
+            activeChip.className = 'status-chip px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 text-white transition-all shadow-sm';
+        }
+        applyFilters();
+    }
+
+    function filterPidTables() {
+        const selectedSec = document.getElementById('tableFilterSelect').value;
+        const allSecs = document.querySelectorAll('.pid-table-card');
+        
+        allSecs.forEach(sec => {
+            if (selectedSec === 'ALL' || sec.id === selectedSec) {
+                sec.style.display = 'block';
+            } else {
+                sec.style.display = 'none';
+            }
+        });
+        applyFilters();
+    }
+
+    function applyFilters() {
+        const query = document.getElementById('pidSearchInput').value.toLowerCase().trim();
+        const selectedSec = document.getElementById('tableFilterSelect').value;
+        const rows = document.querySelectorAll('.pid-row');
+        let totalVisibleRows = 0;
+
+        rows.forEach(row => {
+            const pidCard = row.closest('.pid-table-card');
+            const cardVisible = (selectedSec === 'ALL' || pidCard.id === selectedSec);
+
+            if (!cardVisible) {
+                row.style.display = 'none';
+                return;
+            }
+
+            const pid = (row.dataset.pid || '').toLowerCase();
+            const newpid = (row.dataset.newpid || '').toLowerCase();
+            const quotation = (row.dataset.quotation || '').toLowerCase();
+            const customer = (row.dataset.customer || '').toLowerCase();
+            const po = (row.dataset.po || '').toLowerCase();
+            const so = (row.dataset.so || '').toLowerCase();
+            const status = (row.dataset.status || '').toLowerCase();
+            const isOverdue = row.dataset.overdue === 'true';
+
+            const matchesQuery = !query || 
+                pid.includes(query) || 
+                newpid.includes(query) || 
+                quotation.includes(query) || 
+                customer.includes(query) || 
+                po.includes(query) || 
+                so.includes(query) || 
+                status.includes(query);
+
+            let matchesStatus = true;
+            if (activeStatusFilter === 'COMPLETED') {
+                matchesStatus = (status === 'completed' || status === 'approved');
+            } else if (activeStatusFilter === 'IN_PROGRESS') {
+                matchesStatus = (status !== 'completed' && status !== 'approved');
+            } else if (activeStatusFilter === 'OVERDUE') {
+                matchesStatus = isOverdue;
+            }
+
+            if (matchesQuery && matchesStatus) {
+                row.style.display = '';
+                totalVisibleRows++;
+            } else {
+                row.style.display = 'none';
+            }
+        });
+
+        // Hide table card if all its rows are hidden
+        document.querySelectorAll('.pid-table-card').forEach(sec => {
+            if (selectedSec !== 'ALL' && sec.id !== selectedSec) {
+                sec.style.display = 'none';
+                return;
+            }
+            const visibleRowsInSec = sec.querySelectorAll('.pid-row[style=""]').length;
+            if (visibleRowsInSec === 0 && (query || activeStatusFilter !== 'ALL')) {
+                sec.style.display = 'none';
+            } else if (selectedSec === 'ALL' || sec.id === selectedSec) {
+                sec.style.display = 'block';
+            }
+        });
+
+        const noResultsBanner = document.getElementById('noSearchResults');
+        if (totalVisibleRows === 0 && rows.length > 0) {
+            noResultsBanner.classList.remove('hidden');
+        } else {
+            noResultsBanner.classList.add('hidden');
+        }
+    }
+</script>
+{% endblock %}

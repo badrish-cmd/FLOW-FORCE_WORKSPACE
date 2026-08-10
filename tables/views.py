@@ -2211,3 +2211,135 @@ def tables_analytics_dashboard(request):
     )
 
 
+@login_required
+def pid_dashboard_view(request):
+    from tables.models import Table, Row, CellValue
+    from tables.permissions import get_accessible_tables
+    from django.utils import timezone
+    from datetime import datetime
+
+    today = timezone.localdate()
+
+    if request.user.role in ["SUPER_ADMIN", "ADMIN"]:
+        pid_tables = Table.objects.filter(is_active=True, job_type="LIST_PID").select_related('department').prefetch_related('columns')
+    else:
+        pid_tables = get_accessible_tables(request.user).filter(job_type="LIST_PID").select_related('department').prefetch_related('columns')
+
+    tables_pid_data = []
+    overall_total = 0
+    overall_in_progress = 0
+    overall_completed = 0
+    overall_overdue = 0
+    overall_due_today = 0
+
+    for table in pid_tables:
+        columns = list(table.columns.all())
+        col_map = {col.id: col.name.upper() for col in columns}
+
+        rows = Row.objects.filter(table=table, is_archived=False).select_related('created_by', 'task').prefetch_related('cells__column')
+
+        pids = []
+        tbl_total = 0
+        tbl_in_progress = 0
+        tbl_completed = 0
+        tbl_overdue = 0
+        tbl_due_today = 0
+
+        for r in rows:
+            cells = {c.column.name.upper(): (c.value if c.value is not None else "") for c in r.cells.all()}
+
+            pid_val = str(cells.get("PID") or cells.get("NEW_PID_NO") or cells.get("NEW PID NO") or f"PID-{r.id}").strip()
+            new_pid_val = str(cells.get("NEW_PID_NO") or cells.get("NEW PID NO") or "").strip()
+            quotation_val = str(cells.get("ENQUIRY_NO/QUOTATION_NO") or cells.get("QUOTATION_NO") or cells.get("ENQUIRY_NO") or cells.get("QUOTATION NO") or "-").strip()
+            po_val = str(cells.get("PO") or cells.get("PO_NO") or cells.get("PURCHASE ORDER") or "-").strip()
+            so_val = str(cells.get("SALES_ORDER") or cells.get("SO") or cells.get("SALES ORDER") or "-").strip()
+            customer_val = str(cells.get("COMPANY_NAME") or cells.get("CUSTOMER_NAME") or cells.get("CUSTOMER") or "-").strip()
+            due_date_cust = str(cells.get("DUE_DATE_CUSTOMER") or cells.get("DUE_DATE_CUST") or "-").strip()
+            due_date_ff = str(cells.get("DUE_DATE_FLOW_FORCE") or cells.get("DUE_DATE_FF") or cells.get("DUE_DATE") or "-").strip()
+            status_cell = str(cells.get("STATUS") or cells.get("CURRENT_STATUS") or "").strip()
+            desc_val = str(cells.get("DESCRIPTION") or "").strip()
+            qty_val = str(cells.get("QTY") or "").strip()
+            project_val = str(cells.get("PROJECT") or "").strip()
+
+            task_obj = getattr(r, 'task', None)
+            current_status = status_cell or (task_obj.status if task_obj else "PENDING")
+            last_status = task_obj.status if task_obj else (status_cell or "PENDING")
+
+            is_overdue = False
+            is_due_today = False
+
+            target_date = None
+            if task_obj and task_obj.due_date:
+                target_date = task_obj.due_date
+            elif due_date_ff and due_date_ff != "-":
+                try:
+                    target_date = datetime.strptime(due_date_ff, "%Y-%m-%d").date()
+                except Exception:
+                    pass
+
+            if target_date:
+                if target_date < today and current_status not in ["COMPLETED", "APPROVED"]:
+                    is_overdue = True
+                elif target_date == today:
+                    is_due_today = True
+
+            tbl_total += 1
+            if current_status in ["COMPLETED", "APPROVED"]:
+                tbl_completed += 1
+            else:
+                tbl_in_progress += 1
+                if is_overdue:
+                    tbl_overdue += 1
+
+            if is_due_today:
+                tbl_due_today += 1
+
+            pids.append({
+                "row_id": r.id,
+                "pid": pid_val,
+                "new_pid": new_pid_val,
+                "quotation_no": quotation_val,
+                "po_number": po_val,
+                "so_number": so_val,
+                "customer_name": customer_val,
+                "due_date_customer": due_date_cust,
+                "due_date_flow_force": due_date_ff,
+                "current_status": current_status,
+                "last_status": last_status,
+                "description": desc_val,
+                "qty": qty_val,
+                "project": project_val,
+                "is_overdue": is_overdue,
+                "is_due_today": is_due_today,
+                "created_at": r.created_at,
+            })
+
+        overall_total += tbl_total
+        overall_in_progress += tbl_in_progress
+        overall_completed += tbl_completed
+        overall_overdue += tbl_overdue
+        overall_due_today += tbl_due_today
+
+        tables_pid_data.append({
+            "table": table,
+            "pids": pids,
+            "total": tbl_total,
+            "in_progress": tbl_in_progress,
+            "completed": tbl_completed,
+            "overdue": tbl_overdue,
+            "due_today": tbl_due_today,
+        })
+
+    context = {
+        "tables_pid_data": tables_pid_data,
+        "overall_total": overall_total,
+        "overall_in_progress": overall_in_progress,
+        "overall_completed": overall_completed,
+        "overall_overdue": overall_overdue,
+        "overall_due_today": overall_due_today,
+    }
+
+    return render(request, "tables/pid_dashboard.html", context)
+
+
+

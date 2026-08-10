@@ -1251,4 +1251,43 @@ class TablesTestCase(TestCase):
         parsed = view.safe_parse_date("45443")
         self.assertEqual(parsed, datetime.date(2024, 5, 31))
 
+    def test_pid_dashboard_view(self):
+        """Test PID Executive Dashboard view renders LIST_PID table details correctly."""
+        from django.test import Client
+        client = Client()
+        client.force_login(self.admin)
+
+        pid_table = Table.objects.create(name="Singapore PID Master", created_by=self.admin, job_type="LIST_PID")
+        TableAccess.objects.create(table=pid_table, user=self.admin, access_level="ADMIN")
+
+        r1 = Row.objects.create(table=pid_table, created_by=self.admin)
+        col_pid = pid_table.columns.get(name="PID")
+        col_enq = pid_table.columns.get(name="ENQUIRY_NO/QUOTATION_NO")
+        col_po = pid_table.columns.get(name="PO")
+        col_so = pid_table.columns.get(name="SALES_ORDER")
+        col_cust = pid_table.columns.get(name="COMPANY_NAME")
+        col_due_cust = pid_table.columns.get(name="DUE_DATE_CUSTOMER")
+        col_due_ff = pid_table.columns.get(name="DUE_DATE_FLOW_FORCE")
+        col_status = pid_table.columns.get(name="STATUS")
+
+        CellValue.objects.create(row=r1, column=col_pid, value="PID-9001", updated_by=self.admin)
+        CellValue.objects.create(row=r1, column=col_enq, value="QUO-2026-001", updated_by=self.admin)
+        CellValue.objects.create(row=r1, column=col_po, value="PO-778899", updated_by=self.admin)
+        CellValue.objects.create(row=r1, column=col_so, value="SO-112233", updated_by=self.admin)
+        CellValue.objects.create(row=r1, column=col_cust, value="Acme Corp", updated_by=self.admin)
+        CellValue.objects.create(row=r1, column=col_due_cust, value="2026-09-15", updated_by=self.admin)
+        CellValue.objects.create(row=r1, column=col_due_ff, value="2026-09-01", updated_by=self.admin)
+        CellValue.objects.create(row=r1, column=col_status, value="IN_PROGRESS", updated_by=self.admin)
+
+        response = client.get("/tables/pid-dashboard/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "PID Executive Dashboard")
+        self.assertContains(response, "Singapore PID Master")
+        self.assertContains(response, "PID-9001")
+        self.assertContains(response, "QUO-2026-001")
+        self.assertContains(response, "PO-778899")
+        self.assertContains(response, "SO-112233")
+        self.assertContains(response, "Acme Corp")
+
+
 

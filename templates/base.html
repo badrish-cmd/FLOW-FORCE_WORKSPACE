@@ -88,6 +88,12 @@
                                     <span>Analytics</span>
                                 </a>
                             </li>
+                            <li>
+                                <a href="{% url 'tables:pid_dashboard' %}" class="nav-link {% if request.resolver_match.view_name == 'tables:pid_dashboard' %}active{% endif %}">
+                                    <i class="fas fa-layer-group"></i>
+                                    <span>PID Dashboard</span>
+                                </a>
+                            </li>
                         </ul>
                     </div>
 
