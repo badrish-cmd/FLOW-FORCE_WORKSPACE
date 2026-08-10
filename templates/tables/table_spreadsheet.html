@@ -978,7 +978,7 @@
 
                 <!-- Google Sheets Tab content -->
                 <div x-show="importTab === 'google'" class="space-y-4">
-                    <p class="text-xs text-gray-500">Ensure the Google Sheet is shared with **"Anyone with the link can view"**. Column structure must match exactly. Header must start at row 12 and data at row 13.</p>
+                    <p class="text-xs text-gray-500">Ensure the Google Sheet is shared with <strong>"Anyone with the link can view"</strong>. Header and data rows are auto-detected (or specify custom row numbers below if needed).</p>
                     <div>
                         <label class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Google Sheet URL</label>
                         <input type="text" x-model="googleSheetUrl" placeholder="https://docs.google.com/spreadsheets/d/.../edit" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-sm">
@@ -991,14 +991,14 @@
                     <div class="grid grid-cols-2 gap-3">
                         <div>
                             <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Header Row (1-indexed)</label>
-                            <input type="number" x-model="importHeaderRow" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded p-1.5 text-xs focus:ring-green-500" placeholder="Defaults to 12">
+                            <input type="number" x-model="importHeaderRow" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded p-1.5 text-xs focus:ring-green-500" placeholder="Auto-detect (or 1)">
                         </div>
                         <div>
                             <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Data Start Row (1-indexed)</label>
-                            <input type="number" x-model="importDataRow" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded p-1.5 text-xs focus:ring-green-500" placeholder="Defaults to 13">
+                            <input type="number" x-model="importDataRow" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded p-1.5 text-xs focus:ring-green-500" placeholder="Auto-detect (or 2)">
                         </div>
                     </div>
-                    <p class="text-[10px] text-gray-400">Specifying these overrides the dynamic header auto-detection and reads data exactly from these rows.</p>
+                    <p class="text-[10px] text-gray-400">Leave blank to auto-detect header and data rows. Specify row numbers only if your sheet has custom header positions (e.g. Row 12).</p>
                 </div>
 
                 <div class="flex justify-end gap-3 mt-6">
@@ -1359,8 +1359,8 @@
              importTab: 'csv',
              googleSheetUrl: '',
              isImporting: false,
-             importHeaderRow: 12,
-             importDataRow: 13,
+             importHeaderRow: '',
+             importDataRow: '',
 
              // Drag and Fill State
              isDraggingFill: false,
@@ -2589,6 +2589,8 @@ comments: [],
                 this.importTab = 'csv';
                 this.googleSheetUrl = '';
                 this.isImporting = false;
+                this.importHeaderRow = '';
+                this.importDataRow = '';
             },
 
             uploadCSV() {

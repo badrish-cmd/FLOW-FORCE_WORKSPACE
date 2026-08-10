@@ -1183,3 +1183,72 @@ class TablesTestCase(TestCase):
         sys_col = table_other.columns.first()
         self.assertEqual(get_column_access_level(emp, sys_col), "EDITABLE")
 
+    def test_import_standard_csv_no_metadata(self):
+        """Test importing standard CSV starting on row 1 without metadata lines."""
+        from tables.views import TableViewSet
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        factory = APIRequestFactory()
+
+        table = Table.objects.create(name="Standard CSV Table", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+
+        csv_content = (
+            "Task Name,Due Date,Priority,Status\n"
+            "Deploy Web App,2026-09-01,HIGH,PENDING\n"
+            "Update Documentation,2026-09-05,MEDIUM,PENDING\n"
+        )
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        csv_file = SimpleUploadedFile("standard.csv", csv_content.encode("utf-8"), content_type="text/csv")
+
+        view = TableViewSet.as_view({'post': 'import_csv'})
+        request = factory.post(f"/tables/api/tables/{table.id}/import-csv/", {"file": csv_file}, format="multipart")
+        force_authenticate(request, user=self.admin)
+
+        response = view(request, pk=table.id)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(Row.objects.filter(table=table).count(), 2)
+
+        tasks = list(Task.objects.filter(row__table=table).order_by('id'))
+        self.assertEqual(len(tasks), 2)
+        self.assertEqual(tasks[0].task_name, "Deploy Web App")
+        self.assertEqual(tasks[1].task_name, "Update Documentation")
+
+    def test_import_csv_without_s_no_and_missing_due_date(self):
+        """Test importing CSV without S_NO column and with empty due date."""
+        from tables.views import TableViewSet
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        factory = APIRequestFactory()
+
+        table = Table.objects.create(name="No SNO Table", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+
+        csv_content = (
+            "Task Name,Due Date,Priority\n"
+            "Task Without Date,,LOW\n"
+        )
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        csv_file = SimpleUploadedFile("no_sno.csv", csv_content.encode("utf-8"), content_type="text/csv")
+
+        view = TableViewSet.as_view({'post': 'import_csv'})
+        request = factory.post(f"/tables/api/tables/{table.id}/import-csv/", {"file": csv_file}, format="multipart")
+        force_authenticate(request, user=self.admin)
+
+        response = view(request, pk=table.id)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(Row.objects.filter(table=table).count(), 1)
+
+        task = Task.objects.filter(row__table=table).first()
+        self.assertIsNotNone(task)
+        self.assertEqual(task.task_name, "Task Without Date")
+        self.assertIsNone(task.due_date)
+
+    def test_import_csv_excel_serial_date(self):
+        """Test safe_parse_date with Excel serial date numbers."""
+        from tables.views import TableViewSet
+        view = TableViewSet()
+        import datetime
+        # Excel serial 45443 is 2024-05-31
+        parsed = view.safe_parse_date("45443")
+        self.assertEqual(parsed, datetime.date(2024, 5, 31))
+
+

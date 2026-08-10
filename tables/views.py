@@ -283,7 +283,7 @@ class TableViewSet(viewsets.ModelViewSet):
         return Response({"message": f"Successfully sent escalation emails to {sent_count} recipients"}, status=status.HTTP_200_OK)
 
     def safe_parse_date(self, val):
-        if not val:
+        if val is None or val == "":
             return None
         import datetime as dt_mod
         if isinstance(val, (datetime, dt_mod.date)):
@@ -292,11 +292,22 @@ class TableViewSet(viewsets.ModelViewSet):
         val_str = str(val).strip()
         if not val_str:
             return None
-        if val_str.isdigit():
-            return None
+
+        # Check for Excel serial date numbers (e.g. 45443 or 45443.0) or 8-digit numeric dates
         try:
-            float(val_str)
-            return None
+            val_float = float(val_str)
+            if 10000 <= val_float <= 100000:
+                base_date = dt_mod.date(1899, 12, 30)
+                return base_date + dt_mod.timedelta(days=int(val_float))
+            elif val_str.isdigit() and len(val_str) == 8:
+                try:
+                    return dt_mod.date(int(val_str[:4]), int(val_str[4:6]), int(val_str[6:8]))
+                except ValueError:
+                    pass
+                try:
+                    return dt_mod.date(int(val_str[4:8]), int(val_str[2:4]), int(val_str[:2]))
+                except ValueError:
+                    pass
         except ValueError:
             pass
 
@@ -309,12 +320,24 @@ class TableViewSet(viewsets.ModelViewSet):
         except Exception:
             pass
 
-        # Try dateutil parser
+        # Try dateutil parser with dayfirst=True and dayfirst=False
         from dateutil import parser as du_parser
         try:
-            return du_parser.parse(val_str).date()
+            return du_parser.parse(val_str, dayfirst=True).date()
         except Exception:
             pass
+
+        try:
+            return du_parser.parse(val_str, dayfirst=False).date()
+        except Exception:
+            pass
+
+        # Try explicit format strptime
+        for fmt in ("%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d", "%d-%m-%Y", "%Y-%m-%d", "%d.%m.%Y", "%d %b %Y", "%d %B %Y"):
+            try:
+                return dt_mod.datetime.strptime(val_str, fmt).date()
+            except ValueError:
+                pass
 
         return None
 
@@ -330,6 +353,8 @@ class TableViewSet(viewsets.ModelViewSet):
         is_sales = table.job_type == "SALES"
         is_list_pid = table.job_type == "LIST_PID"
         is_personal = table.job_type == "PERSONAL"
+
+        table_col_names_upper = {c.name.strip().upper() for c in table.columns.all()}
         
         if header_row is not None and data_row is not None:
             try:
@@ -339,33 +364,48 @@ class TableViewSet(viewsets.ModelViewSet):
             except IndexError:
                 return None, f"Specified header row ({header_row}) or data row ({data_row}) is out of bounds."
         else:
-            for idx, line in enumerate(lines):
-                tokens = [t.strip().upper() for t in line.split(",")]
-                # Check if this line looks like our header row
-                has_s_no = any(t in ["S_NO", "S.NO", "S. NO.", "SL_NO", "SL.NO", "SL. NO.", "S NO", "SL NO"] for t in tokens)
+            # Scan lines to find a header candidate
+            for idx, line in enumerate(lines[:30]):
+                if not line.strip():
+                    continue
+                tokens = [t.strip().upper() for t in line.replace(";", ",").replace("\t", ",").split(",")]
+                tokens = [t for t in tokens if t]
+                if not tokens:
+                    continue
+
+                has_s_no = any(t in ["S_NO", "S.NO", "S. NO.", "SL_NO", "SL.NO", "SL. NO.", "S NO", "SL NO", "SR_NO", "SR.NO"] for t in tokens)
                 if is_sales:
                     has_task = any("CUSTOMER" in t or "CLIENT" in t or "TASK" in t for t in tokens)
                     has_due = any("FOLLOW" in t or "UP" in t or "DUE" in t for t in tokens)
                 elif is_list_pid:
-                    has_task = any("ENQUIRY" in t or "PID" in t or "TASK" in t for t in tokens)
+                    has_task = any("ENQUIRY" in t or "PID" in t or "TASK" in t or "QUOTATION" in t for t in tokens)
                     has_due = any("FLOW" in t or "FORCE" in t or "CUSTOMER" in t or "DUE" in t for t in tokens)
                 else:
-                    has_task = any("TASK" in t for t in tokens)
-                    has_due = any("DUE" in t for t in tokens)
-                if has_s_no and has_task and has_due:
+                    has_task = any("TASK" in t or "NAME" in t or "TITLE" in t or "SUBJECT" in t or "ITEM" in t for t in tokens)
+                    has_due = any("DUE" in t or "DATE" in t or "FOLLOW" in t for t in tokens)
+
+                col_match_count = sum(1 for t in tokens if t in table_col_names_upper or t.replace(" ", "_") in table_col_names_upper)
+
+                if (has_s_no and (has_task or has_due)) or (has_task and has_due) or col_match_count >= 2:
                     header_idx = idx
                     break
 
             if header_idx != -1:
                 lines_to_parse = lines[header_idx:]
             else:
-                if len(lines) >= 12:
-                    lines_to_parse = lines[11:]
-                else:
-                    lines_to_parse = lines
+                # Default to line 0 (Row 1 is header) if auto-detection finds no specific line
+                lines_to_parse = lines
+
+        # Detect delimiter (comma, semicolon, tab)
+        sample_header = lines_to_parse[0] if lines_to_parse else ""
+        delimiter = ","
+        if ";" in sample_header and "," not in sample_header:
+            delimiter = ";"
+        elif "\t" in sample_header and "," not in sample_header:
+            delimiter = "\t"
 
         io_string = io.StringIO("\n".join(lines_to_parse))
-        reader = csv.DictReader(io_string)
+        reader = csv.DictReader(io_string, delimiter=delimiter)
 
         if not reader.fieldnames:
             return None, "Import file is empty or invalid"
@@ -382,14 +422,16 @@ class TableViewSet(viewsets.ModelViewSet):
             
             # Map standard column name synonyms
             if is_sales:
-                if h in ["TASK_NAME", "TASKNAME", "TASK", "CUSTOMER_NAME", "CUSTOMERNAME", "CUSTOMER", "CLIENT_NAME", "CLIENTNAME", "CLIENT"]:
+                if h in ["TASK_NAME", "TASKNAME", "TASK", "CUSTOMER_NAME", "CUSTOMERNAME", "CUSTOMER", "CLIENT_NAME", "CLIENTNAME", "CLIENT", "NAME", "COMPANY"]:
                     return "CUSTOMER_NAME"
-                if h in ["DUE_DATE", "DUEDATE", "FOLLOW_UP_DATE", "FOLLOWUPDATE", "FOLLOW_UP"]:
+                if h in ["DUE_DATE", "DUEDATE", "FOLLOW_UP_DATE", "FOLLOWUPDATE", "FOLLOW_UP", "FOLLOWUP", "DATE"]:
                     return "FOLLOW_UP_DATE"
             elif is_list_pid:
                 if h in ["ENQUIRY_NO", "ENQUIRYNO", "ENQUIRY", "ENQUIRIES", "TASK_NAME", "TASKNAME", "TASK", "CUSTOMER_NAME", "ENQUIRY_NO_QUOTATION_NO", "ENQUIRY_QUOTATION_NO", "ENQUIRY_NO_QUOTATION", "QUOTATION_NO", "QUOTATION", "QUOTATION_NUMBER", "ENQUIRY_NUMBER"]:
                     return "ENQUIRY_NO_QUOTATION_NO"
-                if h in ["DUE_DATE_FLOW_FORCE", "FLOW_FORCE_DUE_DATE", "FLOW_FORCE", "DUE_DATE", "FOLLOW_UP_DATE"]:
+                if h in ["PID", "PID_NO", "PID_NUMBER"]:
+                    return "PID"
+                if h in ["DUE_DATE_FLOW_FORCE", "FLOW_FORCE_DUE_DATE", "FLOW_FORCE", "DUE_DATE", "FOLLOW_UP_DATE", "DUE", "DEADLINE"]:
                     return "DUE_DATE_FLOW_FORCE"
                 if h in ["NEW_PID_NO", "NEWPIDNO", "NEW_PID"]:
                     return "NEW_PID_NO"
@@ -402,15 +444,15 @@ class TableViewSet(viewsets.ModelViewSet):
                 if h in ["QTY", "QUANTITY"]:
                     return "QTY"
             else:
-                if h in ["TASK_NAME", "TASKNAME", "TASK", "CUSTOMER_NAME", "CUSTOMERNAME", "CUSTOMER", "CLIENT_NAME", "CLIENTNAME", "CLIENT"]:
+                if h in ["TASK_NAME", "TASKNAME", "TASK", "CUSTOMER_NAME", "CUSTOMERNAME", "CUSTOMER", "CLIENT_NAME", "CLIENTNAME", "CLIENT", "NAME", "TITLE", "SUBJECT", "DESCRIPTION", "PARTICULARS", "ITEM", "SUMMARY", "JOB", "JOB_NAME", "WORK"]:
                     return "TASK_NAME"
-                if h in ["DUE_DATE", "DUEDATE", "FOLLOW_UP_DATE", "FOLLOWUPDATE", "FOLLOW_UP"]:
+                if h in ["DUE_DATE", "DUEDATE", "FOLLOW_UP_DATE", "FOLLOWUPDATE", "FOLLOW_UP", "FOLLOWUP", "TARGET_DATE", "DEADLINE", "DUE", "DATE"]:
                     return "DUE_DATE"
             if h in ["INITIAL_MAIL", "INITIALMAIL"]:
                 return "INITIAL_MAIL"
             if h in ["ALERT_MAIL", "ALERTMAIL"]:
                 return "ALERT_MAIL"
-            if h in ["S_NO", "SNO", "SL_NO", "SLNO", "SERIAL_NO", "SERIALNO", "S_NO_"]:
+            if h in ["S_NO", "SNO", "SL_NO", "SLNO", "SERIAL_NO", "SERIALNO", "S_NO_", "SR_NO", "SRNO", "NO", "SR"]:
                 return "S_NO"
             return h
 
@@ -432,16 +474,14 @@ class TableViewSet(viewsets.ModelViewSet):
             csv_headers.append(normalized)
             header_mapping[name] = normalized
 
-        # Strict validation has been changed to lenient/dynamic mapping as requested.
-        # We only require that the primary task identifier and date columns are present.
+        # Dynamic primary column matching
         if not is_personal:
             required_header = "CUSTOMER_NAME" if is_sales else ("ENQUIRY_NO_QUOTATION_NO" if is_list_pid else "TASK_NAME")
-            required_date = "FOLLOW_UP_DATE" if is_sales else ("DUE_DATE_FLOW_FORCE" if is_list_pid else "DUE_DATE")
-
             if required_header not in csv_headers:
-                return None, f"Required column for task name/customer name/enquiry/quotation no is missing in the CSV sheet headers. Expected one of: {required_header}"
-            if not is_list_pid and required_date not in csv_headers:
-                return None, f"Required column for due date/follow up date is missing in the CSV sheet headers. Expected one of: {required_date}"
+                non_task_sys_cols = {"S_NO", "DATE", "DUE_DATE", "FOLLOW_UP_DATE", "DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER", "INITIAL_MAIL", "ALERT_MAIL"}
+                candidate_primary = [h for h in csv_headers if h not in non_task_sys_cols]
+                if not candidate_primary:
+                    return None, f"Required column for task name/customer name/enquiry/quotation no is missing in the CSV sheet headers. Expected one of: {required_header}"
 
         # Performance Optimizations: pre-map columns, pre-query S_NO base, and setup user cache
         columns_by_name = {c.name: c for c in table.columns.all()}
@@ -465,17 +505,30 @@ class TableViewSet(viewsets.ModelViewSet):
         
         for row_dict in reader:
             normalized_row = {}
+            has_any_value = False
             for original_key, val in row_dict.items():
                 if not original_key:
                     continue
                 normalized_key = header_mapping.get(original_key)
                 if normalized_key:
                     normalized_row[normalized_key] = val
+                    if val is not None and str(val).strip() != "":
+                        has_any_value = True
+
+            # Skip completely empty rows
+            if not has_any_value:
+                continue
 
             if is_list_pid:
-                task_name = normalized_row.get("ENQUIRY_NO_QUOTATION_NO") or normalized_row.get("PID") or "Unnamed"
+                task_name = normalized_row.get("ENQUIRY_NO_QUOTATION_NO") or normalized_row.get("PID")
                 if not task_name:
-                    continue
+                    for k, v in normalized_row.items():
+                        if k not in ["S_NO", "INITIAL_MAIL", "ALERT_MAIL"] and v and str(v).strip():
+                            task_name = str(v).strip()
+                            break
+                if not task_name:
+                    task_name = f"Row {row_import_idx}"
+
                 ff_date_str = normalized_row.get("DUE_DATE_FLOW_FORCE")
                 cust_date_str = normalized_row.get("DUE_DATE_CUSTOMER")
                 ff_date = self.safe_parse_date(ff_date_str) if ff_date_str else None
@@ -504,11 +557,15 @@ class TableViewSet(viewsets.ModelViewSet):
                     task_name = normalized_row.get("TASK_NAME")
                     due_date_str = normalized_row.get("DUE_DATE")
 
-                if not task_name or not due_date_str:
-                    continue
-                due_date = self.safe_parse_date(due_date_str)
-                if not due_date:
-                    continue
+                if not task_name:
+                    for k, v in normalized_row.items():
+                        if k not in ["S_NO", "INITIAL_MAIL", "ALERT_MAIL"] and v and str(v).strip():
+                            task_name = str(v).strip()
+                            break
+                if not task_name:
+                    task_name = f"Row {row_import_idx}"
+
+                due_date = self.safe_parse_date(due_date_str) if due_date_str else None
             
             # Support lowercase/mixed-case options
             priority = "MEDIUM"
@@ -660,11 +717,7 @@ class TableViewSet(viewsets.ModelViewSet):
             system_field_names = temp['system_field_names']
 
             for name, val in cell_values.items():
-                col = None
-                if name in system_field_names:
-                    col = normalized_db_cols.get(name)
-                else:
-                    col = columns_by_name.get(name)
+                col = normalized_db_cols.get(name) or columns_by_name.get(name)
                 if col:
                     cells_to_create.append(
                         CellValue(row=row, column=col, value=val, updated_by=request_user)
