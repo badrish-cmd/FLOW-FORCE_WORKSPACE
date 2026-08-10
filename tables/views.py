@@ -2217,6 +2217,7 @@ def pid_dashboard_view(request):
     from tables.permissions import get_accessible_tables
     from django.utils import timezone
     from datetime import datetime
+    import re
 
     today = timezone.localdate()
 
@@ -2226,15 +2227,24 @@ def pid_dashboard_view(request):
         pid_tables = get_accessible_tables(request.user).filter(job_type="LIST_PID").select_related('department').prefetch_related('columns')
 
     tables_pid_data = []
+    quick_pid_summary = []
+    available_years = set()
     overall_total = 0
     overall_in_progress = 0
     overall_completed = 0
     overall_overdue = 0
     overall_due_today = 0
 
+    def extract_year(date_str, fallback_year):
+        if not date_str or str(date_str).strip() in ["-", "", "None"]:
+            return str(fallback_year)
+        match = re.search(r'\b(20\d\d|19\d\d)\b', str(date_str))
+        if match:
+            return match.group(1)
+        return str(fallback_year)
+
     for table in pid_tables:
         columns = list(table.columns.all())
-        col_map = {col.id: col.name.upper() for col in columns}
 
         rows = Row.objects.filter(table=table, is_archived=False).select_related('created_by', 'task').prefetch_related('cells__column')
 
@@ -2256,14 +2266,23 @@ def pid_dashboard_view(request):
             customer_val = str(cells.get("COMPANY_NAME") or cells.get("CUSTOMER_NAME") or cells.get("CUSTOMER") or "-").strip()
             due_date_cust = str(cells.get("DUE_DATE_CUSTOMER") or cells.get("DUE_DATE_CUST") or "-").strip()
             due_date_ff = str(cells.get("DUE_DATE_FLOW_FORCE") or cells.get("DUE_DATE_FF") or cells.get("DUE_DATE") or "-").strip()
+            date_cell = str(cells.get("DATE") or "").strip()
             status_cell = str(cells.get("STATUS") or cells.get("CURRENT_STATUS") or "").strip()
             desc_val = str(cells.get("DESCRIPTION") or "").strip()
             qty_val = str(cells.get("QTY") or "").strip()
             project_val = str(cells.get("PROJECT") or "").strip()
 
+            fallback_y = r.created_at.year if r.created_at else today.year
+            record_year = extract_year(date_cell, fallback_y)
+            if record_year == str(fallback_y) and (due_date_ff or due_date_cust):
+                record_year = extract_year(due_date_ff or due_date_cust, fallback_y)
+
+            available_years.add(str(record_year))
+
             task_obj = getattr(r, 'task', None)
-            current_status = status_cell or (task_obj.status if task_obj else "PENDING")
-            last_status = task_obj.status if task_obj else (status_cell or "PENDING")
+            exact_status = status_cell if status_cell else (task_obj.status if task_obj else "PENDING")
+            current_status_upper = exact_status.upper()
+            last_status = task_obj.status if task_obj else exact_status
 
             is_overdue = False
             is_due_today = False
@@ -2278,13 +2297,13 @@ def pid_dashboard_view(request):
                     pass
 
             if target_date:
-                if target_date < today and current_status not in ["COMPLETED", "APPROVED"]:
+                if target_date < today and current_status_upper not in ["COMPLETED", "APPROVED"]:
                     is_overdue = True
                 elif target_date == today:
                     is_due_today = True
 
             tbl_total += 1
-            if current_status in ["COMPLETED", "APPROVED"]:
+            if current_status_upper in ["COMPLETED", "APPROVED"]:
                 tbl_completed += 1
             else:
                 tbl_in_progress += 1
@@ -2294,7 +2313,7 @@ def pid_dashboard_view(request):
             if is_due_today:
                 tbl_due_today += 1
 
-            pids.append({
+            pid_entry = {
                 "row_id": r.id,
                 "pid": pid_val,
                 "new_pid": new_pid_val,
@@ -2304,14 +2323,26 @@ def pid_dashboard_view(request):
                 "customer_name": customer_val,
                 "due_date_customer": due_date_cust,
                 "due_date_flow_force": due_date_ff,
-                "current_status": current_status,
+                "current_status": exact_status,
                 "last_status": last_status,
                 "description": desc_val,
                 "qty": qty_val,
                 "project": project_val,
+                "year": str(record_year),
                 "is_overdue": is_overdue,
                 "is_due_today": is_due_today,
                 "created_at": r.created_at,
+            }
+            pids.append(pid_entry)
+
+            quick_pid_summary.append({
+                "row_id": r.id,
+                "pid": pid_val,
+                "status": exact_status,
+                "year": str(record_year),
+                "table_id": table.id,
+                "table_name": table.name,
+                "customer": customer_val,
             })
 
         overall_total += tbl_total
@@ -2330,8 +2361,15 @@ def pid_dashboard_view(request):
             "due_today": tbl_due_today,
         })
 
+    sorted_years = sorted(list(available_years), reverse=True)
+    if "2026" not in sorted_years:
+        sorted_years.insert(0, "2026")
+
     context = {
         "tables_pid_data": tables_pid_data,
+        "quick_pid_summary": quick_pid_summary,
+        "available_years": sorted_years,
+        "selected_year_default": "2026",
         "overall_total": overall_total,
         "overall_in_progress": overall_in_progress,
         "overall_completed": overall_completed,
@@ -2340,6 +2378,7 @@ def pid_dashboard_view(request):
     }
 
     return render(request, "tables/pid_dashboard.html", context)
+
 
 
 

@@ -1277,17 +1277,21 @@ class TablesTestCase(TestCase):
         CellValue.objects.create(row=r1, column=col_cust, value="Acme Corp", updated_by=self.admin)
         CellValue.objects.create(row=r1, column=col_due_cust, value="2026-09-15", updated_by=self.admin)
         CellValue.objects.create(row=r1, column=col_due_ff, value="2026-09-01", updated_by=self.admin)
-        CellValue.objects.create(row=r1, column=col_status, value="IN_PROGRESS", updated_by=self.admin)
+        CellValue.objects.create(row=r1, column=col_status, value="Fabrication In Progress", updated_by=self.admin)
 
         response = client.get("/tables/pid-dashboard/")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "PID Executive Dashboard")
+        self.assertContains(response, "Quick PID Status Summary Index")
         self.assertContains(response, "Singapore PID Master")
         self.assertContains(response, "PID-9001")
         self.assertContains(response, "QUO-2026-001")
         self.assertContains(response, "PO-778899")
         self.assertContains(response, "SO-112233")
         self.assertContains(response, "Acme Corp")
+        self.assertContains(response, "Fabrication In Progress")
+        self.assertContains(response, "Year 2026")
+
 
 
 

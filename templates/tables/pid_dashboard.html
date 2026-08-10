@@ -15,11 +15,13 @@
                     <span class="px-3 py-1 bg-blue-500/20 text-blue-300 border border-blue-400/30 rounded-full text-xs font-semibold uppercase tracking-wider">
                         <i class="fas fa-shield-alt me-1"></i> Management & GM View
                     </span>
-                    <span class="text-xs text-slate-400">Real-time Tracker</span>
+                    <span class="text-xs text-slate-300 bg-white/10 px-2.5 py-1 rounded-full font-bold">
+                        <i class="fas fa-calendar-alt me-1"></i> Year <span id="headerSelectedYear">2026</span>
+                    </span>
                 </div>
                 <h1 class="text-3xl sm:text-4xl font-extrabold tracking-tight mt-2 text-white">PID Executive Dashboard</h1>
                 <p class="text-slate-300 text-sm sm:text-base mt-2 max-w-3xl leading-relaxed">
-                    Comprehensive overview of all PID project tables. Track PID details, Quotation/Enquiry numbers, Current & Last status, PO/SO numbers, and Customer/Flow Force due dates across departments.
+                    Real-time PID project tracker with year-wise segregation, quick PID status index, exact table statuses, quotation numbers, PO/SO details, and customer & Flow Force due dates.
                 </p>
             </div>
             <div class="flex flex-wrap items-center gap-3">
@@ -46,8 +48,8 @@
                 </div>
             </div>
             <div class="mt-4">
-                <span class="text-3xl font-extrabold text-slate-900">{{ overall_total }}</span>
-                <span class="text-xs text-slate-500 block mt-1">Across all PID tables</span>
+                <span class="text-3xl font-extrabold text-slate-900" id="kpiTotalPids">{{ overall_total }}</span>
+                <span class="text-xs text-slate-500 block mt-1">Across PID tables</span>
             </div>
         </div>
 
@@ -60,7 +62,7 @@
                 </div>
             </div>
             <div class="mt-4">
-                <span class="text-3xl font-extrabold text-amber-700">{{ overall_in_progress }}</span>
+                <span class="text-3xl font-extrabold text-amber-700" id="kpiInProgress">{{ overall_in_progress }}</span>
                 <span class="text-xs text-amber-600/80 block mt-1">Active PID workflows</span>
             </div>
         </div>
@@ -74,7 +76,7 @@
                 </div>
             </div>
             <div class="mt-4">
-                <span class="text-3xl font-extrabold text-emerald-700">{{ overall_completed }}</span>
+                <span class="text-3xl font-extrabold text-emerald-700" id="kpiCompleted">{{ overall_completed }}</span>
                 <span class="text-xs text-emerald-600/80 block mt-1">Finalized & Approved</span>
             </div>
         </div>
@@ -88,7 +90,7 @@
                 </div>
             </div>
             <div class="mt-4">
-                <span class="text-3xl font-extrabold text-rose-700">{{ overall_overdue }}</span>
+                <span class="text-3xl font-extrabold text-rose-700" id="kpiOverdue">{{ overall_overdue }}</span>
                 <span class="text-xs text-rose-600/80 block mt-1">Requires GM attention</span>
             </div>
         </div>
@@ -102,17 +104,102 @@
                 </div>
             </div>
             <div class="mt-4">
-                <span class="text-3xl font-extrabold text-indigo-700">{{ overall_due_today }}</span>
+                <span class="text-3xl font-extrabold text-indigo-700" id="kpiDueToday">{{ overall_due_today }}</span>
                 <span class="text-xs text-indigo-600/80 block mt-1">Milestone today</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick PID Status Summary Index Table (Year-Wise, Default 2026) -->
+    <div class="bg-white rounded-2xl border border-slate-200/90 shadow-md overflow-hidden">
+        <div class="p-5 sm:p-6 bg-gradient-to-r from-slate-50 to-blue-50/40 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold shadow">
+                    <i class="fas fa-list text-sm"></i>
+                </div>
+                <div>
+                    <h2 class="text-lg font-bold text-slate-800">Quick PID Status Summary Index</h2>
+                    <p class="text-slate-500 text-xs mt-0.5">Compact PID listing filtered for Year <span class="font-bold text-blue-700 summary-year-label">2026</span>. Click any PID to jump directly to row details.</p>
+                </div>
+            </div>
+            <span class="text-xs font-bold text-blue-700 bg-blue-100/80 px-3 py-1.5 rounded-xl border border-blue-200 shrink-0">
+                <span id="summaryCount">0</span> PIDs Listed
+            </span>
+        </div>
+
+        <div class="p-4 max-h-[280px] overflow-y-auto">
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3" id="quickPidSummaryGrid">
+                {% for item in quick_pid_summary %}
+                    <div class="quick-summary-item p-3 bg-slate-50 hover:bg-blue-50/60 rounded-xl border border-slate-200/70 transition-all cursor-pointer flex items-center justify-between gap-2"
+                         data-year="{{ item.year }}"
+                         data-pid="{{ item.pid }}"
+                         data-status="{{ item.status }}"
+                         data-table="{{ item.table_id }}"
+                         onclick="scrollToPidRow('pid-row-{{ item.row_id }}')">
+                        <div class="truncate">
+                            <div class="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                                <i class="fas fa-hashtag text-[10px] text-blue-500"></i>
+                                <span class="truncate">{{ item.pid }}</span>
+                            </div>
+                            <div class="text-[10px] text-slate-400 truncate mt-0.5" title="{{ item.customer|default:item.table_name }}">
+                                {{ item.customer|default:item.table_name }}
+                            </div>
+                        </div>
+                        <div class="shrink-0 text-right">
+                            <span class="status-badge inline-block px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider" data-status-val="{{ item.status }}">
+                                {{ item.status }}
+                            </span>
+                        </div>
+                    </div>
+                {% empty %}
+                    <div class="col-span-full text-center py-6 text-slate-400 text-xs italic">
+                        No PID records found.
+                    </div>
+                {% endfor %}
+            </div>
+            <div id="quickSummaryEmpty" class="hidden text-center py-6 text-slate-400 text-xs italic">
+                No PID records found for Year <span class="summary-year-label font-bold text-slate-600">2026</span>.
             </div>
         </div>
     </div>
 
     <!-- Search & Filter Controls Toolbar -->
     <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm space-y-4">
-        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <!-- Global PID Search Bar with Search Button -->
-            <div class="flex-grow max-w-2xl">
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+            
+            <!-- Year Selector Dropdown (Default 2026) -->
+            <div class="md:col-span-3">
+                <label for="yearFilterSelect" class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                    <i class="fas fa-calendar-alt me-1 text-blue-600"></i> Select Year (Default: 2026)
+                </label>
+                <select id="yearFilterSelect" onchange="applyFilters()" 
+                        class="w-full px-3.5 py-2.5 bg-blue-50/50 text-blue-900 font-bold text-sm border border-blue-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all shadow-sm">
+                    <option value="2026" selected>Year 2026 (Current)</option>
+                    {% for y in available_years %}
+                        {% if y != "2026" %}
+                            <option value="{{ y }}">Year {{ y }}</option>
+                        {% endif %}
+                    {% endfor %}
+                    <option value="ALL">All Years</option>
+                </select>
+            </div>
+
+            <!-- Table Segregation Selector -->
+            <div class="md:col-span-3">
+                <label for="tableFilterSelect" class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                    <i class="fas fa-filter me-1"></i> Filter by PID Table
+                </label>
+                <select id="tableFilterSelect" onchange="applyFilters()" 
+                        class="w-full px-3.5 py-2.5 bg-slate-50 text-slate-800 text-sm border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-semibold">
+                    <option value="ALL">All Segregated PID Tables ({{ tables_pid_data|length }})</option>
+                    {% for tbl_data in tables_pid_data %}
+                        <option value="table-sec-{{ tbl_data.table.id }}">{{ tbl_data.table.name }} ({{ tbl_data.total }} PIDs)</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Search Bar with Dedicated Search Button -->
+            <div class="md:col-span-6">
                 <label for="pidSearchInput" class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
                     <i class="fas fa-search me-1"></i> Search PID Records
                 </label>
@@ -122,7 +209,7 @@
                             <i class="fas fa-search text-sm"></i>
                         </span>
                         <input type="text" id="pidSearchInput" 
-                               placeholder="Search by PID No, Quotation/Enquiry No, PO, SO, Customer name..."
+                               placeholder="Search by PID No, Quotation No, PO, SO, Customer name..."
                                onkeyup="handleKeySearch(event)"
                                class="w-full pl-10 pr-4 py-2.5 bg-slate-50 text-slate-800 text-sm border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium">
                         <button type="button" onclick="clearPidSearch()" id="clearSearchBtn" 
@@ -130,7 +217,7 @@
                             <i class="fas fa-times-circle"></i>
                         </button>
                     </div>
-                    <button type="button" onclick="executePidSearch()" 
+                    <button type="button" onclick="applyFilters()" 
                             class="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-xl shadow-md shadow-blue-500/20 transition-all flex items-center gap-2 shrink-0">
                         <i class="fas fa-search text-xs"></i>
                         Search
@@ -138,31 +225,18 @@
                 </div>
             </div>
 
-            <!-- Table Segregation Selector -->
-            <div class="w-full md:w-72">
-                <label for="tableFilterSelect" class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-                    <i class="fas fa-filter me-1"></i> Filter by PID Table
-                </label>
-                <select id="tableFilterSelect" onchange="filterPidTables()" 
-                        class="w-full px-3.5 py-2.5 bg-slate-50 text-slate-800 text-sm border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-semibold">
-                    <option value="ALL">All Segregated PID Tables ({{ tables_pid_data|length }})</option>
-                    {% for tbl_data in tables_pid_data %}
-                        <option value="table-sec-{{ tbl_data.table.id }}">{{ tbl_data.table.name }} ({{ tbl_data.total }} PIDs)</option>
-                    {% endfor %}
-                </select>
-            </div>
         </div>
 
         <!-- Quick Status Filter Chips -->
         <div class="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
-            <span class="text-xs font-bold text-slate-400 me-2 uppercase tracking-wider">Quick Status Filter:</span>
+            <span class="text-xs font-bold text-slate-400 me-2 uppercase tracking-wider">Status Filter:</span>
             <button onclick="setStatusFilter('ALL')" id="filter-chip-ALL" 
                     class="status-chip px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 text-white transition-all shadow-sm">
-                All PIDs
+                All Statuses
             </button>
             <button onclick="setStatusFilter('IN_PROGRESS')" id="filter-chip-IN_PROGRESS" 
                     class="status-chip px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 text-slate-600 hover:bg-amber-50 hover:text-amber-700 transition-all">
-                <i class="fas fa-circle text-[8px] text-amber-500 me-1"></i> In Progress / Pending
+                <i class="fas fa-circle text-[8px] text-amber-500 me-1"></i> In Progress / Active
             </button>
             <button onclick="setStatusFilter('COMPLETED')" id="filter-chip-COMPLETED" 
                     class="status-chip px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 transition-all">
@@ -199,9 +273,7 @@
                     </div>
                     <div class="flex items-center gap-3">
                         <div class="text-right text-xs font-semibold text-slate-500 bg-white px-3 py-1.5 rounded-xl border border-slate-200">
-                            <span class="text-slate-800 font-bold me-1">{{ tbl_data.total }}</span> PIDs Total
-                            <span class="text-slate-300 mx-1.5">|</span>
-                            <span class="text-emerald-600 font-bold me-1">{{ tbl_data.completed }}</span> Done
+                            <span class="text-slate-800 font-bold me-1 tbl-visible-count">{{ tbl_data.total }}</span> PIDs Visible
                         </div>
                         <a href="{% url 'tables:table_spreadsheet' tbl_data.table.id %}" 
                            class="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors border border-blue-200/60"
@@ -220,7 +292,7 @@
                                 <th class="py-3.5 px-4">PID No / Details</th>
                                 <th class="py-3.5 px-4">Enquiry / Quotation No</th>
                                 <th class="py-3.5 px-4">Customer Name</th>
-                                <th class="py-3.5 px-4">Current & Last Status</th>
+                                <th class="py-3.5 px-4">Current Status (Exact)</th>
                                 <th class="py-3.5 px-4">PO & SO Numbers</th>
                                 <th class="py-3.5 px-4">Due Date (Customer)</th>
                                 <th class="py-3.5 px-4">Due Date (Flow Force)</th>
@@ -229,7 +301,8 @@
                         </thead>
                         <tbody class="divide-y divide-slate-100 text-xs font-medium text-slate-700">
                             {% for item in tbl_data.pids %}
-                                <tr class="pid-row hover:bg-slate-50/80 transition-colors"
+                                <tr id="pid-row-{{ item.row_id }}" class="pid-row hover:bg-slate-50/80 transition-colors"
+                                    data-year="{{ item.year }}"
                                     data-pid="{{ item.pid }}"
                                     data-newpid="{{ item.new_pid }}"
                                     data-quotation="{{ item.quotation_no }}"
@@ -244,6 +317,7 @@
                                         <div class="font-bold text-slate-900 text-sm flex items-center gap-1.5">
                                             <i class="fas fa-hashtag text-[10px] text-blue-500"></i>
                                             <span>{{ item.pid }}</span>
+                                            <span class="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded me-1">{{ item.year }}</span>
                                         </div>
                                         {% if item.new_pid and item.new_pid != item.pid %}
                                             <div class="text-[11px] text-slate-500 mt-0.5">
@@ -271,36 +345,24 @@
                                         </div>
                                     </td>
 
-                                    <!-- Current & Last Status -->
+                                    <!-- Exact Current Status -->
                                     <td class="py-3.5 px-4 space-y-1">
                                         <div>
-                                            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider me-1">Current:</span>
-                                            {% if item.current_status == "COMPLETED" or item.current_status == "APPROVED" %}
-                                                <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                                    <i class="fas fa-check-circle text-[10px]"></i> Completed
-                                                </span>
-                                            {% elif item.is_overdue %}
-                                                <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200 animate-pulse">
-                                                    <i class="fas fa-exclamation-triangle text-[10px]"></i> Overdue ({{ item.current_status }})
-                                                </span>
-                                            {% elif item.current_status == "IN_PROGRESS" %}
-                                                <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200">
-                                                    <i class="fas fa-sync fa-spin text-[10px]"></i> In Progress
-                                                </span>
-                                            {% elif item.current_status == "READY_FOR_REVIEW" %}
-                                                <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
-                                                    <i class="fas fa-glasses text-[10px]"></i> Ready for Review
-                                                </span>
-                                            {% else %}
-                                                <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                                                    <i class="fas fa-clock text-[10px]"></i> {{ item.current_status }}
+                                            <span class="status-badge inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider border shadow-xs" 
+                                                  data-status-val="{{ item.current_status }}">
+                                                {{ item.current_status }}
+                                            </span>
+                                            {% if item.is_overdue %}
+                                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200 animate-pulse ms-1">
+                                                    <i class="fas fa-exclamation-triangle"></i> Overdue
                                                 </span>
                                             {% endif %}
                                         </div>
-                                        <div class="text-[11px] text-slate-500">
-                                            <span class="text-slate-400">Last Status:</span> 
-                                            <span class="font-semibold text-slate-600">{{ item.last_status }}</span>
-                                        </div>
+                                        {% if item.last_status and item.last_status != item.current_status %}
+                                            <div class="text-[10px] text-slate-400">
+                                                <span>Task Status:</span> <span class="font-semibold text-slate-600">{{ item.last_status }}</span>
+                                            </div>
+                                        {% endif %}
                                     </td>
 
                                     <!-- PO & SO Numbers -->
@@ -382,13 +444,13 @@
         {% endfor %}
     </div>
 
-    <!-- No Search Results Found Banner (Hidden by default) -->
+    <!-- No Search Results Found Banner -->
     <div id="noSearchResults" class="hidden bg-white rounded-2xl border border-slate-200 p-10 text-center shadow-sm">
         <i class="fas fa-search text-4xl text-slate-300 mb-3 block"></i>
         <h3 class="text-lg font-bold text-slate-800">No Matching PID Records</h3>
-        <p class="text-slate-500 text-sm mt-1">Try adjusting your search keywords or status filter.</p>
+        <p class="text-slate-500 text-sm mt-1">No PID records found for Year <span class="summary-year-label font-bold text-slate-700">2026</span> matching your filters.</p>
         <button onclick="clearPidSearch()" class="mt-4 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl transition-all">
-            Clear Search Filter
+            Reset Filters & Search
         </button>
     </div>
 </div>
@@ -399,8 +461,75 @@
 <script>
     let activeStatusFilter = 'ALL';
 
-    function executePidSearch() {
+    document.addEventListener("DOMContentLoaded", function() {
+        colorizeStatusBadges();
+        applyFilters();
+    });
+
+    function colorizeStatusBadges() {
+        document.querySelectorAll('.status-badge').forEach(badge => {
+            const rawVal = (badge.dataset.statusVal || badge.textContent || '').trim().toUpperCase();
+            
+            // Dynamic color logic based on status content
+            if (['COMPLETED', 'APPROVED', 'FINISHED', 'DONE', 'DISPATCHED'].some(s => rawVal.includes(s))) {
+                badge.className = 'status-badge inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300';
+            } else if (['IN_PROGRESS', 'IN PROGRESS', 'FABRICATION', 'PROCESSING', 'ACTIVE', 'WORKING'].some(s => rawVal.includes(s))) {
+                badge.className = 'status-badge inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-blue-100 text-blue-800 border border-blue-300';
+            } else if (['READY_FOR_REVIEW', 'READY FOR REVIEW', 'REVIEW', 'TESTING'].some(s => rawVal.includes(s))) {
+                badge.className = 'status-badge inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-indigo-100 text-indigo-800 border border-indigo-300';
+            } else if (['OVERDUE', 'REJECTED', 'CANCELLED', 'HOLD', 'ON_HOLD'].some(s => rawVal.includes(s))) {
+                badge.className = 'status-badge inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-rose-100 text-rose-800 border border-rose-300';
+            } else {
+                badge.className = 'status-badge inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-amber-100 text-amber-800 border border-amber-300';
+            }
+        });
+    }
+
+    function handleKeySearch(event) {
+        applyFilters();
+    }
+
+    function clearPidSearch() {
+        document.getElementById('pidSearchInput').value = '';
+        document.getElementById('clearSearchBtn').classList.add('hidden');
+        document.getElementById('yearFilterSelect').value = '2026';
+        document.getElementById('tableFilterSelect').value = 'ALL';
+        activeStatusFilter = 'ALL';
+        updateStatusFilterChips();
+        applyFilters();
+    }
+
+    function setStatusFilter(status) {
+        activeStatusFilter = status;
+        updateStatusFilterChips();
+        applyFilters();
+    }
+
+    function updateStatusFilterChips() {
+        document.querySelectorAll('.status-chip').forEach(btn => {
+            btn.className = 'status-chip px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all';
+        });
+        const activeChip = document.getElementById('filter-chip-' + activeStatusFilter);
+        if (activeChip) {
+            activeChip.className = 'status-chip px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 text-white transition-all shadow-sm';
+        }
+    }
+
+    function scrollToPidRow(rowId) {
+        const element = document.getElementById(rowId);
+        if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            element.classList.add('bg-blue-100/80');
+            setTimeout(() => {
+                element.classList.remove('bg-blue-100/80');
+            }, 2500);
+        }
+    }
+
+    function applyFilters() {
         const query = document.getElementById('pidSearchInput').value.toLowerCase().trim();
+        const selectedYear = document.getElementById('yearFilterSelect').value;
+        const selectedSec = document.getElementById('tableFilterSelect').value;
         const clearBtn = document.getElementById('clearSearchBtn');
         
         if (query.length > 0) {
@@ -409,56 +538,20 @@
             clearBtn.classList.add('hidden');
         }
 
-        applyFilters();
-    }
+        // Update header & summary year labels
+        document.querySelectorAll('.summary-year-label').forEach(el => el.textContent = selectedYear);
+        const headerYearEl = document.getElementById('headerSelectedYear');
+        if (headerYearEl) headerYearEl.textContent = selectedYear;
 
-    function handleKeySearch(event) {
-        if (event.key === 'Enter') {
-            executePidSearch();
-        } else {
-            executePidSearch(); // Real-time as user types
-        }
-    }
-
-    function clearPidSearch() {
-        document.getElementById('pidSearchInput').value = '';
-        document.getElementById('clearSearchBtn').classList.add('hidden');
-        applyFilters();
-    }
-
-    function setStatusFilter(status) {
-        activeStatusFilter = status;
-        document.querySelectorAll('.status-chip').forEach(btn => {
-            btn.className = 'status-chip px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all';
-        });
-        const activeChip = document.getElementById('filter-chip-' + status);
-        if (activeChip) {
-            activeChip.className = 'status-chip px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 text-white transition-all shadow-sm';
-        }
-        applyFilters();
-    }
-
-    function filterPidTables() {
-        const selectedSec = document.getElementById('tableFilterSelect').value;
-        const allSecs = document.querySelectorAll('.pid-table-card');
-        
-        allSecs.forEach(sec => {
-            if (selectedSec === 'ALL' || sec.id === selectedSec) {
-                sec.style.display = 'block';
-            } else {
-                sec.style.display = 'none';
-            }
-        });
-        applyFilters();
-    }
-
-    function applyFilters() {
-        const query = document.getElementById('pidSearchInput').value.toLowerCase().trim();
-        const selectedSec = document.getElementById('tableFilterSelect').value;
         const rows = document.querySelectorAll('.pid-row');
         let totalVisibleRows = 0;
+        let visibleCompleted = 0;
+        let visibleInProgress = 0;
+        let visibleOverdue = 0;
+        let visibleDueToday = 0;
 
         rows.forEach(row => {
+            const rowYear = row.dataset.year || '2026';
             const pidCard = row.closest('.pid-table-card');
             const cardVisible = (selectedSec === 'ALL' || pidCard.id === selectedSec);
 
@@ -466,6 +559,8 @@
                 row.style.display = 'none';
                 return;
             }
+
+            const matchesYear = (selectedYear === 'ALL' || rowYear === selectedYear);
 
             const pid = (row.dataset.pid || '').toLowerCase();
             const newpid = (row.dataset.newpid || '').toLowerCase();
@@ -487,34 +582,80 @@
 
             let matchesStatus = true;
             if (activeStatusFilter === 'COMPLETED') {
-                matchesStatus = (status === 'completed' || status === 'approved');
+                matchesStatus = (status.includes('completed') || status.includes('approved') || status.includes('finished') || status.includes('dispatched'));
             } else if (activeStatusFilter === 'IN_PROGRESS') {
-                matchesStatus = (status !== 'completed' && status !== 'approved');
+                matchesStatus = (!status.includes('completed') && !status.includes('approved') && !status.includes('finished'));
             } else if (activeStatusFilter === 'OVERDUE') {
                 matchesStatus = isOverdue;
             }
 
-            if (matchesQuery && matchesStatus) {
+            if (matchesYear && matchesQuery && matchesStatus) {
                 row.style.display = '';
                 totalVisibleRows++;
+
+                if (status.includes('completed') || status.includes('approved') || status.includes('finished')) {
+                    visibleCompleted++;
+                } else {
+                    visibleInProgress++;
+                }
+                if (isOverdue) visibleOverdue++;
             } else {
                 row.style.display = 'none';
             }
         });
 
-        // Hide table card if all its rows are hidden
+        // Filter Quick PID Summary Items by Year & Search
+        const summaryItems = document.querySelectorAll('.quick-summary-item');
+        let visibleSummaryCount = 0;
+
+        summaryItems.forEach(item => {
+            const itemYear = item.dataset.year || '2026';
+            const itemPid = (item.dataset.pid || '').toLowerCase();
+            const itemStatus = (item.dataset.status || '').toLowerCase();
+            const itemTableId = 'table-sec-' + item.dataset.table;
+
+            const matchesYear = (selectedYear === 'ALL' || itemYear === selectedYear);
+            const matchesTable = (selectedSec === 'ALL' || itemTableId === selectedSec);
+            const matchesQuery = !query || itemPid.includes(query) || itemStatus.includes(query);
+
+            if (matchesYear && matchesTable && matchesQuery) {
+                item.style.display = '';
+                visibleSummaryCount++;
+            } else {
+                item.style.display = 'none';
+            }
+        });
+
+        document.getElementById('summaryCount').textContent = visibleSummaryCount;
+        const quickEmpty = document.getElementById('quickSummaryEmpty');
+        if (visibleSummaryCount === 0) {
+            quickEmpty.classList.remove('hidden');
+        } else {
+            quickEmpty.classList.add('hidden');
+        }
+
+        // Update card level visibility and row counts
         document.querySelectorAll('.pid-table-card').forEach(sec => {
             if (selectedSec !== 'ALL' && sec.id !== selectedSec) {
                 sec.style.display = 'none';
                 return;
             }
             const visibleRowsInSec = sec.querySelectorAll('.pid-row[style=""]').length;
-            if (visibleRowsInSec === 0 && (query || activeStatusFilter !== 'ALL')) {
+            const countBadge = sec.querySelector('.tbl-visible-count');
+            if (countBadge) countBadge.textContent = visibleRowsInSec;
+
+            if (visibleRowsInSec === 0) {
                 sec.style.display = 'none';
-            } else if (selectedSec === 'ALL' || sec.id === selectedSec) {
+            } else {
                 sec.style.display = 'block';
             }
         });
+
+        // Update Executive KPI Metrics
+        document.getElementById('kpiTotalPids').textContent = totalVisibleRows;
+        document.getElementById('kpiInProgress').textContent = visibleInProgress;
+        document.getElementById('kpiCompleted').textContent = visibleCompleted;
+        document.getElementById('kpiOverdue').textContent = visibleOverdue;
 
         const noResultsBanner = document.getElementById('noSearchResults');
         if (totalVisibleRows === 0 && rows.length > 0) {
