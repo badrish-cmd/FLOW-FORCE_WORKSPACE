@@ -15,6 +15,80 @@ from .permissions import get_accessible_tables, has_table_access, get_column_acc
 from tasks.models import Task, ActivityLog
 from auth_app.models import EmployeeUser
 
+def sync_logs_row_overdue(row, request_user=None):
+    """
+    For a LOGS table row:
+    - Auto-captures RETURN_DATE to match ISSUE_DATE if missing.
+    - Calculates and persists DAYS_OVERDUE based on RETURN_DATE and STATUS.
+    """
+    if not row or not row.table or row.table.job_type != "LOGS":
+        return
+
+    today = timezone.localdate()
+    cols = {col.name.upper(): col for col in row.table.columns.all()}
+
+    issue_col = cols.get("ISSUE_DATE") or cols.get("DATE")
+    return_col = cols.get("RETURN_DATE") or cols.get("DUE_DATE")
+    status_col = cols.get("STATUS")
+    overdue_col = cols.get("DAYS_OVERDUE")
+
+    if not overdue_col:
+        overdue_col, _ = Column.objects.get_or_create(
+            table=row.table,
+            name="DAYS_OVERDUE",
+            defaults={
+                "data_type": "NUMBER",
+                "is_mandatory": False,
+                "is_system_column": True,
+                "position": 4
+            }
+        )
+
+    issue_cell = CellValue.objects.filter(row=row, column=issue_col).first() if issue_col else None
+    return_cell = CellValue.objects.filter(row=row, column=return_col).first() if return_col else None
+    status_cell = CellValue.objects.filter(row=row, column=status_col).first() if status_col else None
+
+    issue_date = None
+    if issue_cell and issue_cell.value:
+        try:
+            issue_date = datetime.strptime(str(issue_cell.value).split("T")[0], "%Y-%m-%d").date()
+        except ValueError:
+            pass
+
+    return_date = None
+    if return_cell and return_cell.value:
+        try:
+            return_date = datetime.strptime(str(return_cell.value).split("T")[0], "%Y-%m-%d").date()
+        except ValueError:
+            pass
+
+    # Auto system capture: RETURN_DATE has to be same as ISSUE_DATE if empty/missing
+    if not return_date and issue_date:
+        return_date = issue_date
+        if return_col:
+            CellValue.objects.update_or_create(
+                row=row, column=return_col,
+                defaults={"value": return_date.isoformat(), "updated_by": request_user}
+            )
+
+    status_val = str(status_cell.value).strip() if (status_cell and status_cell.value) else "Not Returned"
+    is_returned = status_val.upper() in ["RETURNED", "COMPLETED"]
+
+    days_overdue = 0
+    if is_returned:
+        ref_date = row.updated_at.date() if row.updated_at else today
+        if return_date and ref_date > return_date:
+            days_overdue = (ref_date - return_date).days
+    else:
+        if return_date and today > return_date:
+            days_overdue = (today - return_date).days
+
+    CellValue.objects.update_or_create(
+        row=row,
+        column=overdue_col,
+        defaults={"value": days_overdue, "updated_by": request_user}
+    )
+
 class TableViewSet(viewsets.ModelViewSet):
     serializer_class = TableSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -451,6 +525,8 @@ class TableViewSet(viewsets.ModelViewSet):
                     return "RETURN_DATE"
                 if h in ["ISSUE_DATE", "ISSUEDATE", "ISSUED_DATE", "DATE", "ISSUE"]:
                     return "ISSUE_DATE"
+                if h in ["DAYS_OVERDUE", "DAYSOVERDUE", "DAYS_DUE", "OVERDUE_DAYS", "DAYS"]:
+                    return "DAYS_OVERDUE"
                 if h in ["ISSUED_BY", "ISSUEDBY", "GIVEN_BY", "ISSUER"]:
                     return "ISSUED_BY"
                 if h in ["RECEIVED_BY", "RECEIVEDBY", "TAKEN_BY", "RECEIVER", "BORROWER"]:
@@ -650,13 +726,22 @@ class TableViewSet(viewsets.ModelViewSet):
                     "ALERT_MAIL": alert_mail_val
                 }
             elif is_logs:
-                system_field_names = ["S_NO", "ISSUE_DATE", "RETURN_DATE", "TOOL_NAME", "STATUS", "ISSUED_BY", "RECEIVED_BY", "INITIAL_MAIL", "ALERT_MAIL"]
+                system_field_names = ["S_NO", "ISSUE_DATE", "RETURN_DATE", "DAYS_OVERDUE", "TOOL_NAME", "STATUS", "ISSUED_BY", "RECEIVED_BY", "INITIAL_MAIL", "ALERT_MAIL"]
+                issue_date_val = self.safe_parse_date(normalized_row.get("ISSUE_DATE") or normalized_row.get("DATE")) or timezone.localdate()
+                return_date_val = due_date or issue_date_val
+                status_val = normalized_row.get("STATUS", "Not Returned")
+                days_overdue = 0
+                if str(status_val).strip().upper() not in ["RETURNED", "COMPLETED"]:
+                    if return_date_val and timezone.localdate() > return_date_val:
+                        days_overdue = (timezone.localdate() - return_date_val).days
+
                 cell_values = {
                     "S_NO": s_no,
-                    "ISSUE_DATE": date_val,
-                    "RETURN_DATE": due_date.isoformat() if due_date else None,
+                    "ISSUE_DATE": issue_date_val.isoformat() if hasattr(issue_date_val, 'isoformat') else str(issue_date_val),
+                    "RETURN_DATE": return_date_val.isoformat() if hasattr(return_date_val, 'isoformat') else str(return_date_val),
+                    "DAYS_OVERDUE": days_overdue,
                     "TOOL_NAME": task_name,
-                    "STATUS": normalized_row.get("STATUS", "Not Returned"),
+                    "STATUS": status_val,
                     "ISSUED_BY": normalized_row.get("ISSUED_BY", request_user.full_name or request_user.email),
                     "RECEIVED_BY": normalized_row.get("RECEIVED_BY", ""),
                     "INITIAL_MAIL": initial_mail_val,
@@ -1631,7 +1716,7 @@ class RowViewSet(viewsets.ModelViewSet):
             date_field_name = "DUE_DATE"
             name_field_name = "TASK_NAME"
         elif is_logs:
-            due_date_str = cells_data.get("RETURN_DATE") or cells_data.get("DUE_DATE")
+            due_date_str = cells_data.get("RETURN_DATE") or cells_data.get("DUE_DATE") or cells_data.get("ISSUE_DATE") or cells_data.get("DATE") or timezone.localdate().isoformat()
             task_name = cells_data.get("TOOL_NAME") or cells_data.get("TASK_NAME")
             date_field_name = "RETURN_DATE"
             name_field_name = "TOOL_NAME"
@@ -1695,12 +1780,25 @@ class RowViewSet(viewsets.ModelViewSet):
                     issue_date_val = datetime.strptime(str(issue_date_str).split("T")[0], "%Y-%m-%d").date().isoformat()
                 except ValueError:
                     pass
+            # Return date defaults to issue date if not provided
+            return_date_val = due_date.isoformat() if due_date else issue_date_val
+            status_val = cells_data.get("STATUS", "Not Returned")
+            days_overdue = 0
+            if str(status_val).strip().upper() not in ["RETURNED", "COMPLETED"]:
+                try:
+                    ret_d = datetime.strptime(return_date_val, "%Y-%m-%d").date()
+                    if timezone.localdate() > ret_d:
+                        days_overdue = (timezone.localdate() - ret_d).days
+                except ValueError:
+                    pass
+
             cell_values = {
                 "S_NO": s_no,
                 "ISSUE_DATE": issue_date_val,
-                "RETURN_DATE": due_date.isoformat() if due_date else None,
+                "RETURN_DATE": return_date_val,
+                "DAYS_OVERDUE": days_overdue,
                 "TOOL_NAME": task_name,
-                "STATUS": cells_data.get("STATUS", "Not Returned"),
+                "STATUS": status_val,
                 "ISSUED_BY": cells_data.get("ISSUED_BY", request.user.full_name or request.user.email),
                 "RECEIVED_BY": cells_data.get("RECEIVED_BY", ""),
                 "INITIAL_MAIL": "NO",
@@ -1802,7 +1900,7 @@ class RowViewSet(viewsets.ModelViewSet):
         # Enforce column level permissions
         if table.job_type != "LIST_PID":
             if is_assigned:
-                if column.name == "S_NO" or column.name in ["INITIAL_MAIL", "ALERT_MAIL"]:
+                if column.name == "S_NO" or column.name in ["INITIAL_MAIL", "ALERT_MAIL", "DAYS_OVERDUE"]:
                     return Response({"error": f"Column {column.name} is read-only for assignees"}, status=status.HTTP_403_FORBIDDEN)
             else:
                 perm = get_column_access_level(request.user, column)
@@ -1921,6 +2019,9 @@ class RowViewSet(viewsets.ModelViewSet):
                 user=request.user,
                 details={"column": column.name, "value": value}
             )
+
+        if table.job_type == "LOGS":
+            sync_logs_row_overdue(row, request_user=request.user)
 
         return Response(RowSerializer(row).data, status=status.HTTP_200_OK)
 
@@ -2062,6 +2163,9 @@ class RowViewSet(viewsets.ModelViewSet):
                 user=request.user,
                 details={"updated_columns": updated_columns}
             )
+
+        if table.job_type == "LOGS":
+            sync_logs_row_overdue(row, request_user=request.user)
 
         return Response(RowSerializer(row).data, status=status.HTTP_200_OK)
 

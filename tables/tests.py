@@ -1402,6 +1402,43 @@ class LogsTableTestCase(TestCase):
         self.assertIn("Bob Smith", log_body)
         self.assertIn("2026-08-10", log_body)
 
+    def test_logs_table_auto_return_date_and_days_overdue(self):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from tables.views import RowViewSet
+
+        table = Table.objects.create(name="Tool Logs Test", job_type="LOGS", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+
+        factory = APIRequestFactory()
+        view = RowViewSet.as_view({'post': 'create'})
+
+        # 1. Create row with ISSUE_DATE given but no RETURN_DATE
+        req = factory.post('/tables/api/rows/', {
+            'table': table.id,
+            'cells': {
+                'TOOL_NAME': 'Drill Machine',
+                'ISSUE_DATE': '2026-08-01',
+                'STATUS': 'Not Returned'
+            }
+        }, format='json')
+        force_authenticate(req, user=self.admin)
+        res = view(req)
+        self.assertEqual(res.status_code, 201)
+
+        row_id = res.data['id']
+        row = Row.objects.get(id=row_id)
+
+        # Verify RETURN_DATE auto captured to match ISSUE_DATE (2026-08-01)
+        ret_col = table.columns.get(name='RETURN_DATE')
+        ret_cell = row.cells.get(column=ret_col)
+        self.assertEqual(ret_cell.value, '2026-08-01')
+
+        # Verify DAYS_OVERDUE calculated (14 days past 2026-08-01)
+        overdue_col = table.columns.get(name='DAYS_OVERDUE')
+        overdue_cell = row.cells.get(column=overdue_col)
+        self.assertEqual(overdue_cell.value, 14)
+
+
 
 
 

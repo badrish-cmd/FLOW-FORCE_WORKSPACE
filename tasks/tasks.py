@@ -277,6 +277,21 @@ def send_initial_mail(task_id):
 
         send_email_log_task.delay(email_log.id)
 
+def update_all_logs_days_overdue():
+    """
+    Recalculate and update DAYS_OVERDUE for all active rows in LOGS tables.
+    """
+    try:
+        from tables.models import Table, Row
+        from tables.views import sync_logs_row_overdue
+        logs_tables = Table.objects.filter(job_type="LOGS", is_active=True)
+        for table in logs_tables:
+            rows = Row.objects.filter(table=table, is_archived=False)
+            for row in rows:
+                sync_logs_row_overdue(row)
+    except Exception:
+        pass
+
 @shared_task
 def send_daily_alert_mails():
     """
@@ -285,6 +300,7 @@ def send_daily_alert_mails():
     For LIST_PID tables, we check the DUE_DATE_CUSTOMER and DUE_DATE_FLOW_FORCE columns.
     """
     from datetime import datetime
+    update_all_logs_days_overdue()
     today = timezone.localdate()
     
     # Fetch tasks excluding COMPLETED/APPROVED and PERSONAL tables, prefetching cells to avoid DB queries

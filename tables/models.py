@@ -74,12 +74,13 @@ class Table(models.Model):
                     ("S_NO", "NUMBER", 1),
                     ("ISSUE_DATE", "DATE", 2),
                     ("RETURN_DATE", "DATE", 3),
-                    ("TOOL_NAME", "TEXT", 4),
-                    ("STATUS", "DROPDOWN", 5),
-                    ("ISSUED_BY", "TEXT", 6),
-                    ("RECEIVED_BY", "TEXT", 7),
-                    ("INITIAL_MAIL", "TEXT", 8),
-                    ("ALERT_MAIL", "TEXT", 9),
+                    ("DAYS_OVERDUE", "NUMBER", 4),
+                    ("TOOL_NAME", "TEXT", 5),
+                    ("STATUS", "DROPDOWN", 6),
+                    ("ISSUED_BY", "TEXT", 7),
+                    ("RECEIVED_BY", "TEXT", 8),
+                    ("INITIAL_MAIL", "TEXT", 9),
+                    ("ALERT_MAIL", "TEXT", 10),
                 ]
             else:
                 system_cols = [

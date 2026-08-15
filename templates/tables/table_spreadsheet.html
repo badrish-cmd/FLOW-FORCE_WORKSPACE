@@ -2126,14 +2126,22 @@ comments: [],
                 const isListPid = '{{ table.job_type }}' === 'LIST_PID';
                 const isPersonal = '{{ table.job_type }}' === 'PERSONAL';
                 const isLogs = '{{ table.job_type }}' === 'LOGS';
+                if (isLogs) {
+                    if (!this.newRowCells.ISSUE_DATE) {
+                        this.newRowCells.ISSUE_DATE = new Date().toISOString().split('T')[0];
+                    }
+                    if (!this.newRowCells.RETURN_DATE) {
+                        this.newRowCells.RETURN_DATE = this.newRowCells.ISSUE_DATE;
+                    }
+                }
                 const nameVal = isSales ? this.newRowCells.CUSTOMER_NAME : (isListPid ? (this.newRowCells['ENQUIRY_NO/QUOTATION_NO'] || this.newRowCells.ENQUIRY_NO) : (isLogs ? this.newRowCells.TOOL_NAME : this.newRowCells.TASK_NAME));
-                const dateVal = isSales ? this.newRowCells.FOLLOW_UP_DATE : (isListPid ? this.newRowCells.DUE_DATE_FLOW_FORCE : (isLogs ? (this.newRowCells.RETURN_DATE || this.newRowCells.DUE_DATE) : this.newRowCells.DUE_DATE));
+                const dateVal = isSales ? this.newRowCells.FOLLOW_UP_DATE : (isListPid ? this.newRowCells.DUE_DATE_FLOW_FORCE : (isLogs ? (this.newRowCells.RETURN_DATE || this.newRowCells.ISSUE_DATE || this.newRowCells.DUE_DATE) : this.newRowCells.DUE_DATE));
                 
                 let isInvalid = false;
                 if (isSales) {
                     isInvalid = !nameVal || !dateVal;
                 } else if (isLogs) {
-                    isInvalid = !nameVal || !dateVal;
+                    isInvalid = !nameVal;
                 } else if (isListPid) {
                     isInvalid = !nameVal;
                 } else if (isPersonal) {
@@ -2146,7 +2154,7 @@ comments: [],
                     if (isSales) {
                         alert("Customer Name and Follow-up Date are mandatory fields.");
                     } else if (isLogs) {
-                        alert("Tool Name and Return Date are mandatory fields.");
+                        alert("Tool Name is a mandatory field.");
                     } else if (isListPid) {
                         alert("Enquiry/Quotation No is a mandatory field.");
                     } else {
