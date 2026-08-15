@@ -540,7 +540,15 @@
                         <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider border-r border-gray-200 min-w-[150px] sticky top-0 bg-gray-50 z-20">
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-1.5">
-                                    <span class="font-bold text-gray-800">{{ col.name }}</span>
+                                    <span class="font-bold text-gray-800">
+                                        {% if table.job_type == 'LOGS' and col.name|upper == 'RETURN_DATE' %}
+                                            RETURN_DATE <span class="text-[10px] text-blue-600 font-semibold normal-case">(Auto)</span>
+                                        {% elif table.job_type == 'LOGS' and col.name|upper == 'DAYS_OVERDUE' %}
+                                            DAYS_OVERDUE <span class="text-[10px] text-amber-600 font-semibold normal-case">(Auto)</span>
+                                        {% else %}
+                                            {{ col.name }}
+                                        {% endif %}
+                                    </span>
                                     <span class="text-[9px] text-gray-400 lowercase">({{ col.data_type }})</span>
                                     
                                     {% if col.name|upper == "DATE" %}
@@ -760,6 +768,8 @@
                                 <input type="date" x-model="newRowCells['{{ col.name }}']" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
                             {% elif col.name == 'DATE' %}
                                 <div class="px-3 py-1 text-gray-400 text-xs italic">Auto</div>
+                            {% elif col.name == 'DAYS_OVERDUE' %}
+                                <div class="px-3 py-1 text-amber-600 text-xs italic font-medium">Auto (0)</div>
                             {% elif col.name == 'INITIAL_MAIL' or col.name == 'ALERT_MAIL' %}
                                 <div class="px-3 py-1 text-gray-400 text-xs italic">NO</div>
                             {% else %}
