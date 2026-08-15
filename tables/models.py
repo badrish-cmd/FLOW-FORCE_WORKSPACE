@@ -21,7 +21,7 @@ class Table(models.Model):
     is_active = models.BooleanField(default=True)
     job_type = models.CharField(
         max_length=50,
-        choices=[("SALES", "Sales"), ("GENERAL", "General"), ("ENGINEER", "Engineer"), ("LIST_PID", "List PID"), ("PERSONAL", "Personal")],
+        choices=[("SALES", "Sales"), ("GENERAL", "General"), ("ENGINEER", "Engineer"), ("LIST_PID", "List PID"), ("PERSONAL", "Personal"), ("LOGS", "Logs")],
         default="GENERAL"
     )
     created_at = models.DateTimeField(auto_now_add=True)
@@ -69,6 +69,18 @@ class Table(models.Model):
                     ("INITIAL_MAIL", "TEXT", 16),
                     ("ALERT_MAIL", "TEXT", 17),
                 ]
+            elif self.job_type == "LOGS":
+                system_cols = [
+                    ("S_NO", "NUMBER", 1),
+                    ("ISSUE_DATE", "DATE", 2),
+                    ("RETURN_DATE", "DATE", 3),
+                    ("TOOL_NAME", "TEXT", 4),
+                    ("STATUS", "DROPDOWN", 5),
+                    ("ISSUED_BY", "TEXT", 6),
+                    ("RECEIVED_BY", "TEXT", 7),
+                    ("INITIAL_MAIL", "TEXT", 8),
+                    ("ALERT_MAIL", "TEXT", 9),
+                ]
             else:
                 system_cols = [
                     ("S_NO", "NUMBER", 1),
@@ -80,13 +92,15 @@ class Table(models.Model):
                 ]
             is_sys = (self.job_type != "LIST_PID")
             for name, dtype, pos in system_cols:
+                opts = "Returned,Not Returned" if (name == "STATUS" and self.job_type == "LOGS") else None
                 Column.objects.create(
                     table=self,
                     name=name,
                     data_type=dtype,
                     is_mandatory=True,
                     is_system_column=is_sys,
-                    position=pos
+                    position=pos,
+                    options=opts
                 )
             if self.job_type == "ENGINEER":
                 Column.objects.create(

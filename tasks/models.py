@@ -9,6 +9,8 @@ class Task(models.Model):
         ("READY_FOR_REVIEW", "Ready for Review"),
         ("APPROVED", "Approved"),
         ("COMPLETED", "Completed"),
+        ("RETURNED", "Returned"),
+        ("NOT_RETURNED", "Not Returned"),
     ]
 
     PRIORITY_CHOICES = [
@@ -110,6 +112,11 @@ class Task(models.Model):
             if not name_cell:
                 name_cell = self.row.cells.filter(column__name="PID").first()
             return name_cell.value if name_cell else "Unnamed Task"
+        elif job_type == "LOGS":
+            name_cell = self.row.cells.filter(column__name__in=["TOOL_NAME", "TOOL NAME", "TOOL"]).first()
+            if not name_cell:
+                name_cell = self.row.cells.filter(column__name="TASK_NAME").first()
+            return name_cell.value if name_cell else "Unnamed Tool"
         elif job_type == "PERSONAL":
             name_cell = self.row.cells.filter(column__name__in=["TASK_NAME", "TASK NAME", "NAME", "TITLE", "SUBJECT", "TASK"]).first()
             if not name_cell:
@@ -132,6 +139,31 @@ class Task(models.Model):
     @property
     def task_name_data(self):
         cell = self.row.cells.filter(column__name__in=["TASK_NAME", "TASK NAME"]).first()
+        return cell.value if (cell and cell.value) else None
+
+    @property
+    def tool_name_data(self):
+        cell = self.row.cells.filter(column__name__in=["TOOL_NAME", "TOOL NAME"]).first()
+        return cell.value if (cell and cell.value) else None
+
+    @property
+    def issued_date_data(self):
+        cell = self.row.cells.filter(column__name__in=["ISSUE_DATE", "ISSUE DATE", "DATE"]).first()
+        return cell.value if (cell and cell.value) else None
+
+    @property
+    def return_date_data(self):
+        cell = self.row.cells.filter(column__name__in=["RETURN_DATE", "RETURN DATE", "DUE_DATE"]).first()
+        return cell.value if (cell and cell.value) else None
+
+    @property
+    def issued_by_data(self):
+        cell = self.row.cells.filter(column__name__in=["ISSUED_BY", "ISSUED BY"]).first()
+        return cell.value if (cell and cell.value) else None
+
+    @property
+    def received_by_data(self):
+        cell = self.row.cells.filter(column__name__in=["RECEIVED_BY", "RECEIVED BY"]).first()
         return cell.value if (cell and cell.value) else None
 
     @property

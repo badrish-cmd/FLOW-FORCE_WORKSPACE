@@ -548,8 +548,8 @@
                                         <i class="fas fa-caret-up text-[10px]" :class="sortBy === 'date' && sortDir === 'asc' ? 'text-blue-600 font-bold' : 'text-gray-300'"></i>
                                         <i class="fas fa-caret-down text-[10px] -mt-1" :class="sortBy === 'date' && sortDir === 'desc' ? 'text-blue-600 font-bold' : 'text-gray-300'"></i>
                                     </div>
-                                    {% elif col.name|upper == "DUE_DATE" or col.name|upper == "DUE_DATE_FLOW_FORCE" or col.name|upper == "DUE_DATE_CUSTOMER" %}
-                                    <div class="flex flex-col ml-1 cursor-pointer" @click.stop="toggleSort('due_date')" title="Sort by Due Date">
+                                    {% elif col.name|upper == "DUE_DATE" or col.name|upper == "RETURN_DATE" or col.name|upper == "ISSUE_DATE" or col.name|upper == "DUE_DATE_FLOW_FORCE" or col.name|upper == "DUE_DATE_CUSTOMER" %}
+                                    <div class="flex flex-col ml-1 cursor-pointer" @click.stop="toggleSort('due_date')" title="Sort by Date">
                                         <i class="fas fa-caret-up text-[10px]" :class="sortBy === 'due_date' && sortDir === 'asc' ? 'text-blue-600 font-bold' : 'text-gray-300'"></i>
                                         <i class="fas fa-caret-down text-[10px] -mt-1" :class="sortBy === 'due_date' && sortDir === 'desc' ? 'text-blue-600 font-bold' : 'text-gray-300'"></i>
                                     </div>
@@ -645,13 +645,13 @@
                                            <template x-if="'{{ col.name }}' === 'S_NO'">
                                                <span class="font-medium" x-text="getCellValue(row, '{{ col.name }}')"></span>
                                            </template>
-                                           <template x-if="'{{ col.name }}' === 'TASK_NAME' || '{{ col.name }}' === 'CUSTOMER_NAME'">
+                                           <template x-if="'{{ col.name }}' === 'TASK_NAME' || '{{ col.name }}' === 'CUSTOMER_NAME' || '{{ col.name }}' === 'TOOL_NAME'">
                                                <span class="font-semibold" x-text="getCellValue(row, '{{ col.name }}')"></span>
                                            </template>
-                                           <template x-if="'{{ col.name }}' === 'DUE_DATE' || '{{ col.name }}' === 'FOLLOW_UP_DATE'">
+                                           <template x-if="'{{ col.name }}' === 'DUE_DATE' || '{{ col.name }}' === 'FOLLOW_UP_DATE' || '{{ col.name }}' === 'RETURN_DATE'">
                                                <span :class="isCellOverdue(row, {name: '{{ col.name }}', data_type: '{{ col.data_type }}'}) ? 'text-red-600 font-bold' : ''" x-text="getCellValue(row, '{{ col.name }}')"></span>
                                            </template>
-                                           <template x-if="'{{ col.name }}' !== 'S_NO' && '{{ col.name }}' !== 'TASK_NAME' && '{{ col.name }}' !== 'CUSTOMER_NAME' && '{{ col.name }}' !== 'DUE_DATE' && '{{ col.name }}' !== 'FOLLOW_UP_DATE'">
+                                           <template x-if="'{{ col.name }}' !== 'S_NO' && '{{ col.name }}' !== 'TASK_NAME' && '{{ col.name }}' !== 'CUSTOMER_NAME' && '{{ col.name }}' !== 'TOOL_NAME' && '{{ col.name }}' !== 'DUE_DATE' && '{{ col.name }}' !== 'FOLLOW_UP_DATE' && '{{ col.name }}' !== 'RETURN_DATE'">
                                                <div class="w-full">
                                                    <template x-if="'{{ col.data_type }}' === 'CHECKBOX'">
                                                        <input type="checkbox" 
@@ -745,18 +745,18 @@
                         <td class="p-1 border-r border-gray-200 text-sm whitespace-nowrap align-middle">
                             {% if col.name == 'S_NO' %}
                                 <div class="px-3 text-gray-400 font-semibold text-center">+</div>
-                            {% elif col.name == 'TASK_NAME' or col.name == 'CUSTOMER_NAME' or col.name == 'ENQUIRY_NO' or col.name == 'ENQUIRY_NO/QUOTATION_NO' %}
+                            {% elif col.name == 'TASK_NAME' or col.name == 'CUSTOMER_NAME' or col.name == 'TOOL_NAME' or col.name == 'ENQUIRY_NO' or col.name == 'ENQUIRY_NO/QUOTATION_NO' %}
                                 {% if col.data_type == 'DROPDOWN' %}
                                     <select x-model="newRowCells['{{ col.name }}']" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
-                                        <option value="">-- Select {% if table.job_type == 'SALES' %}Customer Name{% elif table.job_type == 'LIST_PID' %}Enquiry No{% else %}Task Name{% endif %} --</option>
+                                        <option value="">-- Select {% if table.job_type == 'SALES' %}Customer Name{% elif table.job_type == 'LIST_PID' %}Enquiry No{% elif table.job_type == 'LOGS' %}Tool Name{% else %}Task Name{% endif %} --</option>
                                         <template x-for="opt in '{{ col.options|default:""|escapejs }}'.split(',').map(s => s.trim()).filter(Boolean)" :key="opt">
                                             <option :value="opt" x-text="opt"></option>
                                         </template>
                                     </select>
                                 {% else %}
-                                    <input type="text" x-model="newRowCells['{{ col.name }}']" placeholder="{% if table.job_type == 'SALES' %}Customer Name{% elif table.job_type == 'LIST_PID' %}Enquiry No{% else %}Task Name{% endif %}{% if table.job_type != 'PERSONAL' %} (Required){% endif %}" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
+                                    <input type="text" x-model="newRowCells['{{ col.name }}']" placeholder="{% if table.job_type == 'SALES' %}Customer Name{% elif table.job_type == 'LIST_PID' %}Enquiry No{% elif table.job_type == 'LOGS' %}Tool Name{% else %}Task Name{% endif %}{% if table.job_type != 'PERSONAL' %} (Required){% endif %}" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
                                 {% endif %}
-                            {% elif col.name == 'DUE_DATE' or col.name == 'FOLLOW_UP_DATE' or col.name == 'DUE_DATE_FLOW_FORCE' or col.name == 'DUE_DATE_CUSTOMER' %}
+                            {% elif col.name == 'DUE_DATE' or col.name == 'FOLLOW_UP_DATE' or col.name == 'RETURN_DATE' or col.name == 'ISSUE_DATE' or col.name == 'DUE_DATE_FLOW_FORCE' or col.name == 'DUE_DATE_CUSTOMER' %}
                                 <input type="date" x-model="newRowCells['{{ col.name }}']" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
                             {% elif col.name == 'DATE' %}
                                 <div class="px-3 py-1 text-gray-400 text-xs italic">Auto</div>
@@ -1308,6 +1308,13 @@
             newRowCells: ('{{ table.job_type }}' === 'SALES') ? {
                 CUSTOMER_NAME: '',
                 FOLLOW_UP_DATE: ''
+            } : ('{{ table.job_type }}' === 'LOGS') ? {
+                TOOL_NAME: '',
+                RETURN_DATE: '',
+                ISSUE_DATE: '',
+                STATUS: 'Not Returned',
+                ISSUED_BY: '',
+                RECEIVED_BY: ''
             } : ('{{ table.job_type }}' === 'LIST_PID') ? {
                 "ENQUIRY_NO/QUOTATION_NO": '',
                 ENQUIRY_NO: '',
@@ -2118,11 +2125,14 @@ comments: [],
                 const isSales = '{{ table.job_type }}' === 'SALES';
                 const isListPid = '{{ table.job_type }}' === 'LIST_PID';
                 const isPersonal = '{{ table.job_type }}' === 'PERSONAL';
-                const nameVal = isSales ? this.newRowCells.CUSTOMER_NAME : (isListPid ? (this.newRowCells['ENQUIRY_NO/QUOTATION_NO'] || this.newRowCells.ENQUIRY_NO) : this.newRowCells.TASK_NAME);
-                const dateVal = isSales ? this.newRowCells.FOLLOW_UP_DATE : (isListPid ? this.newRowCells.DUE_DATE_FLOW_FORCE : this.newRowCells.DUE_DATE);
+                const isLogs = '{{ table.job_type }}' === 'LOGS';
+                const nameVal = isSales ? this.newRowCells.CUSTOMER_NAME : (isListPid ? (this.newRowCells['ENQUIRY_NO/QUOTATION_NO'] || this.newRowCells.ENQUIRY_NO) : (isLogs ? this.newRowCells.TOOL_NAME : this.newRowCells.TASK_NAME));
+                const dateVal = isSales ? this.newRowCells.FOLLOW_UP_DATE : (isListPid ? this.newRowCells.DUE_DATE_FLOW_FORCE : (isLogs ? (this.newRowCells.RETURN_DATE || this.newRowCells.DUE_DATE) : this.newRowCells.DUE_DATE));
                 
                 let isInvalid = false;
                 if (isSales) {
+                    isInvalid = !nameVal || !dateVal;
+                } else if (isLogs) {
                     isInvalid = !nameVal || !dateVal;
                 } else if (isListPid) {
                     isInvalid = !nameVal;
@@ -2135,6 +2145,8 @@ comments: [],
                 if (isInvalid) {
                     if (isSales) {
                         alert("Customer Name and Follow-up Date are mandatory fields.");
+                    } else if (isLogs) {
+                        alert("Tool Name and Return Date are mandatory fields.");
                     } else if (isListPid) {
                         alert("Enquiry/Quotation No is a mandatory field.");
                     } else {
@@ -2168,6 +2180,15 @@ comments: [],
                             this.newRowCells = {
                                 CUSTOMER_NAME: '',
                                 FOLLOW_UP_DATE: ''
+                            };
+                        } else if (isLogs) {
+                            this.newRowCells = {
+                                TOOL_NAME: '',
+                                RETURN_DATE: '',
+                                ISSUE_DATE: '',
+                                STATUS: 'Not Returned',
+                                ISSUED_BY: '',
+                                RECEIVED_BY: ''
                             };
                         } else if (isListPid) {
                             this.newRowCells = {
@@ -2694,8 +2715,9 @@ comments: [],
                 this.activeRow = row;
                 const isSales = '{{ table.job_type }}' === 'SALES';
                 const isListPid = '{{ table.job_type }}' === 'LIST_PID';
-                this.activeTaskName = isSales ? this.getCellValue(row, 'CUSTOMER_NAME') : (isListPid ? (this.getCellValue(row, 'ENQUIRY_NO') || this.getCellValue(row, 'PID') || 'Unnamed') : this.getCellValue(row, 'TASK_NAME'));
-                this.activeTaskDueDate = isSales ? this.getCellValue(row, 'FOLLOW_UP_DATE') : (isListPid ? (this.getCellValue(row, 'DUE_DATE_FLOW_FORCE') || this.getCellValue(row, 'DUE_DATE_CUSTOMER')) : this.getCellValue(row, 'DUE_DATE'));
+                const isLogs = '{{ table.job_type }}' === 'LOGS';
+                this.activeTaskName = isSales ? this.getCellValue(row, 'CUSTOMER_NAME') : (isListPid ? (this.getCellValue(row, 'ENQUIRY_NO') || this.getCellValue(row, 'PID') || 'Unnamed') : (isLogs ? (this.getCellValue(row, 'TOOL_NAME') || 'Unnamed Tool') : this.getCellValue(row, 'TASK_NAME')));
+                this.activeTaskDueDate = isSales ? this.getCellValue(row, 'FOLLOW_UP_DATE') : (isListPid ? (this.getCellValue(row, 'DUE_DATE_FLOW_FORCE') || this.getCellValue(row, 'DUE_DATE_CUSTOMER')) : (isLogs ? (this.getCellValue(row, 'RETURN_DATE') || this.getCellValue(row, 'DUE_DATE')) : this.getCellValue(row, 'DUE_DATE')));
                 this.activeTaskPriority = row.task_details ? row.task_details.priority : 'MEDIUM';
                 this.activeTaskStatus = row.task_details ? row.task_details.status : 'PENDING';
                 this.activeDrawerTab = 'chat';

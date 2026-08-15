@@ -1,3 +1,4 @@
+import datetime
 from django.test import TestCase
 from django.contrib.auth import get_user_model
 from employee_management.models import Department
@@ -1291,6 +1292,116 @@ class TablesTestCase(TestCase):
         self.assertContains(response, "Acme Corp")
         self.assertContains(response, "Fabrication In Progress")
         self.assertContains(response, "Year 2026")
+
+class LogsTableTestCase(TestCase):
+    def setUp(self):
+        import datetime
+        from auth_app.models import EmployeeUser
+        self.admin = EmployeeUser.objects.create_user(
+            email="admin_logs@example.com",
+            password="Password123!",
+            role="ADMIN",
+            full_name="Admin Logs User"
+        )
+        self.editor = EmployeeUser.objects.create_user(
+            email="editor_logs@example.com",
+            password="Password123!",
+            role="EMPLOYEE",
+            full_name="Editor Logs User"
+        )
+        self.viewer = EmployeeUser.objects.create_user(
+            email="viewer_logs@example.com",
+            password="Password123!",
+            role="EMPLOYEE",
+            full_name="Viewer Logs User"
+        )
+
+    def test_logs_table_system_columns_creation(self):
+        table = Table.objects.create(name="Tool Inventory Logs", job_type="LOGS", created_by=self.admin)
+        col_names = list(table.columns.values_list("name", flat=True))
+        expected_cols = ["S_NO", "ISSUE_DATE", "RETURN_DATE", "TOOL_NAME", "STATUS", "ISSUED_BY", "RECEIVED_BY", "INITIAL_MAIL", "ALERT_MAIL"]
+        for col in expected_cols:
+            self.assertIn(col, col_names)
+        
+        status_col = table.columns.get(name="STATUS")
+        self.assertEqual(status_col.options, "Returned,Not Returned")
+
+    def test_logs_row_creation_and_status_sync(self):
+        from rest_framework.test import APIClient
+        client = APIClient()
+        client.force_authenticate(user=self.admin)
+
+        table = Table.objects.create(name="Workshop Tool Tracker", job_type="LOGS", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.editor, access_level="EDIT")
+        TableAccess.objects.create(table=table, user=self.viewer, access_level="VIEW")
+
+        # Create row
+        response = client.post("/tables/api/rows/", {
+            "table": table.id,
+            "cells": {
+                "TOOL_NAME": "Pneumatic Drill",
+                "ISSUE_DATE": "2026-08-10",
+                "RETURN_DATE": "2026-08-14",
+                "ISSUED_BY": "Admin Logs User",
+                "RECEIVED_BY": "John Doe",
+                "STATUS": "Not Returned"
+            }
+        }, format="json")
+        self.assertEqual(response.status_code, 201)
+
+        row_id = response.data["id"]
+        row = Row.objects.get(id=row_id)
+        self.assertEqual(row.task.due_date, datetime.date(2026, 8, 14))
+
+        # Update cell status to Returned
+        status_col = table.columns.get(name="STATUS")
+        response = client.post(f"/tables/api/rows/{row.id}/edit-cell/", {
+            "column": status_col.id,
+            "value": "Returned"
+        }, format="json")
+        self.assertEqual(response.status_code, 200)
+
+        row.task.refresh_from_db()
+        self.assertEqual(row.task.status, "COMPLETED")
+
+    def test_logs_daily_alert_mails_sending(self):
+        from tasks.tasks import send_daily_alert_mails
+        from tasks.models import EmailLog, Notification
+        from django.utils import timezone
+
+        table = Table.objects.create(name="Site Equipment Logs", job_type="LOGS", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.editor, access_level="EDIT")
+        TableAccess.objects.create(table=table, user=self.viewer, access_level="VIEW")
+
+        # Create row overdue past return date
+        row = Row.objects.create(table=table, created_by=self.admin)
+        cols = {col.name: col for col in table.columns.all()}
+        CellValue.objects.create(row=row, column=cols["TOOL_NAME"], value="Laser Level", updated_by=self.admin)
+        CellValue.objects.create(row=row, column=cols["ISSUE_DATE"], value="2026-08-01", updated_by=self.admin)
+        CellValue.objects.create(row=row, column=cols["RETURN_DATE"], value="2026-08-10", updated_by=self.admin)
+        CellValue.objects.create(row=row, column=cols["ISSUED_BY"], value="Admin Logs User", updated_by=self.admin)
+        CellValue.objects.create(row=row, column=cols["RECEIVED_BY"], value="Bob Smith", updated_by=self.admin)
+        CellValue.objects.create(row=row, column=cols["STATUS"], value="Not Returned", updated_by=self.admin)
+
+        Task.objects.create(row=row, due_date=datetime.date(2026, 8, 10), status="PENDING", assigned_by=self.admin)
+
+        # Trigger daily alert mails
+        send_daily_alert_mails()
+
+        # Check EmailLog created for Admin and Editor, but NOT Viewer
+        admin_logs = EmailLog.objects.filter(recipient_email=self.admin.email, subject__icontains="Unreturned Tool")
+        editor_logs = EmailLog.objects.filter(recipient_email=self.editor.email, subject__icontains="Unreturned Tool")
+        viewer_logs = EmailLog.objects.filter(recipient_email=self.viewer.email, subject__icontains="Unreturned Tool")
+
+        self.assertTrue(admin_logs.exists())
+        self.assertTrue(editor_logs.exists())
+        self.assertFalse(viewer_logs.exists())
+
+        log_body = admin_logs.first().body
+        self.assertIn("Laser Level", log_body)
+        self.assertIn("Bob Smith", log_body)
+        self.assertIn("2026-08-10", log_body)
+
 
 
 

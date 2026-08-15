@@ -353,6 +353,7 @@ class TableViewSet(viewsets.ModelViewSet):
         is_sales = table.job_type == "SALES"
         is_list_pid = table.job_type == "LIST_PID"
         is_personal = table.job_type == "PERSONAL"
+        is_logs = table.job_type == "LOGS"
 
         table_col_names_upper = {c.name.strip().upper() for c in table.columns.all()}
         
@@ -443,6 +444,17 @@ class TableViewSet(viewsets.ModelViewSet):
                     return "DUE_DATE_CUSTOMER"
                 if h in ["QTY", "QUANTITY"]:
                     return "QTY"
+            elif is_logs:
+                if h in ["TOOL_NAME", "TOOLNAME", "TOOL", "TOOL_NAME_LOG", "EQUIPMENT", "INSTRUMENT", "TASK_NAME", "TASKNAME", "TASK", "NAME"]:
+                    return "TOOL_NAME"
+                if h in ["RETURN_DATE", "RETURNDATE", "RETURN_BY", "RETURN", "DUE_DATE", "DUEDATE", "TARGET_DATE", "DEADLINE"]:
+                    return "RETURN_DATE"
+                if h in ["ISSUE_DATE", "ISSUEDATE", "ISSUED_DATE", "DATE", "ISSUE"]:
+                    return "ISSUE_DATE"
+                if h in ["ISSUED_BY", "ISSUEDBY", "GIVEN_BY", "ISSUER"]:
+                    return "ISSUED_BY"
+                if h in ["RECEIVED_BY", "RECEIVEDBY", "TAKEN_BY", "RECEIVER", "BORROWER"]:
+                    return "RECEIVED_BY"
             else:
                 if h in ["TASK_NAME", "TASKNAME", "TASK", "CUSTOMER_NAME", "CUSTOMERNAME", "CUSTOMER", "CLIENT_NAME", "CLIENTNAME", "CLIENT", "NAME", "TITLE", "SUBJECT", "DESCRIPTION", "PARTICULARS", "ITEM", "SUMMARY", "JOB", "JOB_NAME", "WORK"]:
                     return "TASK_NAME"
@@ -553,6 +565,9 @@ class TableViewSet(viewsets.ModelViewSet):
                 if is_sales:
                     task_name = normalized_row.get("CUSTOMER_NAME")
                     due_date_str = normalized_row.get("FOLLOW_UP_DATE")
+                elif is_logs:
+                    task_name = normalized_row.get("TOOL_NAME") or normalized_row.get("TASK_NAME")
+                    due_date_str = normalized_row.get("RETURN_DATE") or normalized_row.get("DUE_DATE")
                 else:
                     task_name = normalized_row.get("TASK_NAME")
                     due_date_str = normalized_row.get("DUE_DATE")
@@ -589,7 +604,7 @@ class TableViewSet(viewsets.ModelViewSet):
             row_import_idx += 1
 
             # Parse and normalize other system fields
-            csv_date_str = normalized_row.get("DATE")
+            csv_date_str = normalized_row.get("DATE") or normalized_row.get("ISSUE_DATE")
             date_val = None
             if csv_date_str:
                 parsed_d = self.safe_parse_date(csv_date_str)
@@ -631,6 +646,19 @@ class TableViewSet(viewsets.ModelViewSet):
                     "DATE": date_val,
                     "ENQUIRY_NO_QUOTATION_NO": task_name,
                     "DUE_DATE_FLOW_FORCE": ff_date.isoformat() if ff_date else None,
+                    "INITIAL_MAIL": initial_mail_val,
+                    "ALERT_MAIL": alert_mail_val
+                }
+            elif is_logs:
+                system_field_names = ["S_NO", "ISSUE_DATE", "RETURN_DATE", "TOOL_NAME", "STATUS", "ISSUED_BY", "RECEIVED_BY", "INITIAL_MAIL", "ALERT_MAIL"]
+                cell_values = {
+                    "S_NO": s_no,
+                    "ISSUE_DATE": date_val,
+                    "RETURN_DATE": due_date.isoformat() if due_date else None,
+                    "TOOL_NAME": task_name,
+                    "STATUS": normalized_row.get("STATUS", "Not Returned"),
+                    "ISSUED_BY": normalized_row.get("ISSUED_BY", request_user.full_name or request_user.email),
+                    "RECEIVED_BY": normalized_row.get("RECEIVED_BY", ""),
                     "INITIAL_MAIL": initial_mail_val,
                     "ALERT_MAIL": alert_mail_val
                 }
@@ -1486,7 +1514,7 @@ class RowViewSet(viewsets.ModelViewSet):
                         queryset = queryset.order_by('enquiry_val', 'id')
                 else:
                     queryset = queryset.order_by('id')
-            elif sort_by == 'due_date' and table.job_type in ['GENERAL', 'ENGINEER', 'LIST_PID']:
+            elif sort_by in ['due_date', 'return_date'] and table.job_type in ['GENERAL', 'ENGINEER', 'LIST_PID', 'LOGS']:
                 if table.job_type == 'LIST_PID':
                     from django.db.models import Subquery, OuterRef, DateField, TextField, Value
                     from django.db.models.functions import Coalesce, Cast, Replace
@@ -1584,8 +1612,9 @@ class RowViewSet(viewsets.ModelViewSet):
         is_sales = table.job_type == "SALES"
         is_list_pid = table.job_type == "LIST_PID"
         is_personal = table.job_type == "PERSONAL"
+        is_logs = table.job_type == "LOGS"
         
-        # Verify DUE_DATE/FOLLOW_UP_DATE and TASK_NAME/CUSTOMER_NAME are present
+        # Verify DUE_DATE/FOLLOW_UP_DATE/RETURN_DATE and TASK_NAME/CUSTOMER_NAME/TOOL_NAME are present
         if is_sales:
             due_date_str = cells_data.get("FOLLOW_UP_DATE")
             task_name = cells_data.get("CUSTOMER_NAME")
@@ -1601,6 +1630,11 @@ class RowViewSet(viewsets.ModelViewSet):
             task_name = "Personal Task"
             date_field_name = "DUE_DATE"
             name_field_name = "TASK_NAME"
+        elif is_logs:
+            due_date_str = cells_data.get("RETURN_DATE") or cells_data.get("DUE_DATE")
+            task_name = cells_data.get("TOOL_NAME") or cells_data.get("TASK_NAME")
+            date_field_name = "RETURN_DATE"
+            name_field_name = "TOOL_NAME"
         else:
             due_date_str = cells_data.get("DUE_DATE")
             task_name = cells_data.get("TASK_NAME")
@@ -1650,6 +1684,25 @@ class RowViewSet(viewsets.ModelViewSet):
                 "DATE": timezone.localdate().isoformat(),
                 enq_col_name: task_name,
                 "DUE_DATE_FLOW_FORCE": due_date.isoformat() if due_date else None,
+                "INITIAL_MAIL": "NO",
+                "ALERT_MAIL": "NO"
+            }
+        elif is_logs:
+            issue_date_str = cells_data.get("ISSUE_DATE") or cells_data.get("DATE")
+            issue_date_val = timezone.localdate().isoformat()
+            if issue_date_str:
+                try:
+                    issue_date_val = datetime.strptime(str(issue_date_str).split("T")[0], "%Y-%m-%d").date().isoformat()
+                except ValueError:
+                    pass
+            cell_values = {
+                "S_NO": s_no,
+                "ISSUE_DATE": issue_date_val,
+                "RETURN_DATE": due_date.isoformat() if due_date else None,
+                "TOOL_NAME": task_name,
+                "STATUS": cells_data.get("STATUS", "Not Returned"),
+                "ISSUED_BY": cells_data.get("ISSUED_BY", request.user.full_name or request.user.email),
+                "RECEIVED_BY": cells_data.get("RECEIVED_BY", ""),
                 "INITIAL_MAIL": "NO",
                 "ALERT_MAIL": "NO"
             }
@@ -1786,7 +1839,7 @@ class RowViewSet(viewsets.ModelViewSet):
                         except ValueError:
                             pass
                 else:
-                    if column.name in ["DUE_DATE", "FOLLOW_UP_DATE", "DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]:
+                    if column.name in ["DUE_DATE", "FOLLOW_UP_DATE", "RETURN_DATE", "DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]:
                         try:
                             new_date = datetime.strptime(str(value).split("T")[0], "%Y-%m-%d").date()
                         except ValueError:
@@ -1802,12 +1855,12 @@ class RowViewSet(viewsets.ModelViewSet):
                     else:
                         task.due_date = new_date
                         task.save(update_fields=["due_date"])
-                elif not is_list_pid:
+                elif not is_list_pid and column.name in ["DUE_DATE", "FOLLOW_UP_DATE", "RETURN_DATE", "DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]:
                     return Response({"error": "Invalid date format"}, status=status.HTTP_400_BAD_REQUEST)
             elif not is_list_pid:
                 # No task but system column
                 pass
-        elif column.name in ["TASK_NAME", "CUSTOMER_NAME", "ENQUIRY_NO"] and column.is_system_column:
+        elif column.name in ["TASK_NAME", "CUSTOMER_NAME", "ENQUIRY_NO", "TOOL_NAME"] and column.is_system_column:
                     # Activity log detail update
                     pass
 
@@ -1817,8 +1870,10 @@ class RowViewSet(viewsets.ModelViewSet):
             task = getattr(row, "task", None)
             if task:
                 val_upper = str(value).upper().strip().replace(" ", "_")
-                if val_upper in ["COMPLETE", "COMPLETED"]:
+                if val_upper in ["COMPLETE", "COMPLETED", "RETURNED"]:
                     val_upper = "COMPLETED"
+                elif val_upper in ["NOT_RETURNED", "NOT RETURNED", "PENDING"]:
+                    val_upper = "PENDING"
                 valid_statuses = [choice[0] for choice in Task.STATUS_CHOICES]
                 if val_upper in valid_statuses:
                     task.status = val_upper
@@ -1933,7 +1988,7 @@ class RowViewSet(viewsets.ModelViewSet):
                             except ValueError:
                                 pass
                     else:
-                        if column.name in ["DUE_DATE", "FOLLOW_UP_DATE", "DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]:
+                        if column.name in ["DUE_DATE", "FOLLOW_UP_DATE", "RETURN_DATE", "DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]:
                             try:
                                 new_date = datetime.strptime(str(value).split("T")[0], "%Y-%m-%d").date()
                             except ValueError:
@@ -1956,8 +2011,10 @@ class RowViewSet(viewsets.ModelViewSet):
                 task = getattr(row, "task", None)
                 if task:
                     val_upper = str(value).upper().strip().replace(" ", "_")
-                    if val_upper in ["COMPLETE", "COMPLETED"]:
+                    if val_upper in ["COMPLETE", "COMPLETED", "RETURNED"]:
                         val_upper = "COMPLETED"
+                    elif val_upper in ["NOT_RETURNED", "NOT RETURNED", "PENDING"]:
+                        val_upper = "PENDING"
                     valid_statuses = [choice[0] for choice in Task.STATUS_CHOICES]
                     if val_upper in valid_statuses:
                         task.status = val_upper

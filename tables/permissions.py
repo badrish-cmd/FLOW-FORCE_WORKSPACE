@@ -169,3 +169,35 @@ def get_employees_with_table_access(table):
         
     return all_employees.filter(q_filter).distinct()
 
+def get_employees_with_editor_or_admin_access(table):
+    """
+    Get all active employees who have ADMIN or EDIT access to the given table.
+    This includes Super Admins, Admins, Department Admins (for the table's department),
+    the table creator, and users/departments with explicit EDIT or ADMIN TableAccess.
+    """
+    from employee_management.models import EmployeeUser
+    from tables.models import TableAccess
+    from django.db.models import Q
+
+    all_employees = EmployeeUser.objects.filter(is_active=True)
+
+    q_filter = Q(role__in=["SUPER_ADMIN", "ADMIN"])
+
+    if table.created_by:
+        q_filter |= Q(id=table.created_by.id)
+
+    if table.department:
+        q_filter |= Q(role="DEPARTMENT_ADMIN", department=table.department)
+
+    edit_access_rules = TableAccess.objects.filter(table=table, access_level__in=["EDIT", "ADMIN"])
+    user_ids = edit_access_rules.filter(user__isnull=False).values_list("user_id", flat=True)
+    dept_ids = edit_access_rules.filter(department__isnull=False).values_list("department_id", flat=True)
+
+    if user_ids:
+        q_filter |= Q(id__in=user_ids)
+    if dept_ids:
+        q_filter |= Q(department_id__in=dept_ids)
+
+    return all_employees.filter(q_filter).distinct()
+
+

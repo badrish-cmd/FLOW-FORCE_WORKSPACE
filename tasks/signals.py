@@ -16,7 +16,7 @@ def sync_task_assignments(task):
 
         table = task.row.table
         
-        if table.job_type == "LIST_PID":
+        if table.job_type in ["LIST_PID", "LOGS"]:
             target_employees = get_employees_with_table_access(table)
         else:
             # Non-admin employees who can access this table

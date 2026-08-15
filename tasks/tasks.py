@@ -479,6 +479,95 @@ def send_daily_alert_mails():
         # Trigger Celery task asynchronously
         send_email_log_task.delay(email_log.id)
 
+    # 3. Process LOGS table daily consolidated emails (unreturned tools past RETURN_DATE)
+    try:
+        from tables.models import Table
+        from tables.permissions import get_employees_with_editor_or_admin_access
+
+        logs_tables = Table.objects.filter(is_active=True, job_type="LOGS").prefetch_related('rows', 'rows__cells', 'rows__cells__column')
+        logs_recipient_items = {}
+
+        for l_table in logs_tables:
+            editor_or_admins = list(get_employees_with_editor_or_admin_access(l_table))
+            if not editor_or_admins:
+                continue
+
+            for row in l_table.rows.filter(is_archived=False):
+                cells_by_name = {cell.column.name.upper(): cell.value for cell in row.cells.all()}
+                
+                status_val = str(cells_by_name.get("STATUS") or "").strip()
+                if status_val.lower() == "returned":
+                    continue
+
+                return_date_str = cells_by_name.get("RETURN_DATE") or cells_by_name.get("DUE_DATE")
+                return_date_obj = None
+                if return_date_str:
+                    try:
+                        return_date_obj = datetime.strptime(str(return_date_str).split("T")[0], "%Y-%m-%d").date()
+                    except ValueError:
+                        pass
+                elif hasattr(row, 'task') and row.task and row.task.due_date:
+                    return_date_obj = row.task.due_date
+
+                if return_date_obj and return_date_obj <= today:
+                    tool_name = cells_by_name.get("TOOL_NAME") or cells_by_name.get("TASK_NAME") or "Unnamed Tool"
+                    issued_date = cells_by_name.get("ISSUE_DATE") or cells_by_name.get("DATE") or "N/A"
+                    issued_by = cells_by_name.get("ISSUED_BY") or "N/A"
+                    received_by = cells_by_name.get("RECEIVED_BY") or "N/A"
+
+                    site_url = getattr(settings, 'SITE_URL', 'https://flowforceworkspace.cloud')
+                    row_link = f"{site_url}/tables/{l_table.id}/"
+                    if hasattr(row, 'task') and row.task:
+                        row_link = f"{site_url}/tables/{l_table.id}/?open_task_id={row.task.id}"
+
+                    log_item = {
+                        'tool_name': tool_name,
+                        'table_name': l_table.name,
+                        'issued_date': str(issued_date),
+                        'return_date': str(return_date_obj),
+                        'issued_by': issued_by,
+                        'received_by': received_by,
+                        'status': status_val or "Not Returned",
+                        'link': row_link,
+                    }
+
+                    for emp in editor_or_admins:
+                        if emp not in logs_recipient_items:
+                            logs_recipient_items[emp] = []
+                        logs_recipient_items[emp].append(log_item)
+
+        for recipient, log_items in logs_recipient_items.items():
+            if not log_items:
+                continue
+
+            Notification.objects.create(
+                user=recipient,
+                title="Unreturned Tools Alert",
+                description=f"You have {len(log_items)} unreturned tool(s) past Return Date in Tool Logs.",
+                type="SYSTEM"
+            )
+
+            subject = f"Daily Alert: {len(log_items)} Unreturned Tool(s) Log Summary"
+            context = {
+                'recipient_name': recipient.full_name or recipient.email,
+                'log_count': len(log_items),
+                'log_items': log_items,
+                'today': today,
+            }
+            html_message = render_to_string('emails/logs_daily_alert_mail.html', context)
+
+            email_log = EmailLog.objects.create(
+                recipient_email=recipient.email,
+                subject=subject,
+                body=html_message,
+                email_type='ALERT_MAIL',
+                status='PENDING',
+                max_retries=2,
+            )
+            send_email_log_task.delay(email_log.id)
+    except Exception:
+        pass
+
 @shared_task
 def send_alert_mail(task_id):
     """
