@@ -1503,21 +1503,32 @@ class RowViewSet(viewsets.ModelViewSet):
         if task_id:
             queryset = queryset.filter(task__id=task_id)
             
-        # General Row Search Filter
+        # General Row Search Filter (irrespective of case-sensitivity and inline spaces)
         search = self.request.query_params.get("search")
-        if search and search.strip():
-            from django.db.models import Q
-            clean_search = search.strip()
+        if search:
+            from django.db.models import Q, Value, TextField
+            from django.db.models.functions import Cast, Lower, Replace
+            
+            clean_search = search.lower().replace(" ", "")
+            
             matching_rows = CellValue.objects.filter(
                 row__table=table,
-                row__is_archived=False,
-                value__icontains=clean_search
+                row__is_archived=False
+            ).annotate(
+                text_val=Cast('value', TextField())
+            ).annotate(
+                clean_val=Lower(Replace('text_val', Value(' '), Value(''), output_field=TextField()))
+            ).filter(
+                clean_val__contains=clean_search
             ).values_list('row_id', flat=True)
             
-            queryset = queryset.filter(
+            queryset = queryset.annotate(
+                clean_task_status=Lower(Replace('task__status', Value(' '), Value(''), output_field=TextField())),
+                clean_task_priority=Lower(Replace('task__priority', Value(' '), Value(''), output_field=TextField()))
+            ).filter(
                 Q(id__in=matching_rows) |
-                Q(task__status__icontains=clean_search) |
-                Q(task__priority__icontains=clean_search)
+                Q(clean_task_status__contains=clean_search) |
+                Q(clean_task_priority__contains=clean_search)
             )
 
         # Custom dynamic column filters
@@ -1593,10 +1604,39 @@ class RowViewSet(viewsets.ModelViewSet):
                 else:
                     queryset = queryset.order_by('id')
             elif sort_by in ['due_date', 'return_date'] and table.job_type in ['GENERAL', 'ENGINEER', 'LIST_PID', 'LOGS']:
-                if sort_dir == 'desc':
-                    queryset = queryset.order_by('-task__due_date', '-id')
+                if table.job_type == 'LIST_PID':
+                    from django.db.models import Subquery, OuterRef, TextField, Value
+                    from django.db.models.functions import Cast, Replace
+                    due_col = Column.objects.filter(table=table, name__iexact="DUE_DATE_FLOW_FORCE").first()
+                    if due_col:
+                        cell_subquery = Subquery(
+                            CellValue.objects.filter(row=OuterRef('pk'), column=due_col).values('value')[:1]
+                        )
+                        queryset = queryset.annotate(
+                            due_date_str=Cast(
+                                Replace(
+                                    Cast(cell_subquery, output_field=TextField()),
+                                    Value('"'),
+                                    Value(''),
+                                    output_field=TextField()
+                                ),
+                                output_field=TextField()
+                            )
+                        )
+                        if sort_dir == 'desc':
+                            queryset = queryset.order_by('-due_date_str', '-id')
+                        else:
+                            queryset = queryset.order_by('due_date_str', 'id')
+                    else:
+                        if sort_dir == 'desc':
+                            queryset = queryset.order_by('-task__due_date', '-id')
+                        else:
+                            queryset = queryset.order_by('task__due_date', 'id')
                 else:
-                    queryset = queryset.order_by('task__due_date', 'id')
+                    if sort_dir == 'desc':
+                        queryset = queryset.order_by('-task__due_date', '-id')
+                    else:
+                        queryset = queryset.order_by('task__due_date', 'id')
             elif sort_by == 'follow_up_date' and table.job_type == 'SALES':
                 from django.db.models import Max, DateField
                 from django.db.models.functions import Coalesce
