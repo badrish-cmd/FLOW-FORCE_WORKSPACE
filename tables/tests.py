@@ -1433,10 +1433,13 @@ class LogsTableTestCase(TestCase):
         ret_cell = row.cells.get(column=ret_col)
         self.assertEqual(ret_cell.value, '2026-08-01')
 
-        # Verify DAYS_OVERDUE calculated (14 days past 2026-08-01)
+        # Verify DAYS_OVERDUE calculated based on current date
+        from django.utils import timezone
+        import datetime
+        expected_days = (timezone.localdate() - datetime.date(2026, 8, 1)).days
         overdue_col = table.columns.get(name='DAYS_OVERDUE')
         overdue_cell = row.cells.get(column=overdue_col)
-        self.assertEqual(overdue_cell.value, 14)
+        self.assertEqual(overdue_cell.value, expected_days)
 
 
 

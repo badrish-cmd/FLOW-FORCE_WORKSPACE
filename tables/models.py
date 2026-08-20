@@ -197,7 +197,8 @@ class CellValue(models.Model):
         Column,
         on_delete=models.CASCADE,
         related_name="cells",
-        db_column="column_fk"
+        db_column="column_fk",
+        db_index=True
     )
     value = models.JSONField(null=True, blank=True)
     updated_by = models.ForeignKey(
@@ -210,6 +211,9 @@ class CellValue(models.Model):
 
     class Meta:
         unique_together = [("row", "column")]
+        indexes = [
+            models.Index(fields=["column", "row"]),
+        ]
 
     def __str__(self):
         return f"Cell {self.row_id}:{self.column_id} = {self.value}"
