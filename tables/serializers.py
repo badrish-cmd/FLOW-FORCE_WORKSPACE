@@ -28,6 +28,34 @@ class ColumnSerializer(serializers.ModelSerializer):
                 qs = qs.exclude(id=self.instance.id)
             if qs.exists():
                 raise serializers.ValidationError({"name": "A column with this name already exists in this table."})
+
+        # Validate options if JSON config for TEXT
+        data_type = attrs.get('data_type') or (self.instance.data_type if self.instance else 'TEXT')
+        options = attrs.get('options')
+        if data_type == 'TEXT' and options:
+            import json
+            if isinstance(options, str) and options.strip().startswith('{'):
+                try:
+                    cfg = json.loads(options)
+                    if cfg.get('input_type') == 'multiline' or cfg.get('multiline') is True:
+                        rows = cfg.get('rows')
+                        if rows is not None:
+                            try:
+                                rows_int = int(rows)
+                                if rows_int < 1:
+                                    raise serializers.ValidationError({"options": "Rows must be at least 1."})
+                            except (ValueError, TypeError):
+                                raise serializers.ValidationError({"options": "Rows must be a valid number."})
+                        max_length = cfg.get('max_length')
+                        if max_length is not None and str(max_length).strip() != "":
+                            try:
+                                max_len_int = int(max_length)
+                                if max_len_int < 1:
+                                    raise serializers.ValidationError({"options": "Max length must be at least 1."})
+                            except (ValueError, TypeError):
+                                raise serializers.ValidationError({"options": "Max length must be a valid number."})
+                except json.JSONDecodeError:
+                    pass
         return attrs
 
 class CellValueSerializer(serializers.ModelSerializer):

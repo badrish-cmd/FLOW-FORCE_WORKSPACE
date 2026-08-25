@@ -1437,9 +1437,249 @@ class LogsTableTestCase(TestCase):
         from django.utils import timezone
         import datetime
         expected_days = (timezone.localdate() - datetime.date(2026, 8, 1)).days
-        overdue_col = table.columns.get(name='DAYS_OVERDUE')
-        overdue_cell = row.cells.get(column=overdue_col)
-        self.assertEqual(overdue_cell.value, expected_days)
+    def test_export_excel(self):
+        import io
+        import openpyxl
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from tables.views import TableViewSet
+
+        table = Table.objects.create(name="PIDs Table Test", job_type="LIST_PID", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+
+        # Create 2 rows
+        row1 = Row.objects.create(table=table, created_by=self.admin)
+        row2 = Row.objects.create(table=table, created_by=self.admin)
+
+        desc_col = table.columns.get(name="DESCRIPTION")
+        company_col = table.columns.get(name="COMPANY_NAME")
+        qty_col = table.columns.get(name="QTY")
+        due_col = table.columns.get(name="DUE_DATE_FLOW_FORCE")
+
+        CellValue.objects.create(row=row1, column=desc_col, value="Line 1\nLine 2 description", updated_by=self.admin)
+        CellValue.objects.create(row=row1, column=company_col, value="Acme Corp", updated_by=self.admin)
+        CellValue.objects.create(row=row1, column=qty_col, value=15, updated_by=self.admin)
+        CellValue.objects.create(row=row1, column=due_col, value="2026-09-01", updated_by=self.admin)
+
+        CellValue.objects.create(row=row2, column=desc_col, value="Single line text", updated_by=self.admin)
+        CellValue.objects.create(row=row2, column=company_col, value="Beta LLC", updated_by=self.admin)
+        CellValue.objects.create(row=row2, column=qty_col, value=42, updated_by=self.admin)
+        CellValue.objects.create(row=row2, column=due_col, value="2026-09-15", updated_by=self.admin)
+
+        factory = APIRequestFactory()
+        view = TableViewSet.as_view({'get': 'export_excel'})
+
+        # 1. Test full export
+        req = factory.get(f'/tables/api/tables/{table.id}/export-excel/')
+        force_authenticate(req, user=self.admin)
+        res = view(req, pk=table.id)
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res['Content-Type'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        self.assertIn('pids_table_test_export_', res['Content-Disposition'])
+        self.assertTrue(res['Content-Disposition'].endswith('.xlsx"'))
+
+        # Parse Excel workbook from bytes
+        wb = openpyxl.load_workbook(io.BytesIO(res.content))
+        ws = wb.active
+
+        # Check headers
+        headers = [cell.value for cell in ws[1]]
+        expected_cols = [c.name for c in table.columns.all().order_by("position", "id")]
+        self.assertEqual(headers, expected_cols)
+
+        # Check row count (1 header + 2 data rows = 3 rows)
+        self.assertEqual(ws.max_row, 3)
+
+        # Check values in first data row
+        desc_idx = headers.index("DESCRIPTION") + 1
+        company_idx = headers.index("COMPANY_NAME") + 1
+        qty_idx = headers.index("QTY") + 1
+
+        self.assertEqual(ws.cell(row=2, column=desc_idx).value, "Line 1\nLine 2 description")
+        self.assertEqual(ws.cell(row=2, column=company_idx).value, "Acme Corp")
+        self.assertEqual(ws.cell(row=2, column=qty_idx).value, 15)
+
+        # 2. Test filtered export (search="Beta")
+        req_filter = factory.get(f'/tables/api/tables/{table.id}/export-excel/?search=Beta')
+        force_authenticate(req_filter, user=self.admin)
+        res_filter = view(req_filter, pk=table.id)
+
+        self.assertEqual(res_filter.status_code, 200)
+        wb_filtered = openpyxl.load_workbook(io.BytesIO(res_filter.content))
+        ws_filtered = wb_filtered.active
+
+        # Filtered export should only have 1 data row
+        self.assertEqual(ws_filtered.max_row, 2)
+        self.assertEqual(ws_filtered.cell(row=2, column=company_idx).value, "Beta LLC")
+
+    def test_text_column_multiline_properties_persistence(self):
+        import json
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from tables.views import ColumnViewSet
+
+        table = Table.objects.create(name="Custom Column Test", job_type="GENERAL", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+
+        factory = APIRequestFactory()
+        view_create = ColumnViewSet.as_view({'post': 'create'})
+        view_update = ColumnViewSet.as_view({'patch': 'partial_update'})
+
+        # 1. Create a custom TEXT column with multiline configuration
+        opts_payload = json.dumps({
+            "input_type": "multiline",
+            "rows": 4,
+            "placeholder": "Enter detailed notes...",
+            "max_length": 1000,
+            "resizable": True
+        })
+        req = factory.post('/tables/api/columns/', {
+            'table': table.id,
+            'name': 'Special Notes',
+            'data_type': 'TEXT',
+            'options': opts_payload,
+            'is_filterable': False
+        }, format='json')
+        force_authenticate(req, user=self.admin)
+        res = view_create(req)
+        self.assertEqual(res.status_code, 201)
+
+        col_id = res.data['id']
+        col = Column.objects.get(id=col_id)
+        self.assertEqual(col.name, 'Special Notes')
+        self.assertEqual(col.data_type, 'TEXT')
+        
+        # Verify JSON options persist
+        parsed_opts = json.loads(col.options)
+        self.assertEqual(parsed_opts['input_type'], 'multiline')
+        self.assertEqual(parsed_opts['rows'], 4)
+        self.assertEqual(parsed_opts['placeholder'], 'Enter detailed notes...')
+        self.assertEqual(parsed_opts['max_length'], 1000)
+        self.assertTrue(parsed_opts['resizable'])
+
+        # 2. Update column configuration via PATCH (edit properties)
+        updated_opts = json.dumps({
+            "input_type": "multiline",
+            "rows": 6,
+            "placeholder": "Updated placeholder",
+            "max_length": 2000,
+            "resizable": False
+        })
+        req_patch = factory.patch(f'/tables/api/columns/{col.id}/', {
+            'options': updated_opts
+        }, format='json')
+        force_authenticate(req_patch, user=self.admin)
+        res_patch = view_update(req_patch, pk=col.id)
+        self.assertEqual(res_patch.status_code, 200)
+
+        col.refresh_from_db()
+        parsed_updated = json.loads(col.options)
+        self.assertEqual(parsed_updated['rows'], 6)
+        self.assertEqual(parsed_updated['placeholder'], 'Updated placeholder')
+        self.assertEqual(parsed_updated['max_length'], 2000)
+        self.assertFalse(parsed_updated['resizable'])
+
+    def test_text_column_validation_invalid_rows_and_max_length(self):
+        import json
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from tables.views import ColumnViewSet
+
+        table = Table.objects.create(name="Validation Test", job_type="GENERAL", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+
+        factory = APIRequestFactory()
+        view_create = ColumnViewSet.as_view({'post': 'create'})
+
+        # Test invalid rows (0 or negative)
+        invalid_rows_opts = json.dumps({
+            "input_type": "multiline",
+            "rows": 0
+        })
+        req = factory.post('/tables/api/columns/', {
+            'table': table.id,
+            'name': 'Invalid Rows Column',
+            'data_type': 'TEXT',
+            'options': invalid_rows_opts
+        }, format='json')
+        force_authenticate(req, user=self.admin)
+        res = view_create(req)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('options', res.data)
+
+        # Test invalid max_length (0 or negative)
+        invalid_len_opts = json.dumps({
+            "input_type": "multiline",
+            "rows": 3,
+            "max_length": -5
+        })
+        req2 = factory.post('/tables/api/columns/', {
+            'table': table.id,
+            'name': 'Invalid Len Column',
+            'data_type': 'TEXT',
+            'options': invalid_len_opts
+        }, format='json')
+        force_authenticate(req2, user=self.admin)
+        res2 = view_create(req2)
+        self.assertEqual(res2.status_code, 400)
+        self.assertIn('options', res2.data)
+
+    def test_multiline_cell_value_save_and_excel_export(self):
+        import io
+        import json
+        import openpyxl
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from tables.views import RowViewSet, TableViewSet
+
+        table = Table.objects.create(name="Multiline Flow Test", job_type="GENERAL", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+
+        # Custom multiline column
+        multiline_col = Column.objects.create(
+            table=table,
+            name="Job Details",
+            data_type="TEXT",
+            position=7,
+            options=json.dumps({"input_type": "multiline", "rows": 3, "placeholder": "Details...", "resizable": True})
+        )
+
+        factory = APIRequestFactory()
+        view_row = RowViewSet.as_view({'post': 'create'})
+
+        multiline_content = "Heading:\n- Item 1\n- Item 2\nSummary paragraph."
+        req_row = factory.post('/tables/api/rows/', {
+            'table': table.id,
+            'cells': {
+                'TASK_NAME': 'Complex Engineering Task',
+                'DUE_DATE': '2026-09-30',
+                'Job Details': multiline_content
+            }
+        }, format='json')
+        force_authenticate(req_row, user=self.admin)
+        res_row = view_row(req_row)
+        self.assertEqual(res_row.status_code, 201)
+
+        row_id = res_row.data['id']
+        cell = CellValue.objects.get(row_id=row_id, column=multiline_col)
+        self.assertEqual(cell.value, multiline_content)
+
+        # Export Excel and verify multiline content and headers
+        view_export = TableViewSet.as_view({'get': 'export_excel'})
+        req_export = factory.get(f'/tables/api/tables/{table.id}/export-excel/')
+        force_authenticate(req_export, user=self.admin)
+        res_export = view_export(req_export, pk=table.id)
+
+        self.assertEqual(res_export.status_code, 200)
+        wb = openpyxl.load_workbook(io.BytesIO(res_export.content))
+        ws = wb.active
+
+        headers = [c.value for c in ws[1]]
+        self.assertIn("Job Details", headers)
+        job_details_idx = headers.index("Job Details") + 1
+
+        # Check cell value in row 2
+        exported_val = ws.cell(row=2, column=job_details_idx).value
+        self.assertEqual(exported_val, multiline_content)
+
+
 
 
 

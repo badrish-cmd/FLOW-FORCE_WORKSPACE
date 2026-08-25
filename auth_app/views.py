@@ -21,22 +21,21 @@ def home_view(request):
 
 
 def login_view(request):
-
-    print("LOGIN VIEW HIT")
-    print("METHOD:", request.method)
+    if request.user.is_authenticated:
+        return redirect(get_role_redirect_name(request.user))
 
     if request.method == "POST":
-
-        print("POST:", request.POST)
-
         email = request.POST.get(
             "email",
             ""
         ).strip().lower()
 
         password = request.POST.get(
-            "password"
+            "password",
+            ""
         )
+
+        print(f"[AUTH] Login attempt for email: {email}")
 
         user = authenticate(
             request,
@@ -44,26 +43,20 @@ def login_view(request):
             password=password
         )
 
-        print("EMAIL:", email)
-        print("AUTH USER:", user)
-
         if user is None:
-
+            # Check if user exists to provide helpful status feedback
             try:
-
-                user = EmployeeUser.objects.get(
+                db_user = EmployeeUser.objects.get(
                     email=email
                 )
-
             except EmployeeUser.DoesNotExist:
-
-                user = None
+                db_user = None
 
             if (
-                user is None
-                or not user.check_password(password)
+                db_user is None
+                or not db_user.check_password(password)
             ):
-
+                print(f"[AUTH] Authentication failed for: {email} (invalid email or password)")
                 messages.error(
                     request,
                     "Invalid email or password."
@@ -72,9 +65,11 @@ def login_view(request):
                 return redirect(
                     "login"
                 )
+            user = db_user
+
+        print(f"[AUTH] Authentication successful for: {email} (role: {user.role}, status: {user.status})")
 
         if user.status == "PENDING":
-
             messages.error(
                 request,
                 "Your account is awaiting approval."
@@ -85,7 +80,6 @@ def login_view(request):
             )
 
         if user.status == "REJECTED":
-
             messages.error(
                 request,
                 "Your account has been rejected."
@@ -96,7 +90,6 @@ def login_view(request):
             )
 
         if not user.is_active:
-
             messages.error(
                 request,
                 "Account disabled."
@@ -540,7 +533,7 @@ def register_view(request):
             )
 
         if EmployeeUser.objects.filter(
-            email=email
+            email=email_lower
         ).exists():
 
             messages.error(
@@ -553,7 +546,7 @@ def register_view(request):
             )
 
         EmployeeUser.objects.create_user(
-            email=email,
+            email=email_lower,
             password=password,
             full_name=full_name,
             role="EMPLOYEE",

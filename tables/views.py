@@ -1066,6 +1066,183 @@ class TableViewSet(viewsets.ModelViewSet):
 
         return Response({"message": f"Successfully updated {updated_count} rows"}, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["get"], url_path="export-excel")
+    def export_excel(self, request, pk=None):
+        import io
+        import re
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+        from django.http import HttpResponse
+        from datetime import datetime, date
+
+        table = self.get_object_or_404(pk)
+        if not has_table_access(request.user, table, "VIEW"):
+            return Response({"error": "No view access to this table"}, status=status.HTTP_403_FORBIDDEN)
+
+        # Get filtered queryset using RowViewSet's get_queryset logic
+        row_viewset = RowViewSet()
+        row_viewset.request = request
+        row_viewset.action = "list"
+        
+        # Ensure 'table' param is set in query_params for RowViewSet filtering
+        if "table" not in request.query_params:
+            if hasattr(request.GET, '_mutable'):
+                request.GET._mutable = True
+                request.GET["table"] = str(table.id)
+                request.GET._mutable = False
+            else:
+                request.GET = request.GET.copy()
+                request.GET["table"] = str(table.id)
+        
+        rows_qs = row_viewset.get_queryset()
+
+        columns = list(table.columns.all().order_by("position", "id"))
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        
+        # Clean title (max 31 chars, no invalid chars : \ / ? * [ ])
+        clean_title = re.sub(r'[:\\/?*\[\]]', '_', table.name)[:31]
+        ws.title = clean_title or "Export"
+
+        # Define Styles
+        header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+        header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+        data_font = Font(name="Calibri", size=10)
+        data_alignment_left = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        data_alignment_center = Alignment(horizontal="center", vertical="top")
+        data_alignment_right = Alignment(horizontal="right", vertical="top")
+
+        thin_border = Border(
+            left=Side(style='thin', color='CBD5E1'),
+            right=Side(style='thin', color='CBD5E1'),
+            top=Side(style='thin', color='CBD5E1'),
+            bottom=Side(style='thin', color='CBD5E1')
+        )
+
+        # Write Header Row
+        headers = [col.name for col in columns]
+        ws.append(headers)
+        ws.row_dimensions[1].height = 28
+
+        for col_idx in range(1, len(headers) + 1):
+            cell = ws.cell(row=1, column=col_idx)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+            cell.border = thin_border
+
+        # Check multiline columns
+        def is_col_multiline(c):
+            if c.name.upper() == "DESCRIPTION":
+                return True
+            if c.data_type == "TEXT" and c.options and str(c.options).strip().startswith("{"):
+                try:
+                    import json
+                    c_opts = json.loads(c.options)
+                    if c_opts.get("input_type") == "multiline" or c_opts.get("multiline") is True:
+                        return True
+                except Exception:
+                    pass
+            return False
+
+        # Fetch and write data rows
+        for row_idx, row in enumerate(rows_qs, start=2):
+            cell_map = {c.column_id: c.value for c in row.cells.all()}
+            row_data = []
+            
+            for col in columns:
+                raw_val = cell_map.get(col.id)
+                formatted_val = raw_val
+                
+                if raw_val is None or str(raw_val).strip() == "":
+                    formatted_val = ""
+                elif col.data_type == "NUMBER":
+                    try:
+                        val_str = str(raw_val).strip()
+                        if "." in val_str:
+                            formatted_val = float(val_str)
+                        else:
+                            formatted_val = int(val_str)
+                    except (ValueError, TypeError):
+                        formatted_val = str(raw_val)
+                elif col.data_type in ["DATE", "DATETIME"]:
+                    try:
+                        date_str = str(raw_val).split("T")[0].strip()
+                        formatted_val = datetime.strptime(date_str, "%Y-%m-%d").date()
+                    except (ValueError, TypeError):
+                        formatted_val = str(raw_val)
+                elif col.data_type == "CHECKBOX":
+                    is_true = str(raw_val).lower().strip() in ["true", "1", "yes"]
+                    formatted_val = "YES" if is_true else "NO"
+                else:
+                    formatted_val = str(raw_val)
+                
+                row_data.append(formatted_val)
+
+            ws.append(row_data)
+            ws.row_dimensions[row_idx].height = 20
+
+            for col_idx, (col, val) in enumerate(zip(columns, row_data), 1):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                cell.font = data_font
+                cell.border = thin_border
+                
+                if col.data_type == "NUMBER":
+                    cell.alignment = data_alignment_right
+                elif col.data_type in ["DATE", "DATETIME"]:
+                    cell.alignment = data_alignment_center
+                    if isinstance(val, (datetime, date)):
+                        cell.number_format = 'yyyy-mm-dd'
+                elif col.data_type == "CHECKBOX":
+                    cell.alignment = data_alignment_center
+                elif is_col_multiline(col):
+                    cell.alignment = data_alignment_left
+                else:
+                    cell.alignment = data_alignment_left
+
+        # Auto-adjust column widths
+        for col_idx, col in enumerate(columns, 1):
+            col_letter = get_column_letter(col_idx)
+            header_len = len(col.name or "")
+            max_len = header_len
+            
+            for cell in ws[col_letter][1:101]:
+                if cell.value is not None:
+                    lines = str(cell.value).split("\n")
+                    longest_line = max((len(l) for l in lines), default=0)
+                    max_len = max(max_len, longest_line)
+            
+            if is_col_multiline(col):
+                ws.column_dimensions[col_letter].width = min(max(max_len + 4, 30), 60)
+            elif col.data_type in ["DATE", "DATETIME"]:
+                ws.column_dimensions[col_letter].width = max(max_len + 4, 15)
+            elif col.data_type == "NUMBER":
+                ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+            else:
+                ws.column_dimensions[col_letter].width = min(max(max_len + 4, 14), 45)
+
+        # Generate Sensible Filename
+        today_str = timezone.localdate().strftime("%Y-%m-%d")
+        safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', table.name.strip().lower())
+        safe_name = re.sub(r'_+', '_', safe_name).strip('_') or "export"
+        filename = f"{safe_name}_export_{today_str}.xlsx"
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        response = HttpResponse(
+            output.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        response["Access-Control-Expose-Headers"] = "Content-Disposition"
+        return response
+
     def get_object_or_404(self, pk):
         obj = get_object_or_404(Table, pk=pk)
         self.check_object_permissions(self.request, obj)
@@ -1831,7 +2008,11 @@ class RowViewSet(viewsets.ModelViewSet):
         for col_name, val in cell_values.items():
             col = cols.get(col_name)
             if col:
-                CellValue.objects.create(row=row, column=col, value=val, updated_by=request.user)
+                CellValue.objects.update_or_create(
+                    row=row,
+                    column=col,
+                    defaults={"value": val, "updated_by": request.user}
+                )
 
         # 3. Create Task
         task = Task.objects.create(
@@ -1849,19 +2030,18 @@ class RowViewSet(viewsets.ModelViewSet):
             col = cols.get(col_name)
             if col and (col.data_type == "USER" or col_name.upper() in ["ASSIGNED_TO", "ASSIGNED TO", "ASSIGNEE"]):
                 if val:
-                    # Resolve user
-                    try:
-                        if str(val).isdigit():
-                            user_to_assign = EmployeeUser.objects.get(id=int(val), is_active=True)
-                        elif "@" in str(val):
-                            user_to_assign = EmployeeUser.objects.get(email=val, is_active=True)
-                        else:
-                            user_to_assign = EmployeeUser.objects.get(full_name__iexact=val, is_active=True)
-                    except EmployeeUser.DoesNotExist:
-                        user_to_assign = EmployeeUser.objects.filter(
-                            Q(full_name__icontains=val) | Q(email__icontains=val),
-                            is_active=True
-                        ).first()
+                    val_str = str(val).strip()
+                    if val_str.isdigit():
+                        user_to_assign = EmployeeUser.objects.filter(id=int(val_str), is_active=True).first()
+                    elif "@" in val_str:
+                        user_to_assign = EmployeeUser.objects.filter(email__iexact=val_str, is_active=True).first()
+                    else:
+                        user_to_assign = EmployeeUser.objects.filter(full_name__iexact=val_str, is_active=True).first()
+                        if not user_to_assign:
+                            user_to_assign = EmployeeUser.objects.filter(
+                                Q(full_name__icontains=val_str) | Q(email__icontains=val_str),
+                                is_active=True
+                            ).first()
                     break
 
         # Handle assignments if provided
@@ -1873,12 +2053,15 @@ class RowViewSet(viewsets.ModelViewSet):
             task.assigned_to.set([user_to_assign])
         
         # Log creation
-        ActivityLog.objects.create(
-            task=task,
-            action="Created Task Row",
-            user=request.user,
-            details={"task_name": task_name, "due_date": due_date_str}
-        )
+        try:
+            ActivityLog.objects.create(
+                task=task,
+                action="Created Task Row",
+                user=request.user,
+                details={"task_name": str(task_name), "due_date": str(due_date_str) if due_date_str else ""}
+            )
+        except Exception:
+            pass
 
         return Response(RowSerializer(row).data, status=status.HTTP_201_CREATED)
 

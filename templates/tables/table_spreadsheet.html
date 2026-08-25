@@ -83,6 +83,9 @@
             <button @click="openImportModal" class="bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out">
                 <i class="fas fa-file-import mr-2"></i> Import CSV
             </button>
+            <button @click="exportExcel" class="bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out flex items-center shadow-sm" title="Download current table data as Excel (.xlsx)">
+                <i class="fas fa-file-excel mr-2"></i> Export Excel
+            </button>
             <button x-show="selectedRowIds.length > 0" @click="bulkDeleteRows(true)" class="bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out flex items-center gap-1.5" x-transition style="display: none;">
                 <i class="fas fa-trash-alt"></i> <span>Delete Selected (<span x-text="selectedRowIds.length"></span>)</span>
             </button>
@@ -537,7 +540,8 @@
                             <input type="checkbox" @change="toggleSelectAll" :checked="isAllSelected" class="rounded text-primary focus:ring-primary">
                         </th>
                         {% for col in table.columns.all %}
-                        <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider border-r border-gray-200 min-w-[150px] sticky top-0 bg-gray-50 z-20">
+                        <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider border-r border-gray-200 sticky top-0 bg-gray-50 z-20"
+                            :class="isMultilineColumn('{{ col.name }}') ? 'min-w-[260px]' : 'min-w-[150px]'">
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-1.5">
                                     <span class="font-bold text-gray-800">
@@ -575,7 +579,7 @@
                                 </div>
                                 <div class="flex items-center gap-1 ml-2">
                                     {% if user.role in 'SUPER_ADMIN,ADMIN,DEPARTMENT_ADMIN' %}
-                                    <button @click.stop="openEditColumnModal({{ col.id }}, '{{ col.name }}', '{{ col.data_type }}', '{{ col.options|default:""|escapejs }}', {{ col.is_system_column|yesno:'true,false' }}, {{ col.is_filterable|yesno:'true,false' }})" class="text-blue-500 hover:text-blue-700 focus:outline-none mr-1" title="Edit Column">
+                                    <button @click.stop="openEditColumnModal({{ col.id }}, '{{ col.name|escapejs }}', '{{ col.data_type }}', '{{ col.options|default:""|escapejs }}', {{ col.is_system_column|yesno:'true,false' }}, {{ col.is_filterable|yesno:'true,false' }})" class="text-blue-500 hover:text-blue-700 focus:outline-none mr-1" title="Edit Column">
                                         <i class="fas fa-cog text-[9px]"></i>
                                     </button>
                                     <button @click.stop="moveColumnLeft({{ col.id }})" class="text-gray-400 hover:text-gray-600 focus:outline-none" title="Move Left">
@@ -613,8 +617,11 @@
                                 <input type="checkbox" :value="row.id" x-model="selectedRowIds" class="rounded text-primary focus:ring-primary">
                             </td>
                             {% for col in table.columns.all %}
-                             <td class="p-0 border-r border-gray-200 text-sm whitespace-nowrap align-middle relative group"
-                                  :class="isCellDragged(row.id, {{ col.id }}) ? 'bg-blue-50 border-2 border-blue-400' : ''"
+                             <td class="p-0 border-r border-gray-200 text-sm align-middle relative group"
+                                  :class="[
+                                      isCellDragged(row.id, {{ col.id }}) ? 'bg-blue-50 border-2 border-blue-400' : '',
+                                      isMultilineColumn('{{ col.name }}') ? 'min-w-[260px] whitespace-normal' : 'whitespace-nowrap'
+                                  ]"
                                   @dblclick="if (rowEditingRowId !== row.id) editCell(row.id, {{ col.id }}, getCellValue(row, '{{ col.name }}'), '{{ col.data_type }}')">
                                   
                                   <!-- Row-Level Editing Inputs -->
@@ -639,8 +646,20 @@
                                                  class="h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded">
                                       </template>
                                       <template x-if="'{{ col.data_type }}' !== 'DATE' && '{{ col.data_type }}' !== 'DATETIME' && '{{ col.data_type }}' !== 'DROPDOWN' && '{{ col.data_type }}' !== 'CHECKBOX'">
-                                          <input type="text" x-model="editingRowValues['{{ col.name }}']" 
-                                                 class="w-full bg-white border border-primary text-gray-900 rounded p-1 text-xs focus:outline-none">
+                                          <div>
+                                              <template x-if="isMultilineColumn('{{ col.name }}')">
+                                                  <textarea x-model="editingRowValues['{{ col.name }}']" 
+                                                            :rows="getColumnConfigByName('{{ col.name }}').rows || 3"
+                                                            :placeholder="getColumnConfigByName('{{ col.name }}').placeholder || 'Enter text...'"
+                                                            :maxlength="getColumnConfigByName('{{ col.name }}').maxLength"
+                                                            :class="getColumnConfigByName('{{ col.name }}').resizable ? 'resize-y' : 'resize-none'"
+                                                            class="w-full bg-white border border-primary text-gray-900 rounded p-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary min-h-[65px]"></textarea>
+                                              </template>
+                                              <template x-if="!isMultilineColumn('{{ col.name }}')">
+                                                  <input type="text" x-model="editingRowValues['{{ col.name }}']" 
+                                                         class="w-full bg-white border border-primary text-gray-900 rounded p-1 text-xs focus:outline-none">
+                                              </template>
+                                          </div>
                                       </template>
                                   </div>
 
@@ -659,7 +678,10 @@
                                            <template x-if="'{{ col.name }}' === 'DUE_DATE' || '{{ col.name }}' === 'FOLLOW_UP_DATE' || '{{ col.name }}' === 'RETURN_DATE'">
                                                <span :class="isCellOverdue(row, {name: '{{ col.name }}', data_type: '{{ col.data_type }}'}) ? 'text-red-600 font-bold' : ''" x-text="getCellValue(row, '{{ col.name }}')"></span>
                                            </template>
-                                           <template x-if="'{{ col.name }}' !== 'S_NO' && '{{ col.name }}' !== 'TASK_NAME' && '{{ col.name }}' !== 'CUSTOMER_NAME' && '{{ col.name }}' !== 'TOOL_NAME' && '{{ col.name }}' !== 'DUE_DATE' && '{{ col.name }}' !== 'FOLLOW_UP_DATE' && '{{ col.name }}' !== 'RETURN_DATE'">
+                                           <template x-if="isMultilineColumn('{{ col.name }}')">
+                                               <span class="whitespace-pre-wrap break-words text-xs text-gray-800 leading-relaxed block py-1" x-text="getCellValue(row, '{{ col.name }}') || '-'"></span>
+                                           </template>
+                                           <template x-if="'{{ col.name }}' !== 'S_NO' && '{{ col.name }}' !== 'TASK_NAME' && '{{ col.name }}' !== 'CUSTOMER_NAME' && '{{ col.name }}' !== 'TOOL_NAME' && '{{ col.name }}' !== 'DUE_DATE' && '{{ col.name }}' !== 'FOLLOW_UP_DATE' && '{{ col.name }}' !== 'RETURN_DATE' && !isMultilineColumn('{{ col.name }}')">
                                                <div class="w-full">
                                                    <template x-if="'{{ col.data_type }}' === 'CHECKBOX'">
                                                        <input type="checkbox" 
@@ -695,11 +717,26 @@
                                               </select>
                                           </template>
                                           <template x-if="'{{ col.data_type }}' !== 'DATE' && '{{ col.data_type }}' !== 'DATETIME' && '{{ col.data_type }}' !== 'DROPDOWN'">
-                                              <input type="text" x-model="editingValue" 
-                                                     @keydown.enter="$event.target.blur()" 
-                                                     @keydown.escape="cancelEdit"
-                                                     @blur="saveCell"
-                                                     class="w-full bg-white border border-primary text-gray-900 rounded p-1 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                                              <div>
+                                                  <template x-if="isMultilineColumn('{{ col.name }}')">
+                                                      <textarea x-model="editingValue" 
+                                                                @keydown.escape="cancelEdit"
+                                                                @keydown.ctrl.enter="saveCell"
+                                                                @blur="saveCell"
+                                                                :rows="getColumnConfigByName('{{ col.name }}').rows || 3"
+                                                                :placeholder="getColumnConfigByName('{{ col.name }}').placeholder || 'Enter text...'"
+                                                                :maxlength="getColumnConfigByName('{{ col.name }}').maxLength"
+                                                                :class="getColumnConfigByName('{{ col.name }}').resizable ? 'resize-y' : 'resize-none'"
+                                                                class="w-full bg-white border border-primary text-gray-900 rounded p-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary min-h-[65px]"></textarea>
+                                                  </template>
+                                                  <template x-if="!isMultilineColumn('{{ col.name }}')">
+                                                      <input type="text" x-model="editingValue" 
+                                                             @keydown.enter="$event.target.blur()" 
+                                                             @keydown.escape="cancelEdit"
+                                                             @blur="saveCell"
+                                                             class="w-full bg-white border border-primary text-gray-900 rounded p-1 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                                                  </template>
+                                              </div>
                                           </template>
                                       </div>
                                   </div>
@@ -750,7 +787,8 @@
                     <tr x-show="currentPage === totalPages()" class="bg-gray-50 border-t border-gray-200">
                         <td class="p-1 border-r border-gray-200"></td>
                         {% for col in table.columns.all %}
-                        <td class="p-1 border-r border-gray-200 text-sm whitespace-nowrap align-middle">
+                        <td class="p-1 border-r border-gray-200 text-sm"
+                            :class="isMultilineColumn('{{ col.name }}') ? 'min-w-[260px] align-top' : 'whitespace-nowrap align-middle'">
                             {% if col.name == 'S_NO' %}
                                 <div class="px-3 text-gray-400 font-semibold text-center">+</div>
                             {% elif col.name == 'TASK_NAME' or col.name == 'CUSTOMER_NAME' or col.name == 'TOOL_NAME' or col.name == 'ENQUIRY_NO' or col.name == 'ENQUIRY_NO/QUOTATION_NO' %}
@@ -788,7 +826,19 @@
                                     <input type="number" x-model="newRowCells['{{ col.name }}']" placeholder="{{ col.name }} value" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
                                 </template>
                                 <template x-if="'{{ col.data_type }}' !== 'DROPDOWN' && '{{ col.data_type }}' !== 'DATE' && '{{ col.data_type }}' !== 'NUMBER'">
-                                    <input type="text" x-model="newRowCells['{{ col.name }}']" placeholder="{{ col.name }} value" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
+                                    <div>
+                                        <template x-if="isMultilineColumn('{{ col.name }}')">
+                                            <textarea x-model="newRowCells['{{ col.name }}']"
+                                                      :rows="getColumnConfigByName('{{ col.name }}').rows || 2"
+                                                      :placeholder="getColumnConfigByName('{{ col.name }}').placeholder || '{{ col.name }} value'"
+                                                      :maxlength="getColumnConfigByName('{{ col.name }}').maxLength"
+                                                      :class="getColumnConfigByName('{{ col.name }}').resizable ? 'resize-y' : 'resize-none'"
+                                                      class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary min-h-[48px]"></textarea>
+                                        </template>
+                                        <template x-if="!isMultilineColumn('{{ col.name }}')">
+                                            <input type="text" x-model="newRowCells['{{ col.name }}']" placeholder="{{ col.name }} value" class="w-full bg-white border border-gray-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-primary">
+                                        </template>
+                                    </div>
                                 </template>
                             {% endif %}
                         </td>
@@ -857,6 +907,56 @@
                             <option value="DROPDOWN">Dropdown</option>
                         </select>
                     </div>
+
+                    <!-- Text Box / Multi-line Properties (When Data Type = Text) -->
+                    <div x-show="newColumnType === 'TEXT'" class="bg-gray-50 p-3.5 rounded-lg border border-gray-200 space-y-3">
+                        <div class="flex items-center justify-between border-b border-gray-200 pb-1.5">
+                            <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                <i class="fas fa-align-left text-primary mr-1"></i> Text Box Properties
+                            </label>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1.5">Input Type</label>
+                            <div class="grid grid-cols-2 gap-2">
+                                <label class="flex items-center gap-2 p-2 bg-white rounded-md border cursor-pointer transition text-xs font-medium text-gray-700 hover:border-primary" :class="newTextType === 'single' ? 'border-primary bg-blue-50/40 text-primary font-bold ring-1 ring-primary' : 'border-gray-200'">
+                                    <input type="radio" value="single" x-model="newTextType" class="text-primary focus:ring-primary h-3.5 w-3.5">
+                                    <span>Single Line</span>
+                                </label>
+                                <label class="flex items-center gap-2 p-2 bg-white rounded-md border cursor-pointer transition text-xs font-medium text-gray-700 hover:border-primary" :class="newTextType === 'multiline' ? 'border-primary bg-blue-50/40 text-primary font-bold ring-1 ring-primary' : 'border-gray-200'">
+                                    <input type="radio" value="multiline" x-model="newTextType" class="text-primary focus:ring-primary h-3.5 w-3.5">
+                                    <span>Text Box / Multi-line</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div x-show="newTextType === 'multiline'" class="space-y-2.5 pt-1" x-transition>
+                            <div class="grid grid-cols-2 gap-2.5">
+                                <div>
+                                    <label class="block text-[11px] font-semibold text-gray-600 mb-1">Rows <span class="text-gray-400 font-normal">(Default 3)</span></label>
+                                    <input type="number" min="1" max="20" x-model="newTextRows" placeholder="3" class="w-full bg-white border border-gray-300 text-gray-900 rounded-md p-2 text-xs focus:ring-1 focus:ring-primary focus:border-primary">
+                                </div>
+                                <div>
+                                    <label class="block text-[11px] font-semibold text-gray-600 mb-1">Max Length <span class="text-gray-400 font-normal">(Optional)</span></label>
+                                    <input type="number" min="1" x-model="newTextMaxLength" placeholder="e.g. 500" class="w-full bg-white border border-gray-300 text-gray-900 rounded-md p-2 text-xs focus:ring-1 focus:ring-primary focus:border-primary">
+                                </div>
+                            </div>
+
+                            <div>
+                                <label class="block text-[11px] font-semibold text-gray-600 mb-1">Placeholder <span class="text-gray-400 font-normal">(Optional)</span></label>
+                                <input type="text" x-model="newTextPlaceholder" placeholder="e.g. Enter details..." class="w-full bg-white border border-gray-300 text-gray-900 rounded-md p-2 text-xs focus:ring-1 focus:ring-primary focus:border-primary">
+                            </div>
+
+                            <div>
+                                <label class="block text-[11px] font-semibold text-gray-600 mb-1">Resizable</label>
+                                <select x-model="newTextResizable" class="w-full bg-white border border-gray-300 text-gray-900 rounded-md p-2 text-xs focus:ring-1 focus:ring-primary focus:border-primary">
+                                    <option :value="true">Yes (Vertical Resize)</option>
+                                    <option :value="false">No (Fixed Size)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
                     <div x-show="newColumnType === 'DROPDOWN'">
                         <label class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Dropdown Options (Comma-separated)</label>
                         <textarea x-model="newColumnOptions" placeholder="e.g. Option A, Option B, Option C" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-sm" rows="3"></textarea>
@@ -877,7 +977,7 @@
     <!-- EDIT COLUMN MODAL -->
     <template x-teleport="body">
         <div x-show="isEditColumnModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 bg-opacity-50" style="display: none;" x-transition>
-            <div class="bg-white rounded-xl max-w-md w-full p-6 shadow-xl border border-gray-200" @click.away="isEditColumnModalOpen = false">
+            <div class="bg-white rounded-xl max-w-md w-full p-6 shadow-xl border border-gray-200 max-h-[90vh] overflow-y-auto" @click.away="isEditColumnModalOpen = false">
                 <h3 class="text-lg font-bold text-gray-900 mb-4">Edit Column Properties</h3>
                 <div class="space-y-4">
                     <div>
@@ -902,6 +1002,56 @@
                             <span class="text-[10px] text-emerald-600 font-medium mt-1 block"><i class="fas fa-info-circle"></i> You can change this system column to DROPDOWN to define predefined choices.</span>
                         </template>
                     </div>
+
+                    <!-- Text Box / Multi-line Properties (When Data Type = Text) -->
+                    <div x-show="editColumnType === 'TEXT'" class="bg-gray-50 p-3.5 rounded-lg border border-gray-200 space-y-3">
+                        <div class="flex items-center justify-between border-b border-gray-200 pb-1.5">
+                            <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                <i class="fas fa-align-left text-primary mr-1"></i> Text Box Properties
+                            </label>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1.5">Input Type</label>
+                            <div class="grid grid-cols-2 gap-2">
+                                <label class="flex items-center gap-2 p-2 bg-white rounded-md border cursor-pointer transition text-xs font-medium text-gray-700 hover:border-primary" :class="editTextType === 'single' ? 'border-primary bg-blue-50/40 text-primary font-bold ring-1 ring-primary' : 'border-gray-200'">
+                                    <input type="radio" value="single" x-model="editTextType" class="text-primary focus:ring-primary h-3.5 w-3.5">
+                                    <span>Single Line</span>
+                                </label>
+                                <label class="flex items-center gap-2 p-2 bg-white rounded-md border cursor-pointer transition text-xs font-medium text-gray-700 hover:border-primary" :class="editTextType === 'multiline' ? 'border-primary bg-blue-50/40 text-primary font-bold ring-1 ring-primary' : 'border-gray-200'">
+                                    <input type="radio" value="multiline" x-model="editTextType" class="text-primary focus:ring-primary h-3.5 w-3.5">
+                                    <span>Text Box / Multi-line</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div x-show="editTextType === 'multiline'" class="space-y-2.5 pt-1" x-transition>
+                            <div class="grid grid-cols-2 gap-2.5">
+                                <div>
+                                    <label class="block text-[11px] font-semibold text-gray-600 mb-1">Rows <span class="text-gray-400 font-normal">(Default 3)</span></label>
+                                    <input type="number" min="1" max="20" x-model="editTextRows" placeholder="3" class="w-full bg-white border border-gray-300 text-gray-900 rounded-md p-2 text-xs focus:ring-1 focus:ring-primary focus:border-primary">
+                                </div>
+                                <div>
+                                    <label class="block text-[11px] font-semibold text-gray-600 mb-1">Max Length <span class="text-gray-400 font-normal">(Optional)</span></label>
+                                    <input type="number" min="1" x-model="editTextMaxLength" placeholder="e.g. 500" class="w-full bg-white border border-gray-300 text-gray-900 rounded-md p-2 text-xs focus:ring-1 focus:ring-primary focus:border-primary">
+                                </div>
+                            </div>
+
+                            <div>
+                                <label class="block text-[11px] font-semibold text-gray-600 mb-1">Placeholder <span class="text-gray-400 font-normal">(Optional)</span></label>
+                                <input type="text" x-model="editTextPlaceholder" placeholder="e.g. Enter details..." class="w-full bg-white border border-gray-300 text-gray-900 rounded-md p-2 text-xs focus:ring-1 focus:ring-primary focus:border-primary">
+                            </div>
+
+                            <div>
+                                <label class="block text-[11px] font-semibold text-gray-600 mb-1">Resizable</label>
+                                <select x-model="editTextResizable" class="w-full bg-white border border-gray-300 text-gray-900 rounded-md p-2 text-xs focus:ring-1 focus:ring-primary focus:border-primary">
+                                    <option :value="true">Yes (Vertical Resize)</option>
+                                    <option :value="false">No (Fixed Size)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
                     <div x-show="editColumnType === 'DROPDOWN'">
                         <label class="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Dropdown Options (Comma-separated)</label>
                         <textarea x-model="editColumnOptions" placeholder="e.g. Option A, Option B, Option C" class="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-2.5 text-sm" rows="3"></textarea>
@@ -1360,6 +1510,11 @@
             newColumnType: 'TEXT',
             newColumnOptions: '',
             newColumnIsFilterable: false,
+            newTextType: 'single',
+            newTextRows: 3,
+            newTextPlaceholder: '',
+            newTextMaxLength: '',
+            newTextResizable: true,
 
             // Edit Column Modal
             isEditColumnModalOpen: false,
@@ -1369,6 +1524,11 @@
             editColumnOptions: '',
             editColumnIsSystem: false,
             editColumnIsFilterable: false,
+            editTextType: 'single',
+            editTextRows: 3,
+            editTextPlaceholder: '',
+            editTextMaxLength: '',
+            editTextResizable: true,
 
 
              // Import Modal State
@@ -1497,6 +1657,29 @@ comments: [],
 
                 this.currentPage = 1;
                 this.fetchRows();
+            },
+
+            exportExcel() {
+                const params = new URLSearchParams({
+                    table: this.tableId
+                });
+                if (this.selectedPidFilter) params.append('pid', this.selectedPidFilter);
+                if (this.selectedYearFilter) params.append('year', this.selectedYearFilter);
+                if (this.selectedMonthFilter) params.append('month', this.selectedMonthFilter);
+                if (this.selectedDueFilter) params.append('due', this.selectedDueFilter);
+                if (this.searchQuery) params.append('search', this.searchQuery);
+                if (this.sortBy) {
+                    params.append('sort_by', this.sortBy);
+                    params.append('sort_dir', this.sortDir);
+                }
+                Object.keys(this.columnFilters).forEach(colId => {
+                    const filterVal = this.columnFilters[colId];
+                    if (filterVal) {
+                        params.append('col_' + colId, filterVal);
+                    }
+                });
+
+                window.location.href = `/tables/api/tables/${this.tableId}/export-excel/?${params.toString()}`;
             },
 
             getSortLabel() {
@@ -2273,6 +2456,52 @@ comments: [],
                 });
             },
 
+            // Helper methods for Text Box / Multiline columns
+            getColumnConfigByName(colName) {
+                if (!colName) return { isMultiline: false, rows: 3, placeholder: '', maxLength: null, resizable: true };
+                const col = this.columns.find(c => c.name === colName);
+                return this.getColumnConfig(col);
+            },
+
+            getColumnConfig(col) {
+                if (!col) return { isMultiline: false, rows: 3, placeholder: '', maxLength: null, resizable: true };
+                const isDesc = String(col.name || '').toUpperCase() === 'DESCRIPTION';
+                let opts = col.options || '';
+                if (typeof opts === 'string' && opts.trim().startsWith('{')) {
+                    try {
+                        const parsed = JSON.parse(opts);
+                        if (parsed.input_type === 'multiline' || parsed.multiline === true) {
+                            return {
+                                isMultiline: true,
+                                rows: parseInt(parsed.rows) || 3,
+                                placeholder: parsed.placeholder || (isDesc ? 'Enter description...' : ''),
+                                maxLength: parsed.max_length ? parseInt(parsed.max_length) : null,
+                                resizable: parsed.resizable !== false
+                            };
+                        } else if (parsed.input_type === 'single') {
+                            return {
+                                isMultiline: false,
+                                rows: 1,
+                                placeholder: '',
+                                maxLength: null,
+                                resizable: false
+                            };
+                        }
+                    } catch (e) {}
+                }
+                return {
+                    isMultiline: isDesc,
+                    rows: isDesc ? 3 : 1,
+                    placeholder: isDesc ? 'Enter description...' : '',
+                    maxLength: null,
+                    resizable: true
+                };
+            },
+
+            isMultilineColumn(colName) {
+                return this.getColumnConfigByName(colName).isMultiline;
+            },
+
             // Column Builder
             openColumnModal() {
                 this.isColumnModalOpen = true;
@@ -2280,9 +2509,44 @@ comments: [],
                 this.newColumnType = 'TEXT';
                 this.newColumnOptions = '';
                 this.newColumnIsFilterable = false;
+                this.newTextType = 'single';
+                this.newTextRows = 3;
+                this.newTextPlaceholder = '';
+                this.newTextMaxLength = '';
+                this.newTextResizable = true;
             },
 
             createColumn() {
+                let finalOptions = this.newColumnOptions;
+                if (this.newColumnType === 'TEXT') {
+                    if (this.newTextType === 'multiline') {
+                        const rowsNum = parseInt(this.newTextRows);
+                        if (isNaN(rowsNum) || rowsNum < 1) {
+                            alert("Number of rows must be at least 1.");
+                            return;
+                        }
+                        let maxLen = null;
+                        if (this.newTextMaxLength !== '' && this.newTextMaxLength !== null && this.newTextMaxLength !== undefined) {
+                            maxLen = parseInt(this.newTextMaxLength);
+                            if (isNaN(maxLen) || maxLen < 1) {
+                                alert("Max length must be a positive integer.");
+                                return;
+                            }
+                        }
+                        finalOptions = JSON.stringify({
+                            input_type: 'multiline',
+                            rows: rowsNum,
+                            placeholder: (this.newTextPlaceholder || '').trim(),
+                            max_length: maxLen,
+                            resizable: this.newTextResizable === true || this.newTextResizable === 'true'
+                        });
+                    } else {
+                        finalOptions = JSON.stringify({
+                            input_type: 'single'
+                        });
+                    }
+                }
+
                 fetch('/tables/api/columns/', {
                     method: 'POST',
                     headers: {
@@ -2293,7 +2557,7 @@ comments: [],
                         table: this.tableId,
                         name: this.newColumnName,
                         data_type: this.newColumnType,
-                        options: this.newColumnOptions,
+                        options: finalOptions,
                         is_filterable: this.newColumnIsFilterable
                     })
                 })
@@ -2301,7 +2565,10 @@ comments: [],
                     if (res.ok) {
                         location.reload(); 
                     } else {
-                        alert("Error adding column.");
+                        res.json().then(data => {
+                            const errMsg = typeof data === 'object' ? Object.values(data).flat().join(' ') : 'Error adding column.';
+                            alert(errMsg);
+                        }).catch(() => alert("Error adding column."));
                     }
                 });
             },
@@ -2313,11 +2580,74 @@ comments: [],
                 this.editColumnOptions = columnOptions || '';
                 this.editColumnIsSystem = isSystem;
                 this.editColumnIsFilterable = isFilterable;
+
+                this.editTextType = 'single';
+                this.editTextRows = 3;
+                this.editTextPlaceholder = '';
+                this.editTextMaxLength = '';
+                this.editTextResizable = true;
+
+                if (columnType === 'TEXT' || (!columnType && this.editColumnType === 'TEXT')) {
+                    const isDesc = String(columnName || '').toUpperCase() === 'DESCRIPTION';
+                    let parsed = null;
+                    if (columnOptions && typeof columnOptions === 'string' && columnOptions.trim().startsWith('{')) {
+                        try {
+                            parsed = JSON.parse(columnOptions);
+                        } catch (e) {}
+                    }
+                    if (parsed && (parsed.input_type === 'multiline' || parsed.multiline === true)) {
+                        this.editTextType = 'multiline';
+                        this.editTextRows = parseInt(parsed.rows) || 3;
+                        this.editTextPlaceholder = parsed.placeholder || '';
+                        this.editTextMaxLength = parsed.max_length || '';
+                        this.editTextResizable = parsed.resizable !== false;
+                    } else if (parsed && parsed.input_type === 'single') {
+                        this.editTextType = 'single';
+                    } else if (isDesc) {
+                        this.editTextType = 'multiline';
+                        this.editTextRows = 3;
+                        this.editTextPlaceholder = 'Enter description...';
+                        this.editTextMaxLength = '';
+                        this.editTextResizable = true;
+                    }
+                }
+
                 this.isEditColumnModalOpen = true;
             },
 
             saveColumnProperties() {
                 if (!this.editColumnId) return;
+
+                let finalOptions = this.editColumnOptions;
+                if (this.editColumnType === 'TEXT') {
+                    if (this.editTextType === 'multiline') {
+                        const rowsNum = parseInt(this.editTextRows);
+                        if (isNaN(rowsNum) || rowsNum < 1) {
+                            alert("Number of rows must be at least 1.");
+                            return;
+                        }
+                        let maxLen = null;
+                        if (this.editTextMaxLength !== '' && this.editTextMaxLength !== null && this.editTextMaxLength !== undefined) {
+                            maxLen = parseInt(this.editTextMaxLength);
+                            if (isNaN(maxLen) || maxLen < 1) {
+                                alert("Max length must be a positive integer.");
+                                return;
+                            }
+                        }
+                        finalOptions = JSON.stringify({
+                            input_type: 'multiline',
+                            rows: rowsNum,
+                            placeholder: (this.editTextPlaceholder || '').trim(),
+                            max_length: maxLen,
+                            resizable: this.editTextResizable === true || this.editTextResizable === 'true'
+                        });
+                    } else {
+                        finalOptions = JSON.stringify({
+                            input_type: 'single'
+                        });
+                    }
+                }
+
                 fetch(`/tables/api/columns/${this.editColumnId}/`, {
                     method: 'PATCH',
                     headers: {
@@ -2327,7 +2657,7 @@ comments: [],
                     body: JSON.stringify({
                         name: this.editColumnName,
                         data_type: this.editColumnType,
-                        options: this.editColumnOptions,
+                        options: finalOptions,
                         is_filterable: this.editColumnIsFilterable
                     })
                 })
@@ -2336,7 +2666,8 @@ comments: [],
                         location.reload();
                     } else {
                         res.json().then(data => {
-                            alert(data.name ? data.name[0] : "Error saving column properties.");
+                            const errMsg = typeof data === 'object' ? Object.values(data).flat().join(' ') : 'Error saving column properties.';
+                            alert(errMsg);
                         }).catch(() => {
                             alert("Error saving column properties.");
                         });

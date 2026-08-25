@@ -22,14 +22,91 @@ class LoginSessionTests(TestCase):
             "email": "test.user@flow-force.com",
             "password": "testpassword123"
         })
-        # Check redirect
+        # Check redirect to employee dashboard
         self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse("employee_dashboard"))
         # Verify that the session has the expected 10-year age
         session = self.client.session
         # Check that session expiry age is equal to SESSION_COOKIE_AGE
         self.assertEqual(session.get_expiry_age(), settings.SESSION_COOKIE_AGE)
         # Check that it doesn't expire at browser close
         self.assertFalse(session.get_expire_at_browser_close())
+
+    def test_login_invalid_password_rejected(self):
+        response = self.client.post(self.login_url, {
+            "email": "test.user@flow-force.com",
+            "password": "wrongpassword"
+        }, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Invalid email or password.")
+        self.assertNotIn('_auth_user_id', self.client.session)
+
+    def test_login_nonexistent_user_rejected(self):
+        response = self.client.post(self.login_url, {
+            "email": "nonexistent@flow-force.com",
+            "password": "testpassword123"
+        }, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Invalid email or password.")
+        self.assertNotIn('_auth_user_id', self.client.session)
+
+    def test_login_pending_user_rejected(self):
+        pending_user = EmployeeUser.objects.create_user(
+            email="pending@flow-force.com",
+            password="testpassword123",
+            full_name="Pending User",
+            status="PENDING"
+        )
+        response = self.client.post(self.login_url, {
+            "email": "pending@flow-force.com",
+            "password": "testpassword123"
+        }, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Your account is awaiting approval.")
+        self.assertNotIn('_auth_user_id', self.client.session)
+
+    def test_login_rejected_user_rejected(self):
+        rejected_user = EmployeeUser.objects.create_user(
+            email="rejected@flow-force.com",
+            password="testpassword123",
+            full_name="Rejected User",
+            status="REJECTED"
+        )
+        response = self.client.post(self.login_url, {
+            "email": "rejected@flow-force.com",
+            "password": "testpassword123"
+        }, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Your account has been rejected.")
+        self.assertNotIn('_auth_user_id', self.client.session)
+
+    def test_login_disabled_user_rejected(self):
+        disabled_user = EmployeeUser.objects.create_user(
+            email="disabled@flow-force.com",
+            password="testpassword123",
+            full_name="Disabled User",
+            status="APPROVED",
+            is_active=False
+        )
+        response = self.client.post(self.login_url, {
+            "email": "disabled@flow-force.com",
+            "password": "testpassword123"
+        }, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Account disabled.")
+        self.assertNotIn('_auth_user_id', self.client.session)
+
+    def test_create_superuser_defaults_to_approved(self):
+        su = EmployeeUser.objects.create_superuser(
+            email="superadmin@flow-force.com",
+            password="superpassword123",
+            full_name="Super Admin"
+        )
+        self.assertEqual(su.status, "APPROVED")
+        self.assertTrue(su.is_superuser)
+        self.assertTrue(su.is_staff)
+        self.assertTrue(su.is_active)
+        self.assertEqual(su.role, "SUPER_ADMIN")
 
     def test_logout_clears_session(self):
         # Log in first

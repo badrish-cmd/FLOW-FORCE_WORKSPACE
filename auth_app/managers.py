@@ -14,7 +14,7 @@ class EmployeeUserManager(BaseUserManager):
                 "Email is required"
             )
 
-        email = self.normalize_email(email)
+        email = self.normalize_email(email).lower().strip()
 
         # Resolve department string or key to a Department instance
         dept = extra_fields.get("department")
@@ -46,6 +46,11 @@ class EmployeeUserManager(BaseUserManager):
         extra_fields.setdefault(
             "role",
             "SUPER_ADMIN"
+        )
+
+        extra_fields.setdefault(
+            "status",
+            "APPROVED"
         )
 
         extra_fields.setdefault(
