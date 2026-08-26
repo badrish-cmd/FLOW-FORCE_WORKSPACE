@@ -89,6 +89,215 @@ def sync_logs_row_overdue(row, request_user=None):
         defaults={"value": days_overdue, "updated_by": request_user}
     )
 
+def get_filtered_table_rows(table, query_params, user=None):
+    """
+    Returns a filtered, ordered queryset of rows for a given table based on query parameters.
+    Shared across RowViewSet.get_queryset and TableViewSet.export_excel.
+    """
+    if user and not has_table_access(user, table, "VIEW"):
+        return Row.objects.none()
+
+    from django.db.models import Prefetch, Q, Value, TextField
+    from django.db.models.functions import Cast, Lower, Replace
+    import datetime
+
+    queryset = Row.objects.filter(
+        table=table, is_archived=False
+    ).select_related(
+        'created_by', 'task', 'task__assigned_by'
+    ).prefetch_related(
+        Prefetch('cells', queryset=CellValue.objects.select_related('column', 'updated_by')),
+        'task__assigned_to'
+    )
+
+    # 1. Filter by task_id
+    task_id = query_params.get("task_id")
+    if task_id:
+        queryset = queryset.filter(task__id=task_id)
+
+    # 2. General Row Search Filter (irrespective of case-sensitivity and inline spaces)
+    search = query_params.get("search")
+    if search:
+        clean_search = search.lower().replace(" ", "")
+        
+        matching_rows = CellValue.objects.filter(
+            row__table=table,
+            row__is_archived=False
+        ).annotate(
+            text_val=Cast('value', TextField())
+        ).annotate(
+            clean_val=Lower(Replace('text_val', Value(' '), Value(''), output_field=TextField()))
+        ).filter(
+            clean_val__contains=clean_search
+        ).values_list('row_id', flat=True)
+        
+        queryset = queryset.annotate(
+            clean_task_status=Lower(Replace('task__status', Value(' '), Value(''), output_field=TextField())),
+            clean_task_priority=Lower(Replace('task__priority', Value(' '), Value(''), output_field=TextField()))
+        ).filter(
+            Q(id__in=matching_rows) |
+            Q(clean_task_status__contains=clean_search) |
+            Q(clean_task_priority__contains=clean_search)
+        )
+
+    # 3. Custom dynamic column filters (col_<id>)
+    for key, val in query_params.items():
+        if key.startswith("col_") and val:
+            try:
+                col_id = int(key.replace("col_", ""))
+                queryset = queryset.filter(cells__column_id=col_id, cells__value=val)
+            except ValueError:
+                pass
+
+    # 4. Filter by PID
+    pid = query_params.get("pid")
+    if pid:
+        queryset = queryset.filter(
+            Q(cells__column__name__iexact='PID', cells__value=pid) |
+            Q(cells__column__name__iexact='PID', cells__value__icontains=pid)
+        ).distinct()
+
+    # 5. Filter by Year
+    year = query_params.get("year")
+    if year:
+        try:
+            year_int = int(str(year).strip())
+            queryset = queryset.filter(task__due_date__year=year_int)
+        except (ValueError, TypeError):
+            pass
+
+    # 6. Filter by Month
+    month = query_params.get("month")
+    if month:
+        try:
+            month_int = int(str(month).strip())
+            queryset = queryset.filter(task__due_date__month=month_int)
+        except (ValueError, TypeError):
+            pass
+
+    # 7. Filter by Due Status
+    due = query_params.get("due")
+    if due:
+        today = timezone.localdate()
+        if due == "today":
+            queryset = queryset.filter(task__due_date=today)
+        elif due == "this_week":
+            monday = today - datetime.timedelta(days=today.weekday())
+            sunday = monday + datetime.timedelta(days=6)
+            queryset = queryset.filter(task__due_date__range=[monday, sunday])
+
+    # 8. Apply Sorting (PostgreSQL-safe without unsafe DateField casts of JSONB)
+    sort_by = query_params.get("sort_by")
+    sort_dir = query_params.get("sort_dir", "asc")
+    if sort_by:
+        if sort_by.lower() == 'date':
+            sort_by = 'date_assigned'
+        elif sort_by.lower() in ['enquiry_no', 'enquiry_number', 'enquiry_no/quotation_no']:
+            sort_by = 'enquiry_no'
+        
+        if sort_by == 'enquiry_no':
+            from django.db.models import Subquery, OuterRef
+            enquiry_col = Column.objects.filter(table=table, name__iexact="ENQUIRY_NO/QUOTATION_NO").first()
+            if not enquiry_col:
+                enquiry_col = Column.objects.filter(table=table, name__icontains="ENQUIRY").first()
+            if enquiry_col:
+                cell_subquery = Subquery(
+                    CellValue.objects.filter(row=OuterRef('pk'), column=enquiry_col).values('value')[:1]
+                )
+                queryset = queryset.annotate(
+                    enquiry_val=Cast(
+                        Replace(
+                            Cast(cell_subquery, output_field=TextField()),
+                            Value('"'),
+                            Value(''),
+                            output_field=TextField()
+                        ),
+                        output_field=TextField()
+                    )
+                )
+                if sort_dir == 'desc':
+                    queryset = queryset.order_by('-enquiry_val', '-id')
+                else:
+                    queryset = queryset.order_by('enquiry_val', 'id')
+            else:
+                queryset = queryset.order_by('id')
+        elif sort_by in ['due_date', 'return_date'] and table.job_type in ['GENERAL', 'ENGINEER', 'LIST_PID', 'LOGS']:
+            if table.job_type == 'LIST_PID':
+                from django.db.models import Subquery, OuterRef
+                due_col = Column.objects.filter(table=table, name__iexact="DUE_DATE_FLOW_FORCE").first()
+                if due_col:
+                    cell_subquery = Subquery(
+                        CellValue.objects.filter(row=OuterRef('pk'), column=due_col).values('value')[:1]
+                    )
+                    queryset = queryset.annotate(
+                        due_date_str=Cast(
+                            Replace(
+                                Cast(cell_subquery, output_field=TextField()),
+                                Value('"'),
+                                Value(''),
+                                output_field=TextField()
+                            ),
+                            output_field=TextField()
+                        )
+                    )
+                    if sort_dir == 'desc':
+                        queryset = queryset.order_by('-due_date_str', '-id')
+                    else:
+                        queryset = queryset.order_by('due_date_str', 'id')
+                else:
+                    if sort_dir == 'desc':
+                        queryset = queryset.order_by('-task__due_date', '-id')
+                    else:
+                        queryset = queryset.order_by('task__due_date', 'id')
+            else:
+                if sort_dir == 'desc':
+                    queryset = queryset.order_by('-task__due_date', '-id')
+                else:
+                    queryset = queryset.order_by('task__due_date', 'id')
+        elif sort_by == 'follow_up_date' and table.job_type == 'SALES':
+            from django.db.models import Max, DateField
+            from django.db.models.functions import Coalesce
+            queryset = queryset.annotate(
+                latest_follow_up=Max('task__follow_ups__follow_up_date')
+            ).annotate(
+                sorted_follow_up=Coalesce('latest_follow_up', 'task__due_date', output_field=DateField())
+            )
+            if sort_dir == 'desc':
+                queryset = queryset.order_by('-sorted_follow_up', '-id')
+            else:
+                queryset = queryset.order_by('sorted_follow_up', 'id')
+        elif sort_by == 'date_assigned':
+            from django.db.models import Subquery, OuterRef
+            from django.db.models.functions import Coalesce
+            date_col = Column.objects.filter(table=table, name__iexact="DATE").first()
+            if date_col:
+                cell_subquery = Subquery(
+                    CellValue.objects.filter(row=OuterRef('pk'), column=date_col).values('value')[:1]
+                )
+                queryset = queryset.annotate(
+                    date_assigned_val=Cast(
+                        Replace(
+                            Cast(cell_subquery, output_field=TextField()),
+                            Value('"'),
+                            Value(''),
+                            output_field=TextField()
+                        ),
+                        output_field=TextField()
+                    )
+                ).annotate(
+                    sorted_date_assigned=Coalesce('date_assigned_val', Cast('created_at', output_field=TextField()), output_field=TextField())
+                )
+            else:
+                queryset = queryset.annotate(
+                    sorted_date_assigned=Cast('created_at', output_field=TextField())
+                )
+            if sort_dir == 'desc':
+                queryset = queryset.order_by('-sorted_date_assigned', '-id')
+            else:
+                queryset = queryset.order_by('sorted_date_assigned', 'id')
+
+    return queryset
+
 class TableViewSet(viewsets.ModelViewSet):
     serializer_class = TableSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -1070,178 +1279,177 @@ class TableViewSet(viewsets.ModelViewSet):
     def export_excel(self, request, pk=None):
         import io
         import re
+        import logging
         import openpyxl
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
         from openpyxl.utils import get_column_letter
         from django.http import HttpResponse
         from datetime import datetime, date
 
-        table = self.get_object_or_404(pk)
-        if not has_table_access(request.user, table, "VIEW"):
-            return Response({"error": "No view access to this table"}, status=status.HTTP_403_FORBIDDEN)
+        logger = logging.getLogger(__name__)
 
-        # Get filtered queryset using RowViewSet's get_queryset logic
-        row_viewset = RowViewSet()
-        row_viewset.request = request
-        row_viewset.action = "list"
-        
-        # Ensure 'table' param is set in query_params for RowViewSet filtering
-        if "table" not in request.query_params:
-            if hasattr(request.GET, '_mutable'):
-                request.GET._mutable = True
-                request.GET["table"] = str(table.id)
-                request.GET._mutable = False
-            else:
-                request.GET = request.GET.copy()
-                request.GET["table"] = str(table.id)
-        
-        rows_qs = row_viewset.get_queryset()
+        try:
+            table = get_object_or_404(Table, pk=pk)
+            if not has_table_access(request.user, table, "VIEW"):
+                return Response({"error": "No view access to this table"}, status=status.HTTP_403_FORBIDDEN)
 
-        columns = list(table.columns.all().order_by("position", "id"))
+            rows_qs = get_filtered_table_rows(table, request.query_params, user=request.user)
+            columns = list(table.columns.all().order_by("position", "id"))
 
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        
-        # Clean title (max 31 chars, no invalid chars : \ / ? * [ ])
-        clean_title = re.sub(r'[:\\/?*\[\]]', '_', table.name)[:31]
-        ws.title = clean_title or "Export"
-
-        # Define Styles
-        header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
-        header_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
-        header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
-        data_font = Font(name="Calibri", size=10)
-        data_alignment_left = Alignment(horizontal="left", vertical="top", wrap_text=True)
-        data_alignment_center = Alignment(horizontal="center", vertical="top")
-        data_alignment_right = Alignment(horizontal="right", vertical="top")
-
-        thin_border = Border(
-            left=Side(style='thin', color='CBD5E1'),
-            right=Side(style='thin', color='CBD5E1'),
-            top=Side(style='thin', color='CBD5E1'),
-            bottom=Side(style='thin', color='CBD5E1')
-        )
-
-        # Write Header Row
-        headers = [col.name for col in columns]
-        ws.append(headers)
-        ws.row_dimensions[1].height = 28
-
-        for col_idx in range(1, len(headers) + 1):
-            cell = ws.cell(row=1, column=col_idx)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = header_alignment
-            cell.border = thin_border
-
-        # Check multiline columns
-        def is_col_multiline(c):
-            if c.name.upper() == "DESCRIPTION":
-                return True
-            if c.data_type == "TEXT" and c.options and str(c.options).strip().startswith("{"):
-                try:
-                    import json
-                    c_opts = json.loads(c.options)
-                    if c_opts.get("input_type") == "multiline" or c_opts.get("multiline") is True:
-                        return True
-                except Exception:
-                    pass
-            return False
-
-        # Fetch and write data rows
-        for row_idx, row in enumerate(rows_qs, start=2):
-            cell_map = {c.column_id: c.value for c in row.cells.all()}
-            row_data = []
+            wb = openpyxl.Workbook()
+            ws = wb.active
             
-            for col in columns:
-                raw_val = cell_map.get(col.id)
-                formatted_val = raw_val
-                
-                if raw_val is None or str(raw_val).strip() == "":
-                    formatted_val = ""
-                elif col.data_type == "NUMBER":
-                    try:
-                        val_str = str(raw_val).strip()
-                        if "." in val_str:
-                            formatted_val = float(val_str)
-                        else:
-                            formatted_val = int(val_str)
-                    except (ValueError, TypeError):
-                        formatted_val = str(raw_val)
-                elif col.data_type in ["DATE", "DATETIME"]:
-                    try:
-                        date_str = str(raw_val).split("T")[0].strip()
-                        formatted_val = datetime.strptime(date_str, "%Y-%m-%d").date()
-                    except (ValueError, TypeError):
-                        formatted_val = str(raw_val)
-                elif col.data_type == "CHECKBOX":
-                    is_true = str(raw_val).lower().strip() in ["true", "1", "yes"]
-                    formatted_val = "YES" if is_true else "NO"
-                else:
-                    formatted_val = str(raw_val)
-                
-                row_data.append(formatted_val)
+            # Clean title (max 31 chars, no invalid chars : \ / ? * [ ])
+            clean_title = re.sub(r'[:\\/?*\[\]]', '_', (table.name or "Export"))[:31]
+            ws.title = clean_title or "Export"
 
-            ws.append(row_data)
-            ws.row_dimensions[row_idx].height = 20
+            # Define Styles
+            header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+            header_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+            header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-            for col_idx, (col, val) in enumerate(zip(columns, row_data), 1):
-                cell = ws.cell(row=row_idx, column=col_idx)
-                cell.font = data_font
+            data_font = Font(name="Calibri", size=10)
+            data_alignment_left = Alignment(horizontal="left", vertical="top", wrap_text=True)
+            data_alignment_center = Alignment(horizontal="center", vertical="top")
+            data_alignment_right = Alignment(horizontal="right", vertical="top")
+
+            thin_border = Border(
+                left=Side(style='thin', color='CBD5E1'),
+                right=Side(style='thin', color='CBD5E1'),
+                top=Side(style='thin', color='CBD5E1'),
+                bottom=Side(style='thin', color='CBD5E1')
+            )
+
+            # Write Header Row
+            headers = [col.name for col in columns]
+            ws.append(headers)
+            ws.row_dimensions[1].height = 28
+
+            for col_idx in range(1, len(headers) + 1):
+                cell = ws.cell(row=1, column=col_idx)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_alignment
                 cell.border = thin_border
+
+            # Check multiline columns
+            def is_col_multiline(c):
+                if c.name and c.name.upper() == "DESCRIPTION":
+                    return True
+                if c.data_type == "TEXT" and c.options and str(c.options).strip().startswith("{"):
+                    try:
+                        import json
+                        c_opts = json.loads(c.options)
+                        if c_opts.get("input_type") == "multiline" or c_opts.get("multiline") is True:
+                            return True
+                    except Exception:
+                        pass
+                return False
+
+            # Write data rows
+            row_idx = 1
+            for row in rows_qs.iterator(chunk_size=1000):
+                row_idx += 1
+                cell_map = {c.column_id: c.value for c in row.cells.all()}
+                row_data = []
                 
-                if col.data_type == "NUMBER":
-                    cell.alignment = data_alignment_right
+                for col in columns:
+                    raw_val = cell_map.get(col.id)
+                    formatted_val = raw_val
+                    
+                    if raw_val is None or str(raw_val).strip() == "":
+                        formatted_val = ""
+                    elif col.data_type == "NUMBER":
+                        try:
+                            val_str = str(raw_val).strip()
+                            if "." in val_str:
+                                formatted_val = float(val_str)
+                            else:
+                                formatted_val = int(val_str)
+                        except (ValueError, TypeError):
+                            formatted_val = str(raw_val)
+                    elif col.data_type in ["DATE", "DATETIME"]:
+                        try:
+                            date_str = str(raw_val).split("T")[0].strip()
+                            formatted_val = datetime.strptime(date_str, "%Y-%m-%d").date()
+                        except (ValueError, TypeError):
+                            formatted_val = str(raw_val)
+                    elif col.data_type == "CHECKBOX" or col.name.upper() in ["INITIAL_MAIL", "ALERT_MAIL"]:
+                        is_true = str(raw_val).lower().strip() in ["true", "1", "yes"]
+                        formatted_val = "YES" if is_true else "NO"
+                    else:
+                        formatted_val = str(raw_val)
+                    
+                    row_data.append(formatted_val)
+
+                ws.append(row_data)
+                ws.row_dimensions[row_idx].height = 20
+
+                for col_idx, (col, val) in enumerate(zip(columns, row_data), 1):
+                    cell = ws.cell(row=row_idx, column=col_idx)
+                    cell.font = data_font
+                    cell.border = thin_border
+                    
+                    if col.data_type == "NUMBER":
+                        cell.alignment = data_alignment_right
+                    elif col.data_type in ["DATE", "DATETIME"]:
+                        cell.alignment = data_alignment_center
+                        if isinstance(val, (datetime, date)):
+                            cell.number_format = 'yyyy-mm-dd'
+                    elif col.data_type == "CHECKBOX":
+                        cell.alignment = data_alignment_center
+                    elif is_col_multiline(col):
+                        cell.alignment = data_alignment_left
+                    else:
+                        cell.alignment = data_alignment_left
+
+            # Auto-adjust column widths
+            for col_idx, col in enumerate(columns, 1):
+                col_letter = get_column_letter(col_idx)
+                header_len = len(col.name or "")
+                max_len = header_len
+                
+                col_cells = ws[col_letter]
+                sample_cells = col_cells[1:101] if len(col_cells) > 1 else ()
+                for cell in sample_cells:
+                    if cell.value is not None:
+                        lines = str(cell.value).split("\n")
+                        longest_line = max((len(l) for l in lines), default=0)
+                        max_len = max(max_len, longest_line)
+                
+                if is_col_multiline(col):
+                    ws.column_dimensions[col_letter].width = min(max(max_len + 4, 30), 60)
                 elif col.data_type in ["DATE", "DATETIME"]:
-                    cell.alignment = data_alignment_center
-                    if isinstance(val, (datetime, date)):
-                        cell.number_format = 'yyyy-mm-dd'
-                elif col.data_type == "CHECKBOX":
-                    cell.alignment = data_alignment_center
-                elif is_col_multiline(col):
-                    cell.alignment = data_alignment_left
+                    ws.column_dimensions[col_letter].width = max(max_len + 4, 15)
+                elif col.data_type == "NUMBER":
+                    ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
                 else:
-                    cell.alignment = data_alignment_left
+                    ws.column_dimensions[col_letter].width = min(max(max_len + 4, 14), 45)
 
-        # Auto-adjust column widths
-        for col_idx, col in enumerate(columns, 1):
-            col_letter = get_column_letter(col_idx)
-            header_len = len(col.name or "")
-            max_len = header_len
-            
-            for cell in ws[col_letter][1:101]:
-                if cell.value is not None:
-                    lines = str(cell.value).split("\n")
-                    longest_line = max((len(l) for l in lines), default=0)
-                    max_len = max(max_len, longest_line)
-            
-            if is_col_multiline(col):
-                ws.column_dimensions[col_letter].width = min(max(max_len + 4, 30), 60)
-            elif col.data_type in ["DATE", "DATETIME"]:
-                ws.column_dimensions[col_letter].width = max(max_len + 4, 15)
-            elif col.data_type == "NUMBER":
-                ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
-            else:
-                ws.column_dimensions[col_letter].width = min(max(max_len + 4, 14), 45)
+            # Generate Sensible Filename
+            today_str = timezone.localdate().strftime("%Y-%m-%d")
+            safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', (table.name or "table").strip().lower())
+            safe_name = re.sub(r'_+', '_', safe_name).strip('_') or "export"
+            filename = f"{safe_name}_export_{today_str}.xlsx"
 
-        # Generate Sensible Filename
-        today_str = timezone.localdate().strftime("%Y-%m-%d")
-        safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', table.name.strip().lower())
-        safe_name = re.sub(r'_+', '_', safe_name).strip('_') or "export"
-        filename = f"{safe_name}_export_{today_str}.xlsx"
+            output = io.BytesIO()
+            wb.save(output)
+            output.seek(0)
 
-        output = io.BytesIO()
-        wb.save(output)
-        output.seek(0)
+            response = HttpResponse(
+                output.getvalue(),
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            response["Content-Disposition"] = f'attachment; filename="{filename}"'
+            response["Access-Control-Expose-Headers"] = "Content-Disposition"
+            return response
 
-        response = HttpResponse(
-            output.getvalue(),
-            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-        response["Content-Disposition"] = f'attachment; filename="{filename}"'
-        response["Access-Control-Expose-Headers"] = "Content-Disposition"
-        return response
+        except Exception as e:
+            logger.exception("Error exporting Excel for table %s: %s", pk, str(e))
+            return Response(
+                {"error": "Failed to generate Excel export. An error occurred on the server."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     def get_object_or_404(self, pk):
         obj = get_object_or_404(Table, pk=pk)
@@ -1665,198 +1873,7 @@ class RowViewSet(viewsets.ModelViewSet):
         if not has_table_access(self.request.user, table, "VIEW"):
             return Row.objects.none()
             
-        from django.db.models import Prefetch
-        queryset = Row.objects.filter(
-            table=table, is_archived=False
-        ).select_related(
-            'created_by', 'task', 'task__assigned_by'
-        ).prefetch_related(
-            Prefetch('cells', queryset=CellValue.objects.select_related('column', 'updated_by')),
-            'task__assigned_to'
-        )
-        
-        # Apply Query Params Filters
-        task_id = self.request.query_params.get("task_id")
-        if task_id:
-            queryset = queryset.filter(task__id=task_id)
-            
-        # General Row Search Filter (irrespective of case-sensitivity and inline spaces)
-        search = self.request.query_params.get("search")
-        if search:
-            from django.db.models import Q, Value, TextField
-            from django.db.models.functions import Cast, Lower, Replace
-            
-            clean_search = search.lower().replace(" ", "")
-            
-            matching_rows = CellValue.objects.filter(
-                row__table=table,
-                row__is_archived=False
-            ).annotate(
-                text_val=Cast('value', TextField())
-            ).annotate(
-                clean_val=Lower(Replace('text_val', Value(' '), Value(''), output_field=TextField()))
-            ).filter(
-                clean_val__contains=clean_search
-            ).values_list('row_id', flat=True)
-            
-            queryset = queryset.annotate(
-                clean_task_status=Lower(Replace('task__status', Value(' '), Value(''), output_field=TextField())),
-                clean_task_priority=Lower(Replace('task__priority', Value(' '), Value(''), output_field=TextField()))
-            ).filter(
-                Q(id__in=matching_rows) |
-                Q(clean_task_status__contains=clean_search) |
-                Q(clean_task_priority__contains=clean_search)
-            )
-
-        # Custom dynamic column filters
-        for key, val in self.request.query_params.items():
-            if key.startswith("col_") and val:
-                try:
-                    col_id = int(key.replace("col_", ""))
-                    queryset = queryset.filter(cells__column_id=col_id, cells__value=val)
-                except ValueError:
-                    pass
-        pid = self.request.query_params.get("pid")
-        if pid:
-            from django.db.models import Q
-            queryset = queryset.filter(
-                Q(cells__column__name__iexact='PID', cells__value=pid) |
-                Q(cells__column__name__iexact='PID', cells__value__icontains=pid)
-            ).distinct()
-            
-        year = self.request.query_params.get("year")
-        if year:
-            queryset = queryset.filter(task__due_date__year=year)
-            
-        month = self.request.query_params.get("month")
-        if month:
-            queryset = queryset.filter(task__due_date__month=month)
-            
-        due = self.request.query_params.get("due")
-        if due:
-            import datetime
-            from django.utils import timezone
-            today = timezone.localdate()
-            if due == "today":
-                queryset = queryset.filter(task__due_date=today)
-            elif due == "this_week":
-                monday = today - datetime.timedelta(days=today.weekday())
-                sunday = monday + datetime.timedelta(days=6)
-                queryset = queryset.filter(task__due_date__range=[monday, sunday])
-                
-        # Apply Sorting
-        sort_by = self.request.query_params.get("sort_by")
-        sort_dir = self.request.query_params.get("sort_dir", "asc")
-        if sort_by:
-            if sort_by.lower() == 'date':
-                sort_by = 'date_assigned'
-            elif sort_by.lower() in ['enquiry_no', 'enquiry_number', 'enquiry_no/quotation_no']:
-                sort_by = 'enquiry_no'
-            
-            if sort_by == 'enquiry_no':
-                from django.db.models import Subquery, OuterRef, TextField, Value
-                from django.db.models.functions import Cast, Replace
-                enquiry_col = Column.objects.filter(table=table, name__iexact="ENQUIRY_NO/QUOTATION_NO").first()
-                if not enquiry_col:
-                    enquiry_col = Column.objects.filter(table=table, name__icontains="ENQUIRY").first()
-                if enquiry_col:
-                    cell_subquery = Subquery(
-                        CellValue.objects.filter(row=OuterRef('pk'), column=enquiry_col).values('value')[:1]
-                    )
-                    queryset = queryset.annotate(
-                        enquiry_val=Cast(
-                            Replace(
-                                Cast(cell_subquery, output_field=TextField()),
-                                Value('"'),
-                                Value(''),
-                                output_field=TextField()
-                            ),
-                            output_field=TextField()
-                        )
-                    )
-                    if sort_dir == 'desc':
-                        queryset = queryset.order_by('-enquiry_val', '-id')
-                    else:
-                        queryset = queryset.order_by('enquiry_val', 'id')
-                else:
-                    queryset = queryset.order_by('id')
-            elif sort_by in ['due_date', 'return_date'] and table.job_type in ['GENERAL', 'ENGINEER', 'LIST_PID', 'LOGS']:
-                if table.job_type == 'LIST_PID':
-                    from django.db.models import Subquery, OuterRef, TextField, Value
-                    from django.db.models.functions import Cast, Replace
-                    due_col = Column.objects.filter(table=table, name__iexact="DUE_DATE_FLOW_FORCE").first()
-                    if due_col:
-                        cell_subquery = Subquery(
-                            CellValue.objects.filter(row=OuterRef('pk'), column=due_col).values('value')[:1]
-                        )
-                        queryset = queryset.annotate(
-                            due_date_str=Cast(
-                                Replace(
-                                    Cast(cell_subquery, output_field=TextField()),
-                                    Value('"'),
-                                    Value(''),
-                                    output_field=TextField()
-                                ),
-                                output_field=TextField()
-                            )
-                        )
-                        if sort_dir == 'desc':
-                            queryset = queryset.order_by('-due_date_str', '-id')
-                        else:
-                            queryset = queryset.order_by('due_date_str', 'id')
-                    else:
-                        if sort_dir == 'desc':
-                            queryset = queryset.order_by('-task__due_date', '-id')
-                        else:
-                            queryset = queryset.order_by('task__due_date', 'id')
-                else:
-                    if sort_dir == 'desc':
-                        queryset = queryset.order_by('-task__due_date', '-id')
-                    else:
-                        queryset = queryset.order_by('task__due_date', 'id')
-            elif sort_by == 'follow_up_date' and table.job_type == 'SALES':
-                from django.db.models import Max, DateField
-                from django.db.models.functions import Coalesce
-                queryset = queryset.annotate(
-                    latest_follow_up=Max('task__follow_ups__follow_up_date')
-                ).annotate(
-                    sorted_follow_up=Coalesce('latest_follow_up', 'task__due_date', output_field=DateField())
-                )
-                if sort_dir == 'desc':
-                    queryset = queryset.order_by('-sorted_follow_up', '-id')
-                else:
-                    queryset = queryset.order_by('sorted_follow_up', 'id')
-            elif sort_by == 'date_assigned':
-                from django.db.models import Subquery, OuterRef, DateField, TextField, Value
-                from django.db.models.functions import Coalesce, Cast, Replace
-                date_col = Column.objects.filter(table=table, name__iexact="DATE").first()
-                if date_col:
-                    cell_subquery = Subquery(
-                        CellValue.objects.filter(row=OuterRef('pk'), column=date_col).values('value')[:1]
-                    )
-                    queryset = queryset.annotate(
-                        date_assigned_val=Cast(
-                            Replace(
-                                Cast(cell_subquery, output_field=TextField()),
-                                Value('"'),
-                                Value(''),
-                                output_field=TextField()
-                            ),
-                            output_field=DateField()
-                        )
-                    ).annotate(
-                        sorted_date_assigned=Coalesce('date_assigned_val', Cast('created_at', output_field=DateField()), output_field=DateField())
-                    )
-                else:
-                    queryset = queryset.annotate(
-                        sorted_date_assigned=Cast('created_at', output_field=DateField())
-                    )
-                if sort_dir == 'desc':
-                    queryset = queryset.order_by('-sorted_date_assigned', '-id')
-                else:
-                    queryset = queryset.order_by('sorted_date_assigned', 'id')
-
-        return queryset
+        return get_filtered_table_rows(table, self.request.query_params, user=self.request.user)
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()

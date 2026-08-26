@@ -1679,6 +1679,184 @@ class LogsTableTestCase(TestCase):
         exported_val = ws.cell(row=2, column=job_details_idx).value
         self.assertEqual(exported_val, multiline_content)
 
+    def test_export_excel_table_27_style_and_year_filter(self):
+        import io
+        from datetime import datetime
+        import openpyxl
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from tables.views import TableViewSet
+
+        # 1. Create a Table matching production Table 27 (LIST_PID schema)
+        table = Table.objects.create(name="PID Master 2025", job_type="LIST_PID", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+
+        col_names = [
+            ("S_NO", "NUMBER"),
+            ("ENQUIRY_NO/QUOTATION_NO", "TEXT"),
+            ("PID", "TEXT"),
+            ("NEW_PID_NO", "TEXT"),
+            ("SALES_ORDER", "TEXT"),
+            ("PO", "TEXT"),
+            ("DATE", "DATE"),
+            ("FFE_SINGAPORE", "TEXT"),
+            ("COMPANY_NAME", "TEXT"),
+            ("DESCRIPTION", "TEXT"),
+            ("QTY", "NUMBER"),
+            ("DUE_DATE_CUSTOMER", "DATE"),
+            ("DUE_DATE_FLOW_FORCE", "DATE"),
+            ("PROJECT", "TEXT"),
+            ("STATUS", "TEXT"),
+            ("INITIAL_MAIL", "CHECKBOX"),
+            ("ALERT_MAIL", "CHECKBOX"),
+        ]
+        created_cols = {}
+        for pos, (c_name, c_type) in enumerate(col_names, start=1):
+            created_cols[c_name], _ = Column.objects.get_or_create(
+                table=table,
+                name=c_name,
+                defaults={
+                    "data_type": c_type,
+                    "position": pos,
+                    "is_system_column": True
+                }
+            )
+
+        # 2. Add Row 1 (Year 2025)
+        row2025 = Row.objects.create(table=table, created_by=self.admin)
+        Task.objects.create(
+            row=row2025,
+            due_date=datetime.strptime("2025-06-15", "%Y-%m-%d").date(),
+            priority="HIGH",
+            status="PENDING",
+            assigned_by=self.admin
+        )
+        CellValue.objects.update_or_create(row=row2025, column=created_cols["S_NO"], defaults={"value": 1, "updated_by": self.admin})
+        CellValue.objects.update_or_create(row=row2025, column=created_cols["ENQUIRY_NO/QUOTATION_NO"], defaults={"value": "ENQ-2025-001", "updated_by": self.admin})
+        CellValue.objects.update_or_create(row=row2025, column=created_cols["PID"], defaults={"value": "PID-2025-A", "updated_by": self.admin})
+        CellValue.objects.update_or_create(row=row2025, column=created_cols["DESCRIPTION"], defaults={"value": "Line 1: 2025 Order\nLine 2: Multi-line spec", "updated_by": self.admin})
+        CellValue.objects.update_or_create(row=row2025, column=created_cols["QTY"], defaults={"value": 25, "updated_by": self.admin})
+        CellValue.objects.update_or_create(row=row2025, column=created_cols["DUE_DATE_FLOW_FORCE"], defaults={"value": "2025-06-15", "updated_by": self.admin})
+        CellValue.objects.update_or_create(row=row2025, column=created_cols["INITIAL_MAIL"], defaults={"value": "true", "updated_by": self.admin})
+        # Leave other columns empty/null to test null handling
+
+        # 3. Add Row 2 (Year 2026)
+        row2026 = Row.objects.create(table=table, created_by=self.admin)
+        Task.objects.create(
+            row=row2026,
+            due_date=datetime.strptime("2026-08-20", "%Y-%m-%d").date(),
+            priority="MEDIUM",
+            status="COMPLETED",
+            assigned_by=self.admin
+        )
+        CellValue.objects.update_or_create(row=row2026, column=created_cols["S_NO"], defaults={"value": 2, "updated_by": self.admin})
+        CellValue.objects.update_or_create(row=row2026, column=created_cols["ENQUIRY_NO/QUOTATION_NO"], defaults={"value": "ENQ-2026-099", "updated_by": self.admin})
+        CellValue.objects.update_or_create(row=row2026, column=created_cols["PID"], defaults={"value": "PID-2026-B", "updated_by": self.admin})
+        CellValue.objects.update_or_create(row=row2026, column=created_cols["DESCRIPTION"], defaults={"value": "2026 single line", "updated_by": self.admin})
+        CellValue.objects.update_or_create(row=row2026, column=created_cols["QTY"], defaults={"value": 50, "updated_by": self.admin})
+        CellValue.objects.update_or_create(row=row2026, column=created_cols["DUE_DATE_FLOW_FORCE"], defaults={"value": "2026-08-20", "updated_by": self.admin})
+        CellValue.objects.update_or_create(row=row2026, column=created_cols["INITIAL_MAIL"], defaults={"value": "false", "updated_by": self.admin})
+
+        factory = APIRequestFactory()
+        view = TableViewSet.as_view({'get': 'export_excel'})
+
+        # Test A: Unfiltered Export (table=27)
+        req_all = factory.get(f'/tables/api/tables/{table.id}/export-excel/?table={table.id}')
+        force_authenticate(req_all, user=self.admin)
+        res_all = view(req_all, pk=table.id)
+
+        self.assertEqual(res_all.status_code, 200)
+        self.assertEqual(res_all['Content-Type'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        wb_all = openpyxl.load_workbook(io.BytesIO(res_all.content))
+        ws_all = wb_all.active
+        self.assertEqual(ws_all.max_row, 3) # Header + 2 data rows
+
+        # Test B: Filtered Export with ?table=27&year=2025
+        req_2025 = factory.get(f'/tables/api/tables/{table.id}/export-excel/?table={table.id}&year=2025')
+        force_authenticate(req_2025, user=self.admin)
+        res_2025 = view(req_2025, pk=table.id)
+
+        self.assertEqual(res_2025.status_code, 200)
+        wb_2025 = openpyxl.load_workbook(io.BytesIO(res_2025.content))
+        ws_2025 = wb_2025.active
+        self.assertEqual(ws_2025.max_row, 2) # Header + exactly 1 row (2025)
+
+        headers = [c.value for c in ws_2025[1]]
+        desc_idx = headers.index("DESCRIPTION") + 1
+        pid_idx = headers.index("PID") + 1
+        qty_idx = headers.index("QTY") + 1
+        mail_idx = headers.index("INITIAL_MAIL") + 1
+        po_idx = headers.index("PO") + 1
+
+        self.assertEqual(ws_2025.cell(row=2, column=pid_idx).value, "PID-2025-A")
+        self.assertEqual(ws_2025.cell(row=2, column=desc_idx).value, "Line 1: 2025 Order\nLine 2: Multi-line spec")
+        self.assertEqual(ws_2025.cell(row=2, column=qty_idx).value, 25)
+        self.assertEqual(ws_2025.cell(row=2, column=mail_idx).value, "YES")
+        self.assertIn(ws_2025.cell(row=2, column=po_idx).value, ["", None]) # Null/empty value check
+
+    def test_export_excel_empty_table(self):
+        import io
+        import openpyxl
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from tables.views import TableViewSet
+
+        empty_table = Table.objects.create(name="Empty Test Table", job_type="GENERAL", created_by=self.admin)
+        TableAccess.objects.create(table=empty_table, user=self.admin, access_level="ADMIN")
+
+        Column.objects.create(table=empty_table, name="CustomCol1", data_type="TEXT", position=10)
+        Column.objects.create(table=empty_table, name="CustomCol2", data_type="NUMBER", position=11)
+
+        factory = APIRequestFactory()
+        view = TableViewSet.as_view({'get': 'export_excel'})
+        req = factory.get(f'/tables/api/tables/{empty_table.id}/export-excel/')
+        force_authenticate(req, user=self.admin)
+        res = view(req, pk=empty_table.id)
+
+        self.assertEqual(res.status_code, 200)
+        wb = openpyxl.load_workbook(io.BytesIO(res.content))
+        ws = wb.active
+        self.assertEqual(ws.max_row, 1) # Header only
+        expected_cols = [c.name for c in empty_table.columns.all().order_by("position", "id")]
+        self.assertEqual([c.value for c in ws[1]], expected_cols)
+
+    def test_export_excel_postgresql_safe_date_sorting(self):
+        import io
+        import openpyxl
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from tables.views import TableViewSet
+
+        table = Table.objects.create(name="Date Sorting Test", job_type="GENERAL", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+
+        date_col = Column.objects.create(table=table, name="DATE", data_type="DATE", position=1)
+        task_col = Column.objects.create(table=table, name="TASK_NAME", data_type="TEXT", position=2)
+
+        # Row 1 with valid date
+        r1 = Row.objects.create(table=table, created_by=self.admin)
+        CellValue.objects.create(row=r1, column=date_col, value="2025-01-15", updated_by=self.admin)
+        CellValue.objects.create(row=r1, column=task_col, value="Task A", updated_by=self.admin)
+
+        # Row 2 with empty string "" in date (simulating PostgreSQL JSONB empty string edge case)
+        r2 = Row.objects.create(table=table, created_by=self.admin)
+        CellValue.objects.create(row=r2, column=date_col, value="", updated_by=self.admin)
+        CellValue.objects.create(row=r2, column=task_col, value="Task B", updated_by=self.admin)
+
+        # Row 3 with null in date
+        r3 = Row.objects.create(table=table, created_by=self.admin)
+        CellValue.objects.create(row=r3, column=date_col, value=None, updated_by=self.admin)
+        CellValue.objects.create(row=r3, column=task_col, value="Task C", updated_by=self.admin)
+
+        factory = APIRequestFactory()
+        view = TableViewSet.as_view({'get': 'export_excel'})
+        req = factory.get(f'/tables/api/tables/{table.id}/export-excel/?sort_by=date&sort_dir=asc')
+        force_authenticate(req, user=self.admin)
+        res = view(req, pk=table.id)
+
+        self.assertEqual(res.status_code, 200)
+        wb = openpyxl.load_workbook(io.BytesIO(res.content))
+        ws = wb.active
+        self.assertEqual(ws.max_row, 4) # Header + 3 data rows
+
+
 
 
 
