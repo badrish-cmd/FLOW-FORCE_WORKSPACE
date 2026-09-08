@@ -5,26 +5,27 @@
 
 :root {
     /* Primary Colors */
-    --primary-color: #0066FF;
-    --primary-dark: #0052CC;
-    --primary-light: #E6F0FF;
+    --primary-color: #2563EB;
+    --primary-dark: #1D4ED8;
+    --primary-light: #EFF6FF;
     
     /* Neutral Colors */
-    --dark-bg: #0F1419;
-    --dark-surface: #1F2937;
-    --dark-border: #374151;
-    --light-text: #F3F4F6;
-    --mid-text: #D1D5DB;
-    --muted-text: #9CA3AF;
-    --gray-100: #F9FAFB;
-    --gray-200: #F3F4F6;
-    --gray-300: #E5E7EB;
-    --gray-400: #D1D5DB;
-    --gray-500: #9CA3AF;
-    --gray-600: #6B7280;
-    --gray-700: #374151;
-    --gray-800: #1F2937;
-    --gray-900: #111827;
+    --dark-bg: #0F172A;
+    --dark-surface: #1E293B;
+    --dark-border: #334155;
+    --light-text: #F8FAFC;
+    --mid-text: #CBD5E1;
+    --muted-text: #94A3B8;
+    --workspace-bg: #F8FAFC;
+    --gray-100: #F8FAFC;
+    --gray-200: #F1F5F9;
+    --gray-300: #E2E8F0;
+    --gray-400: #CBD5E1;
+    --gray-500: #94A3B8;
+    --gray-600: #64748B;
+    --gray-700: #334155;
+    --gray-800: #1E293B;
+    --gray-900: #0F172A;
     
     /* Status Colors */
     --success-color: #10B981;
@@ -84,7 +85,7 @@ html, body {
     font-family: var(--font-family);
     font-size: var(--font-size-base);
     color: var(--gray-900);
-    background-color: #fff;
+    background-color: var(--workspace-bg);
 }
 
 body {
@@ -100,7 +101,7 @@ body {
 .app-container {
     display: flex;
     height: 100vh;
-    background-color: var(--gray-100);
+    background-color: var(--workspace-bg);
 }
 
 .sidebar {
@@ -272,6 +273,7 @@ body {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    background-color: var(--workspace-bg);
 }
 
 .app-header {
@@ -344,9 +346,14 @@ body {
 .page-container {
     flex: 1;
     overflow-y: auto;
-    padding: var(--spacing-xl);
+    padding: 16px 20px;
     animation: pageFadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
     opacity: 0;
+    background-color: var(--workspace-bg);
+}
+
+.content-area {
+    background-color: var(--workspace-bg);
 }
 
 @keyframes pageFadeIn {
@@ -877,3 +884,90 @@ body {
 .animate-fade-in {
     animation: fadeIn 0.25s ease-out forwards;
 }
+
+/* ============================================================================
+   Flow-Force SKU-Inspired Polish Enhancements
+   ============================================================================ */
+.ff-card {
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 16px;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.04);
+}
+
+.ff-btn-primary {
+    background-color: #2563EB;
+    color: #FFFFFF;
+    font-weight: 600;
+    font-size: 0.8125rem;
+    padding: 0.5625rem 1rem;
+    border-radius: 12px;
+    box-shadow: 0 1px 2px 0 rgba(37, 99, 235, 0.2);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border: 1px solid transparent;
+    transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
+}
+.ff-btn-primary:hover {
+    background-color: #1D4ED8;
+    box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.25);
+    color: #FFFFFF;
+}
+
+.ff-btn-secondary {
+    background-color: #FFFFFF;
+    color: #334155;
+    border: 1px solid #E2E8F0;
+    font-weight: 600;
+    font-size: 0.8125rem;
+    padding: 0.5625rem 0.875rem;
+    border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+    transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
+}
+.ff-btn-secondary:hover {
+    background-color: #F8FAFC;
+    border-color: #CBD5E1;
+    color: #0F172A;
+}
+
+.ff-search-input {
+    background-color: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    padding: 0.5625rem 0.875rem 0.5625rem 2.5rem;
+    font-size: 0.8125rem;
+    color: #0F172A;
+    transition: all 150ms ease;
+    width: 100%;
+}
+.ff-search-input:focus {
+    background-color: #FFFFFF;
+    border-color: #2563EB;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+    outline: none;
+}
+
+/* Custom subtle scrollbar for spreadsheet view */
+.ff-table-scroll::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+.ff-table-scroll::-webkit-scrollbar-track {
+    background: #F1F5F9;
+    border-radius: 4px;
+}
+.ff-table-scroll::-webkit-scrollbar-thumb {
+    background: #CBD5E1;
+    border-radius: 4px;
+}
+.ff-table-scroll::-webkit-scrollbar-thumb:hover {
+    background: #94A3B8;
+}
+

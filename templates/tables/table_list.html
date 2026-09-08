@@ -5,16 +5,19 @@
 {% block content %}
 <div class="space-y-8 animate-fade-in">
     <!-- Header -->
-    <div class="flex flex-col md:flex-row md:items-center md:justify-between border-b border-slate-100 pb-5 gap-4">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between border-b border-slate-200/80 pb-5 gap-4">
         <div>
-            <h1 class="text-3xl font-bold tracking-tight text-slate-900">Workspace Tables</h1>
-            <p class="text-slate-500 mt-1">{% if is_admin %}Create, delete, and configure employee access permissions for tables.{% else %}Browse and open spreadsheet tables assigned to you.{% endif %}</p>
+            <h1 class="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 flex items-center gap-2.5">
+                <i class="fas fa-table text-blue-600"></i>
+                <span>Workspace Tables</span>
+            </h1>
+            <p class="text-slate-500 text-xs sm:text-sm mt-1">{% if is_admin %}Create, delete, and configure employee access permissions for tables.{% else %}Browse and open spreadsheet tables assigned to you.{% endif %}</p>
         </div>
         {% if is_admin %}
         <div>
             <button onclick="document.getElementById('createTableModal').classList.remove('hidden')" 
-                    class="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow transition-all duration-200">
-                <i class="fas fa-plus"></i> Create Table
+                    class="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-sm hover:shadow transition-all">
+                <i class="fas fa-plus-circle"></i> Create Table
             </button>
         </div>
         {% endif %}
@@ -22,15 +25,11 @@
 
     <!-- Search Bar -->
     <div class="max-w-md mb-6">
-        <div class="flex gap-2">
-            <div class="relative flex-grow">
-                <span class="absolute inset-y-0 left-0 flex items-center pl-3">
-                    <i class="fas fa-search text-slate-400"></i>
-                </span>
-                <input type="text" id="tableSearchInput" placeholder="Search tables by name or description..." 
-                       class="w-full pl-10 pr-4 py-2 bg-white text-sm border border-slate-200 rounded-lg shadow-sm focus:outline-none focus:border-blue-500 transition-all duration-200">
-            </div>
-            <button type="button" onclick="filterTables()" class="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow transition-all duration-200">
+        <div class="relative">
+            <i class="fas fa-search absolute left-3.5 top-3 text-slate-400 text-xs"></i>
+            <input type="text" id="tableSearchInput" onkeydown="if (event.key === 'Enter') filterTables()" placeholder="Search tables by name or description..." 
+                   class="w-full pl-9 pr-20 py-2.5 bg-white text-xs sm:text-sm border border-slate-200 rounded-xl shadow-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all font-medium">
+            <button type="button" onclick="filterTables()" class="absolute right-1.5 top-1.5 inline-flex items-center justify-center px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-all">
                 Search
             </button>
         </div>
@@ -39,7 +38,7 @@
     <!-- Table Grid -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {% for table in tables %}
-            <div class="bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between overflow-hidden">
+            <div class="bg-white rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-md transition-all flex flex-col justify-between overflow-hidden">
                 <!-- Card Head -->
                 <div class="p-6 border-b border-slate-50">
                     <div class="flex items-start justify-between gap-4">
@@ -147,28 +146,28 @@
                 {% endif %}
 
                 <!-- Footer -->
-                <div class="p-6 bg-slate-50/20 flex items-center justify-between border-t border-slate-50">
-                    <span class="text-xs text-slate-400">
-                        <i class="far fa-calendar-alt me-1"></i>
+                <div class="p-6 bg-slate-50/40 flex items-center justify-between border-t border-slate-100">
+                    <span class="text-xs text-slate-400 font-medium">
+                        <i class="far fa-calendar-alt me-1 text-slate-400"></i>
                         Created {{ table.created_at|date:"M d, Y" }}
                     </span>
                     <a href="{% url 'tables:table_spreadsheet' table.id %}" 
-                       class="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm hover:shadow transition-all duration-200">
+                       class="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-sm hover:shadow transition-all duration-200">
                         Open Spreadsheet
                         <i class="fas fa-arrow-right text-[10px]"></i>
                     </a>
                 </div>
             </div>
         {% empty %}
-            <div class="col-span-full bg-white rounded-2xl border border-slate-100 p-12 text-center shadow-sm">
-                <div class="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <div class="col-span-full bg-white rounded-2xl border border-slate-200/90 p-12 text-center shadow-sm">
+                <div class="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-sm">
                     <i class="fas fa-table text-2xl"></i>
                 </div>
                 <h3 class="text-lg font-bold text-slate-800">No tables available</h3>
                 <p class="text-slate-500 text-sm mt-1 max-w-md mx-auto">There are no tables active or shared with you right now.</p>
                 {% if is_admin %}
                     <button onclick="document.getElementById('createTableModal').classList.remove('hidden')" 
-                            class="inline-flex items-center gap-2 px-5 py-2.5 mt-6 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow transition-all">
+                            class="inline-flex items-center gap-2 px-5 py-2.5 mt-6 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-sm hover:shadow transition-all">
                         <i class="fas fa-plus text-xs"></i>
                         Create First Table
                     </button>

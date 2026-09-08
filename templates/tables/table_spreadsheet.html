@@ -31,7 +31,7 @@
     </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<div class="container-fluid py-6 max-w-7xl mx-auto" x-data="spreadsheetApp({{ table.id }})">
+<div class="container-fluid pt-1 pb-6 max-w-7xl mx-auto" x-data="spreadsheetApp({{ table.id }})">
     <!-- Global Loading Spinner Overlay -->
     <div x-show="isLoading" 
          x-transition:enter="transition ease-out duration-300"
@@ -59,74 +59,121 @@
             </div>
         </div>
     </div>
-    <!-- Header/Title section -->
-    <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
-        <div>
-            <h1 class="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                <i class="fas fa-table text-primary"></i>
-                <span>{{ table.name }}</span>
-                {% if has_admin_access %}
-                <button @click="openEditTableModal" class="text-gray-400 hover:text-blue-600 focus:outline-none transition duration-150" title="Edit Table Details">
-                    <i class="fas fa-edit text-sm"></i>
-                </button>
-                {% endif %}
-            </h1>
-            <p class="text-sm text-gray-500 mt-1">{{ table.description|default:"Spreadsheet workspace" }}</p>
-        </div>
-        <div class="flex flex-wrap items-center gap-2">
-            <button @click="toggleDashboard" class="bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out">
-                <i class="fas fa-chart-line mr-2"></i> <span x-text="showDashboard ? 'Hide Dashboard' : 'Show Dashboard'"></span>
-            </button>
-            <button @click="duplicateTable" class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out">
-                <i class="fas fa-copy mr-2"></i> Duplicate Table (Copy Layout)
-            </button>
-            <button @click="openImportModal" class="bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out">
-                <i class="fas fa-file-import mr-2"></i> Import CSV
-            </button>
-            <button @click="exportExcel" class="bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out flex items-center shadow-sm" title="Download current table data as Excel (.xlsx)">
-                <i class="fas fa-file-excel mr-2"></i> Export Excel
-            </button>
-            <button x-show="selectedRowIds.length > 0" @click="bulkDeleteRows(true)" class="bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out flex items-center gap-1.5" x-transition style="display: none;">
-                <i class="fas fa-trash-alt"></i> <span>Delete Selected (<span x-text="selectedRowIds.length"></span>)</span>
-            </button>
-            <button x-show="selectedRowIds.length > 0" @click="bulkUpdateSelectedStatus('COMPLETED')" class="bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out flex items-center gap-1.5" x-transition style="display: none;">
-                <i class="fas fa-check-circle"></i> <span>Mark Completed (<span x-text="selectedRowIds.length"></span>)</span>
-            </button>
-            <button x-show="selectedRowIds.length > 0" @click="bulkUpdateSelectedStatus('PENDING')" class="bg-amber-600 hover:bg-amber-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out flex items-center gap-1.5" x-transition style="display: none;">
-                <i class="fas fa-undo"></i> <span>Mark Pending (<span x-text="selectedRowIds.length"></span>)</span>
-            </button>
 
-            {% if has_admin_access %}
-            <div class="relative inline-block text-left" x-data="{ open: false }">
-                <button @click="open = !open" class="bg-rose-600 hover:bg-rose-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out flex items-center gap-1.5">
-                    <i class="fas fa-tools"></i> <span>Bulk Update</span> <i class="fas fa-chevron-down text-xs"></i>
-                </button>
-                <div x-show="open" @click.away="open = false" class="origin-top-right absolute right-0 mt-2 w-56 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 focus:outline-none z-30" style="display: none;" x-transition>
-                    <div class="py-1">
-                        <button @click="open = false; bulkUpdate('INITIAL_MAIL')" class="text-gray-700 block w-full text-left px-4 py-2.5 text-sm hover:bg-gray-100 font-medium">
-                            <i class="fas fa-envelope mr-2 text-blue-500"></i> Set All Initial Mail to YES
+    <!-- Header/Title section with compact business application hierarchy -->
+    <div class="mb-4 space-y-2.5">
+        <!-- Top Context Row: Department badge + Job type identifier -->
+        <div class="flex items-center gap-2 flex-wrap">
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200/80">
+                <i class="fas fa-layer-group text-[10px]"></i>
+                {{ table.department.name|default:"General Table" }}
+            </span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                {{ table.job_type }}
+            </span>
+        </div>
+
+        <!-- Main Title & Actions Row -->
+        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+            <!-- Left: Large Table Icon + Table Name + Edit + Subtitle -->
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-blue-50 border border-blue-200/70 text-blue-600 flex items-center justify-center shrink-0 shadow-sm">
+                    <i class="fas fa-table text-lg"></i>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h1 class="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight leading-tight">{{ table.name }}</h1>
+                        {% if has_admin_access %}
+                        <button @click="openEditTableModal" class="p-1 text-slate-400 hover:text-blue-600 rounded-lg hover:bg-slate-100 transition-colors" title="Edit Table Details">
+                            <i class="fas fa-edit text-xs"></i>
                         </button>
-                        <button @click="open = false; bulkUpdate('ALERT_MAIL')" class="text-gray-700 block w-full text-left px-4 py-2.5 text-sm hover:bg-gray-100 font-medium">
-                            <i class="fas fa-bell mr-2 text-amber-500"></i> Set All Alert Mail to YES
-                        </button>
-                        <button @click="open = false; bulkUpdate('STATUS')" class="text-gray-700 block w-full text-left px-4 py-2.5 text-sm hover:bg-gray-100 font-medium">
-                            <i class="fas fa-check-double mr-2 text-emerald-500"></i> Set All Status to COMPLETED
-                        </button>
-                        <button @click="open = false; sendEscalationMail()" class="text-gray-700 block w-full text-left px-4 py-2.5 text-sm hover:bg-gray-100 font-medium">
-                            <i class="fas fa-paper-plane mr-2 text-rose-500"></i> Send Escalation Mail
-                        </button>
-                        <hr class="border-gray-200">
-                        <button @click="open = false; bulkDeleteRows(false)" class="text-red-700 block w-full text-left px-4 py-2.5 text-sm hover:bg-red-50 font-medium">
-                            <i class="fas fa-dumpster mr-2 text-red-500"></i> Bulk Delete All Tasks
-                        </button>
+                        {% endif %}
                     </div>
+                    <p class="text-xs text-slate-500 font-medium">{{ table.description|default:"Spreadsheet workspace" }}</p>
                 </div>
             </div>
-            {% endif %}
 
-            <button @click="openColumnModal" class="bg-primary hover:bg-blue-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition duration-150 ease-in-out">
-                <i class="fas fa-plus-circle mr-2"></i> Add Column
-            </button>
+            <!-- Right: Action Buttons Grouped Visually with Consistent Heights (h-9) -->
+            <div class="flex flex-wrap items-center gap-2">
+                <!-- Secondary: Toggle Dashboard -->
+                <button @click="toggleDashboard" class="h-9 inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 hover:border-slate-300 text-xs font-semibold rounded-lg px-3 shadow-sm transition-all">
+                    <i class="fas fa-chart-line text-indigo-500 text-xs"></i>
+                    <span x-text="showDashboard ? 'Hide Analytics' : 'Analytics'"></span>
+                </button>
+
+                <!-- Secondary: Duplicate Table -->
+                <button @click="duplicateTable" class="h-9 inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 hover:border-slate-300 text-xs font-semibold rounded-lg px-3 shadow-sm transition-all" title="Duplicate Table (Copy Layout)">
+                    <i class="fas fa-copy text-slate-400 text-xs"></i> Duplicate
+                </button>
+
+                <!-- Secondary: Import CSV -->
+                <button @click="openImportModal" class="h-9 inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 hover:border-slate-300 text-xs font-semibold rounded-lg px-3 shadow-sm transition-all">
+                    <i class="fas fa-file-import text-blue-600 text-xs"></i> Import CSV
+                </button>
+
+                <!-- Secondary: Export Excel -->
+                <button @click="exportExcel" class="h-9 inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 hover:border-slate-300 text-xs font-semibold rounded-lg px-3 shadow-sm transition-all" title="Download current table data as Excel (.xlsx)">
+                    <i class="fas fa-file-excel text-emerald-600 text-xs"></i> Export Excel
+                </button>
+
+                <!-- Utility: Bulk Update Dropdown (Admin) -->
+                {% if has_admin_access %}
+                <div class="relative inline-block text-left" x-data="{ open: false }">
+                    <button @click="open = !open" class="h-9 inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 hover:border-slate-300 text-xs font-semibold rounded-lg px-3 shadow-sm transition-all">
+                        <i class="fas fa-tools text-amber-500 text-xs"></i>
+                        <span>Bulk Actions</span>
+                        <i class="fas fa-chevron-down text-[9px] text-slate-400"></i>
+                    </button>
+                    <div x-show="open" @click.away="open = false" class="origin-top-right absolute right-0 mt-1.5 w-60 rounded-xl shadow-xl bg-white border border-slate-200 ring-1 ring-black/5 focus:outline-none z-30 divide-y divide-slate-100" style="display: none;" x-transition>
+                        <div class="py-1">
+                            <button @click="open = false; bulkUpdate('INITIAL_MAIL')" class="w-full text-left px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 font-medium flex items-center gap-2">
+                                <i class="fas fa-envelope text-blue-500 w-4"></i> Set All Initial Mail to YES
+                            </button>
+                            <button @click="open = false; bulkUpdate('ALERT_MAIL')" class="w-full text-left px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 font-medium flex items-center gap-2">
+                                <i class="fas fa-bell text-amber-500 w-4"></i> Set All Alert Mail to YES
+                            </button>
+                            <button @click="open = false; bulkUpdate('STATUS')" class="w-full text-left px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 font-medium flex items-center gap-2">
+                                <i class="fas fa-check-double text-emerald-500 w-4"></i> Set All Status to COMPLETED
+                            </button>
+                            <button @click="open = false; sendEscalationMail()" class="w-full text-left px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 font-medium flex items-center gap-2">
+                                <i class="fas fa-paper-plane text-rose-500 w-4"></i> Send Escalation Mail
+                            </button>
+                        </div>
+                        <div class="py-1">
+                            <button @click="open = false; bulkDeleteRows(false)" class="w-full text-left px-4 py-2 text-xs text-rose-600 hover:bg-rose-50 font-medium flex items-center gap-2">
+                                <i class="fas fa-trash-alt text-rose-500 w-4"></i> Bulk Delete All Tasks
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Primary: Add Column (Strongest Action) -->
+                <button @click="openColumnModal" class="h-9 inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg px-3.5 shadow-sm hover:shadow transition-all">
+                    <i class="fas fa-plus text-xs"></i> Add Column
+                </button>
+            </div>
+        </div>
+
+        <!-- Selection Banner (appears when rows are checked) -->
+        <div x-show="selectedRowIds.length > 0" x-transition class="bg-blue-50/90 border border-blue-200/90 rounded-lg p-2.5 flex flex-wrap items-center justify-between gap-2.5 shadow-sm" style="display: none;">
+            <div class="flex items-center gap-2">
+                <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white font-bold text-[11px]" x-text="selectedRowIds.length"></span>
+                <span class="text-xs font-bold text-blue-900">row(s) selected</span>
+                <span class="text-slate-300">|</span>
+                <button @click="selectedRowIds = []; isAllSelected = false" class="text-xs text-slate-500 hover:text-slate-700 font-semibold underline decoration-dotted">Deselect All</button>
+            </div>
+            <div class="flex items-center gap-1.5 flex-wrap">
+                <button @click="bulkUpdateSelectedStatus('COMPLETED')" class="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-md text-xs px-2.5 py-1 shadow-sm transition-all">
+                    <i class="fas fa-check-circle text-[11px]"></i> Mark Completed
+                </button>
+                <button @click="bulkUpdateSelectedStatus('PENDING')" class="inline-flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-md text-xs px-2.5 py-1 shadow-sm transition-all">
+                    <i class="fas fa-undo text-[11px]"></i> Mark Pending
+                </button>
+                <button @click="bulkDeleteRows(true)" class="inline-flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white font-semibold rounded-md text-xs px-2.5 py-1 shadow-sm transition-all">
+                    <i class="fas fa-trash-alt text-[11px]"></i> Delete Selected
+                </button>
+            </div>
         </div>
     </div>
 
@@ -358,47 +405,65 @@
 
 
 
-    <!-- Unified Filter Bar -->
-    <div class="mb-6 bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex flex-wrap items-center justify-between gap-4">
-        <div class="flex flex-wrap items-center gap-4">
-            <div class="flex items-center gap-2">
-                <span class="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                    <i class="fas fa-filter text-primary"></i> Filters
-                </span>
-            </div>
-
-            <!-- Row Data Search Control -->
-            <div class="flex items-center gap-2 border-l border-gray-200 pl-4">
-                <div class="relative">
-                    <input type="text" x-model="searchQuery" @keydown.enter="changeFilter()" placeholder="Search in table..." class="bg-gray-50 border border-gray-300 text-gray-900 rounded-lg pl-8 pr-3 py-1.5 text-xs focus:ring-primary focus:border-primary min-w-[200px] font-semibold">
-                    <i class="fas fa-search absolute left-2.5 top-2.5 text-gray-400 text-xs"></i>
+    <!-- Unified Filter Bar (SKU-inspired card layout) -->
+    <div class="mb-3.5 bg-white rounded-xl border border-slate-200 shadow-sm p-3 sm:p-3.5 space-y-2.5">
+        <!-- Top Toolbar Row: Prominent Search + Record Count + Reset Filters -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-slate-100">
+            <!-- Prominent Rounded Search Field with Naturally Attached Search Button -->
+            <div class="relative flex-1 max-w-md flex items-center">
+                <div class="relative w-full">
+                    <i class="fas fa-search absolute left-3 top-2.5 text-slate-400 text-xs"></i>
+                    <input type="text" 
+                           x-model="searchQuery" 
+                           @keydown.enter="changeFilter()" 
+                           placeholder="Search table by any keyword..." 
+                           class="w-full h-9 bg-slate-50 focus:bg-white text-xs sm:text-sm text-slate-800 placeholder-slate-400 border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 rounded-l-lg pl-8 pr-3 transition-all font-medium">
                 </div>
-                <button @click="changeFilter()" class="bg-primary hover:bg-blue-700 text-white font-medium rounded-lg text-xs px-3.5 py-1.5 transition duration-150 ease-in-out shadow-sm">
+                <button @click="changeFilter()" 
+                        class="h-9 inline-flex items-center px-3.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-r-lg border border-blue-600 shadow-sm transition-all shrink-0"
+                        title="Search table">
                     Search
                 </button>
+            </div>
+
+            <!-- Record Count Status & Reset Filters Action -->
+            <div class="flex items-center gap-3 shrink-0">
+                <span class="text-xs text-slate-500 font-medium select-none" x-text="totalRows === 1 ? '1 record' : `${totalRows} total records`"></span>
+                <button @click="resetFilters" 
+                        class="h-8 inline-flex items-center gap-1.5 text-xs font-semibold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg px-2.5 transition-all shadow-sm" 
+                        title="Clear all active filters and search">
+                    <i class="fas fa-undo-alt text-[10px]"></i> Reset Filters
+                </button>
+            </div>
+        </div>
+
+        <!-- Bottom Toolbar Row: Filters Label + Uniform Height Filter Buttons -->
+        <div class="flex flex-wrap items-center gap-2">
+            <div class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-1 select-none">
+                <i class="fas fa-filter text-blue-500 text-[10px]"></i>
+                <span>Filters</span>
             </div>
 
             <!-- PID Filter (only if PID column exists or job_type is ENGINEER / LIST_PID) -->
             {% if table.job_type == 'ENGINEER' or table.job_type == 'LIST_PID' %}
             <div class="relative inline-block text-left" x-data="{ open: false, search: '' }" @click.away="open = false">
-                <div class="flex items-center gap-2">
-                    <label class="text-xs font-semibold text-gray-500">Project ID (PID):</label>
-                    <button type="button" @click="open = !open" class="bg-gray-50 border border-gray-300 text-gray-700 rounded-lg py-1.5 px-3 text-xs focus:ring-primary focus:border-primary font-medium flex items-center justify-between min-w-[120px]">
-                        <span x-text="selectedPidFilter || '-- All Projects --'"></span>
-                        <i class="fas fa-chevron-down text-[10px] ml-2 text-gray-400"></i>
-                    </button>
-                </div>
-                <div x-show="open" x-transition class="origin-top-left absolute left-0 mt-1 w-56 rounded-lg shadow-xl bg-white border border-gray-200 z-50 p-2 space-y-2" style="display: none;">
+                <button type="button" @click="open = !open" 
+                        :class="selectedPidFilter ? 'border-blue-500 text-blue-700 bg-blue-50/50 ring-1 ring-blue-500/20' : 'border-slate-200 text-slate-700 bg-white hover:bg-slate-50'"
+                        class="h-8 border rounded-lg py-1 px-2.5 text-xs font-semibold flex items-center justify-between gap-1.5 shadow-sm transition-all min-w-[120px]">
+                    <span class="truncate max-w-[130px]" x-text="selectedPidFilter ? `PID: ${selectedPidFilter}` : 'PID: All'"></span>
+                    <i class="fas fa-chevron-down text-[9px] text-slate-400"></i>
+                </button>
+                <div x-show="open" x-transition class="origin-top-left absolute left-0 mt-1 w-56 rounded-xl shadow-xl bg-white border border-slate-200 z-50 p-2 space-y-2" style="display: none;">
                     <div class="relative">
-                        <input type="text" x-model="search" placeholder="Search PID..." class="w-full bg-gray-50 border border-gray-300 rounded-md py-1 px-2.5 text-xs focus:ring-primary focus:border-primary">
-                        <i class="fas fa-search absolute right-2.5 top-2 text-gray-400 text-[10px]"></i>
+                        <input type="text" x-model="search" placeholder="Search PID..." class="w-full bg-slate-50 border border-slate-200 rounded-lg py-1 px-2.5 text-xs focus:ring-1 focus:ring-blue-500">
+                        <i class="fas fa-search absolute right-2.5 top-2 text-slate-400 text-[10px]"></i>
                     </div>
-                    <ul class="max-h-48 overflow-y-auto divide-y divide-gray-100 text-xs">
-                        <li @click="selectedPidFilter = ''; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-500">
+                    <ul class="max-h-48 overflow-y-auto divide-y divide-slate-100 text-xs">
+                        <li @click="selectedPidFilter = ''; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-slate-50 cursor-pointer rounded font-medium text-slate-500">
                             -- All Projects --
                         </li>
                         <template x-for="pid in getUniquePids().filter(p => !search || String(p).toLowerCase().includes(search.toLowerCase()))" :key="pid">
-                            <li @click="selectedPidFilter = pid; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700" x-text="pid"></li>
+                            <li @click="selectedPidFilter = pid; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-blue-50 cursor-pointer rounded font-medium text-slate-700" x-text="pid"></li>
                         </template>
                     </ul>
                 </div>
@@ -407,24 +472,23 @@
 
             <!-- Year Filter -->
             <div class="relative inline-block text-left" x-data="{ open: false, search: '' }" @click.away="open = false">
-                <div class="flex items-center gap-2">
-                    <label class="text-xs font-semibold text-gray-500">Year:</label>
-                    <button type="button" @click="open = !open" class="bg-gray-50 border border-gray-300 text-gray-700 rounded-lg py-1.5 px-3 text-xs focus:ring-primary focus:border-primary font-medium flex items-center justify-between min-w-[100px]">
-                        <span x-text="selectedYearFilter || '-- All Years --'"></span>
-                        <i class="fas fa-chevron-down text-[10px] ml-2 text-gray-400"></i>
-                    </button>
-                </div>
-                <div x-show="open" x-transition class="origin-top-left absolute left-0 mt-1 w-44 rounded-lg shadow-xl bg-white border border-gray-200 z-50 p-2 space-y-2" style="display: none;">
+                <button type="button" @click="open = !open" 
+                        :class="selectedYearFilter ? 'border-blue-500 text-blue-700 bg-blue-50/50 ring-1 ring-blue-500/20' : 'border-slate-200 text-slate-700 bg-white hover:bg-slate-50'"
+                        class="h-8 border rounded-lg py-1 px-2.5 text-xs font-semibold flex items-center justify-between gap-1.5 shadow-sm transition-all min-w-[105px]">
+                    <span x-text="selectedYearFilter ? `Year: ${selectedYearFilter}` : 'Year: All'"></span>
+                    <i class="fas fa-chevron-down text-[9px] text-slate-400"></i>
+                </button>
+                <div x-show="open" x-transition class="origin-top-left absolute left-0 mt-1 w-44 rounded-xl shadow-xl bg-white border border-slate-200 z-50 p-2 space-y-2" style="display: none;">
                     <div class="relative">
-                        <input type="text" x-model="search" placeholder="Search year..." class="w-full bg-gray-50 border border-gray-300 rounded-md py-1 px-2.5 text-xs focus:ring-primary focus:border-primary">
-                        <i class="fas fa-search absolute right-2.5 top-2 text-gray-400 text-[10px]"></i>
+                        <input type="text" x-model="search" placeholder="Search year..." class="w-full bg-slate-50 border border-slate-200 rounded-lg py-1 px-2.5 text-xs focus:ring-1 focus:ring-blue-500">
+                        <i class="fas fa-search absolute right-2.5 top-2 text-slate-400 text-[10px]"></i>
                     </div>
-                    <ul class="max-h-48 overflow-y-auto divide-y divide-gray-100 text-xs">
-                        <li @click="selectedYearFilter = ''; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-500">
+                    <ul class="max-h-48 overflow-y-auto divide-y divide-slate-100 text-xs">
+                        <li @click="selectedYearFilter = ''; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-slate-50 cursor-pointer rounded font-medium text-slate-500">
                             -- All Years --
                         </li>
                         <template x-for="year in getUniqueYears().filter(y => !search || String(y).toLowerCase().includes(search.toLowerCase()))" :key="year">
-                            <li @click="selectedYearFilter = year; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700" x-text="year"></li>
+                            <li @click="selectedYearFilter = year; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-blue-50 cursor-pointer rounded font-medium text-slate-700" x-text="year"></li>
                         </template>
                     </ul>
                 </div>
@@ -432,20 +496,19 @@
 
             <!-- Month Filter -->
             <div class="relative inline-block text-left" x-data="{ open: false, search: '' }" @click.away="open = false">
-                <div class="flex items-center gap-2">
-                    <label class="text-xs font-semibold text-gray-500">Month:</label>
-                    <button type="button" @click="open = !open" class="bg-gray-50 border border-gray-300 text-gray-700 rounded-lg py-1.5 px-3 text-xs focus:ring-primary focus:border-primary font-medium flex items-center justify-between min-w-[110px]">
-                        <span x-text="selectedMonthFilter ? ['January','February','March','April','May','June','July','August','September','October','November','December'][selectedMonthFilter - 1] : '-- All Months --'"></span>
-                        <i class="fas fa-chevron-down text-[10px] ml-2 text-gray-400"></i>
-                    </button>
-                </div>
-                <div x-show="open" x-transition class="origin-top-left absolute left-0 mt-1 w-48 rounded-lg shadow-xl bg-white border border-gray-200 z-50 p-2 space-y-2" style="display: none;">
+                <button type="button" @click="open = !open" 
+                        :class="selectedMonthFilter ? 'border-blue-500 text-blue-700 bg-blue-50/50 ring-1 ring-blue-500/20' : 'border-slate-200 text-slate-700 bg-white hover:bg-slate-50'"
+                        class="h-8 border rounded-lg py-1 px-2.5 text-xs font-semibold flex items-center justify-between gap-1.5 shadow-sm transition-all min-w-[110px]">
+                    <span x-text="selectedMonthFilter ? ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][selectedMonthFilter - 1] : 'Month: All'"></span>
+                    <i class="fas fa-chevron-down text-[9px] text-slate-400"></i>
+                </button>
+                <div x-show="open" x-transition class="origin-top-left absolute left-0 mt-1 w-48 rounded-xl shadow-xl bg-white border border-slate-200 z-50 p-2 space-y-2" style="display: none;">
                     <div class="relative">
-                        <input type="text" x-model="search" placeholder="Search month..." class="w-full bg-gray-50 border border-gray-300 rounded-md py-1 px-2.5 text-xs focus:ring-primary focus:border-primary">
-                        <i class="fas fa-search absolute right-2.5 top-2 text-gray-400 text-[10px]"></i>
+                        <input type="text" x-model="search" placeholder="Search month..." class="w-full bg-slate-50 border border-slate-200 rounded-lg py-1 px-2.5 text-xs focus:ring-1 focus:ring-blue-500">
+                        <i class="fas fa-search absolute right-2.5 top-2 text-slate-400 text-[10px]"></i>
                     </div>
-                    <ul class="max-h-48 overflow-y-auto divide-y divide-gray-100 text-xs">
-                        <li @click="selectedMonthFilter = ''; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-500">
+                    <ul class="max-h-48 overflow-y-auto divide-y divide-slate-100 text-xs">
+                        <li @click="selectedMonthFilter = ''; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-slate-50 cursor-pointer rounded font-medium text-slate-500">
                             -- All Months --
                         </li>
                         <template x-for="m in [
@@ -462,7 +525,7 @@
                             {val: '11', label: 'November'},
                             {val: '12', label: 'December'}
                         ].filter(item => !search || item.label.toLowerCase().includes(search.toLowerCase()))" :key="m.val">
-                            <li @click="selectedMonthFilter = m.val; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700" x-text="m.label"></li>
+                            <li @click="selectedMonthFilter = m.val; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-blue-50 cursor-pointer rounded font-medium text-slate-700" x-text="m.label"></li>
                         </template>
                     </ul>
                 </div>
@@ -470,122 +533,122 @@
 
             <!-- Due Date Filter -->
             <div class="relative inline-block text-left" x-data="{ open: false, search: '' }" @click.away="open = false">
-                <div class="flex items-center gap-2">
-                    <label class="text-xs font-semibold text-gray-500">Due Status:</label>
-                    <button type="button" @click="open = !open" class="bg-gray-50 border border-gray-300 text-gray-700 rounded-lg py-1.5 px-3 text-xs focus:ring-primary focus:border-primary font-medium flex items-center justify-between min-w-[130px]">
-                        <span x-text="selectedDueFilter === 'today' ? 'Due Today' : (selectedDueFilter === 'this_week' ? 'Due This Week' : '-- All Due Dates --')"></span>
-                        <i class="fas fa-chevron-down text-[10px] ml-2 text-gray-400"></i>
-                    </button>
-                </div>
-                <div x-show="open" x-transition class="origin-top-left absolute left-0 mt-1 w-48 rounded-lg shadow-xl bg-white border border-gray-200 z-50 p-2 space-y-2" style="display: none;">
+                <button type="button" @click="open = !open" 
+                        :class="selectedDueFilter ? 'border-blue-500 text-blue-700 bg-blue-50/50 ring-1 ring-blue-500/20' : 'border-slate-200 text-slate-700 bg-white hover:bg-slate-50'"
+                        class="h-8 border rounded-lg py-1 px-2.5 text-xs font-semibold flex items-center justify-between gap-1.5 shadow-sm transition-all min-w-[115px]">
+                    <span x-text="selectedDueFilter === 'today' ? 'Due: Today' : (selectedDueFilter === 'this_week' ? 'Due: This Week' : 'Due: All')"></span>
+                    <i class="fas fa-chevron-down text-[9px] text-slate-400"></i>
+                </button>
+                <div x-show="open" x-transition class="origin-top-left absolute left-0 mt-1 w-48 rounded-xl shadow-xl bg-white border border-slate-200 z-50 p-2 space-y-2" style="display: none;">
                     <div class="relative">
-                        <input type="text" x-model="search" placeholder="Search due status..." class="w-full bg-gray-50 border border-gray-300 rounded-md py-1 px-2.5 text-xs focus:ring-primary focus:border-primary">
-                        <i class="fas fa-search absolute right-2.5 top-2 text-gray-400 text-[10px]"></i>
+                        <input type="text" x-model="search" placeholder="Search due status..." class="w-full bg-slate-50 border border-slate-200 rounded-lg py-1 px-2.5 text-xs focus:ring-1 focus:ring-blue-500">
+                        <i class="fas fa-search absolute right-2.5 top-2 text-slate-400 text-[10px]"></i>
                     </div>
-                    <ul class="max-h-48 overflow-y-auto divide-y divide-gray-100 text-xs">
-                        <li @click="selectedDueFilter = ''; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-500">
+                    <ul class="max-h-48 overflow-y-auto divide-y divide-slate-100 text-xs">
+                        <li @click="selectedDueFilter = ''; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-slate-50 cursor-pointer rounded font-medium text-slate-500">
                             -- All Due Dates --
                         </li>
                         <template x-for="d in [
                             {val: 'today', label: 'Due Today'},
                             {val: 'this_week', label: 'Due This Week'}
                         ].filter(item => !search || item.label.toLowerCase().includes(search.toLowerCase()))" :key="d.val">
-                            <li @click="selectedDueFilter = d.val; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700" x-text="d.label"></li>
+                            <li @click="selectedDueFilter = d.val; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-blue-50 cursor-pointer rounded font-medium text-slate-700" x-text="d.label"></li>
                         </template>
                     </ul>
                 </div>
             </div>
 
-
-
-            <!-- Dynamic Column Filters (Dropdown and Non-Dropdown) -->
+            <!-- Dynamic Column Filters -->
             <template x-for="col in columns.filter(c => c.is_filterable)" :key="col.id">
                 <div class="relative inline-block text-left" x-data="{ open: false, search: '' }" @click.away="open = false">
-                    <div class="flex items-center gap-2">
-                        <label class="text-xs font-semibold text-gray-500" x-text="col.name + ':'"></label>
-                        <button type="button" @click="open = !open" class="bg-gray-50 border border-gray-300 text-gray-700 rounded-lg py-1.5 px-3 text-xs focus:ring-primary focus:border-primary font-medium flex items-center justify-between min-w-[130px]">
-                            <span x-text="columnFilters[col.id] || '-- All ' + col.name + ' --'"></span>
-                            <i class="fas fa-chevron-down text-[10px] ml-2 text-gray-400"></i>
-                        </button>
-                    </div>
-                    <div x-show="open" x-transition class="origin-top-left absolute left-0 mt-1 w-52 rounded-lg shadow-xl bg-white border border-gray-200 z-50 p-2 space-y-2" style="display: none;">
+                    <button type="button" @click="open = !open" 
+                            :class="columnFilters[col.id] ? 'border-blue-500 text-blue-700 bg-blue-50/50 ring-1 ring-blue-500/20' : 'border-slate-200 text-slate-700 bg-white hover:bg-slate-50'"
+                            class="h-8 border rounded-lg py-1 px-2.5 text-xs font-semibold flex items-center justify-between gap-1.5 shadow-sm transition-all min-w-[120px]">
+                        <span class="truncate max-w-[120px]" x-text="columnFilters[col.id] ? `${col.name}: ${columnFilters[col.id]}` : `${col.name}: All`"></span>
+                        <i class="fas fa-chevron-down text-[9px] text-slate-400"></i>
+                    </button>
+                    <div x-show="open" x-transition class="origin-top-left absolute left-0 mt-1 w-52 rounded-xl shadow-xl bg-white border border-slate-200 z-50 p-2 space-y-2" style="display: none;">
                         <div class="relative">
-                            <input type="text" x-model="search" :placeholder="'Search ' + col.name + '...'" class="w-full bg-gray-50 border border-gray-300 rounded-md py-1 px-2.5 text-xs focus:ring-primary focus:border-primary">
-                            <i class="fas fa-search absolute right-2.5 top-2 text-gray-400 text-[10px]"></i>
+                            <input type="text" x-model="search" :placeholder="'Search ' + col.name + '...'" class="w-full bg-slate-50 border border-slate-200 rounded-lg py-1 px-2.5 text-xs focus:ring-1 focus:ring-blue-500">
+                            <i class="fas fa-search absolute right-2.5 top-2 text-slate-400 text-[10px]"></i>
                         </div>
-                        <ul class="max-h-48 overflow-y-auto divide-y divide-gray-100 text-xs">
-                            <li @click="columnFilters[col.id] = ''; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-500" x-text="'-- All ' + col.name + ' --'">
+                        <ul class="max-h-48 overflow-y-auto divide-y divide-slate-100 text-xs">
+                            <li @click="columnFilters[col.id] = ''; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-slate-50 cursor-pointer rounded font-medium text-slate-500" x-text="'-- All ' + col.name + ' --'">
                             </li>
                             <template x-for="opt in (uniqueColumnValues[col.id] || []).filter(o => !search || String(o).toLowerCase().includes(search.toLowerCase()))" :key="opt">
-                                <li @click="columnFilters[col.id] = opt; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-gray-100 cursor-pointer rounded font-medium text-gray-700" x-text="opt"></li>
+                                <li @click="columnFilters[col.id] = opt; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-blue-50 cursor-pointer rounded font-medium text-slate-700" x-text="opt"></li>
                             </template>
                         </ul>
                     </div>
                 </div>
             </template>
         </div>
+    </div>
 
-        <button @click="resetFilters" class="text-xs text-red-500 hover:text-red-700 font-semibold flex items-center gap-1">
-            <i class="fas fa-undo-alt"></i> Reset Filters
-        </button>
+    <!-- Table Section Heading -->
+    <div class="flex items-center justify-between mb-1.5 px-0.5">
+        <h2 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 select-none">
+            <i class="fas fa-database text-[10px] text-slate-400"></i>
+            <span>Table Data</span>
+        </h2>
     </div>
 
     <!-- Main Table Container -->
-    <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-        <div class="overflow-x-auto overflow-y-auto max-h-[calc(100vh-220px)] min-h-[400px]">
-            <table class="min-w-full divide-y divide-gray-200 border-collapse">
-                <thead class="bg-gray-50">
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="overflow-x-auto overflow-y-auto max-h-[calc(100vh-210px)] min-h-[420px] ff-table-scroll">
+            <table class="min-w-full divide-y divide-slate-200 border-collapse">
+                <thead class="bg-slate-50 border-b border-slate-200">
                     <tr>
-                        <th scope="col" class="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider border-r border-gray-200 w-10 sticky top-0 bg-gray-50 z-20">
+                        <th scope="col" class="px-3 py-2.5 text-center text-xs font-bold text-slate-600 uppercase tracking-wider border-r border-slate-200 w-10 sticky top-0 bg-slate-50 z-20">
                             <input type="checkbox" @change="toggleSelectAll" :checked="isAllSelected" class="rounded text-primary focus:ring-primary">
                         </th>
                         {% for col in table.columns.all %}
-                        <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider border-r border-gray-200 sticky top-0 bg-gray-50 z-20"
+                        <th scope="col" class="px-3.5 py-2.5 text-left text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200 sticky top-0 bg-slate-50 z-20"
                             :class="isMultilineColumn('{{ col.name }}') ? 'min-w-[260px]' : 'min-w-[150px]'">
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center gap-1.5">
-                                    <span class="font-bold text-gray-800">
+                            <div class="flex items-center justify-between gap-1">
+                                <div class="flex items-center gap-1.5 min-w-0">
+                                    <span class="font-bold text-slate-800 truncate">
                                         {% if table.job_type == 'LOGS' and col.name|upper == 'RETURN_DATE' %}
-                                            RETURN_DATE <span class="text-[10px] text-blue-600 font-semibold normal-case">(Auto)</span>
+                                            RETURN_DATE <span class="text-[9px] text-blue-600 font-semibold normal-case">(Auto)</span>
                                         {% elif table.job_type == 'LOGS' and col.name|upper == 'DAYS_OVERDUE' %}
-                                            DAYS_OVERDUE <span class="text-[10px] text-amber-600 font-semibold normal-case">(Auto)</span>
+                                            DAYS_OVERDUE <span class="text-[9px] text-amber-600 font-semibold normal-case">(Auto)</span>
                                         {% else %}
                                             {{ col.name }}
                                         {% endif %}
                                     </span>
-                                    <span class="text-[9px] text-gray-400 lowercase">({{ col.data_type }})</span>
+                                    <span class="text-[9px] text-slate-400 font-normal lowercase shrink-0">({{ col.data_type }})</span>
                                     
                                     {% if col.name|upper == "DATE" %}
                                     <div class="flex flex-col ml-1 cursor-pointer" @click.stop="toggleSort('date')" title="Sort by Date">
-                                        <i class="fas fa-caret-up text-[10px]" :class="sortBy === 'date' && sortDir === 'asc' ? 'text-blue-600 font-bold' : 'text-gray-300'"></i>
-                                        <i class="fas fa-caret-down text-[10px] -mt-1" :class="sortBy === 'date' && sortDir === 'desc' ? 'text-blue-600 font-bold' : 'text-gray-300'"></i>
+                                        <i class="fas fa-caret-up text-[10px]" :class="sortBy === 'date' && sortDir === 'asc' ? 'text-blue-600 font-bold' : 'text-slate-300'"></i>
+                                        <i class="fas fa-caret-down text-[10px] -mt-1" :class="sortBy === 'date' && sortDir === 'desc' ? 'text-blue-600 font-bold' : 'text-slate-300'"></i>
                                     </div>
                                     {% elif col.name|upper == "DUE_DATE" or col.name|upper == "RETURN_DATE" or col.name|upper == "ISSUE_DATE" or col.name|upper == "DUE_DATE_FLOW_FORCE" or col.name|upper == "DUE_DATE_CUSTOMER" %}
                                     <div class="flex flex-col ml-1 cursor-pointer" @click.stop="toggleSort('due_date')" title="Sort by Date">
-                                        <i class="fas fa-caret-up text-[10px]" :class="sortBy === 'due_date' && sortDir === 'asc' ? 'text-blue-600 font-bold' : 'text-gray-300'"></i>
-                                        <i class="fas fa-caret-down text-[10px] -mt-1" :class="sortBy === 'due_date' && sortDir === 'desc' ? 'text-blue-600 font-bold' : 'text-gray-300'"></i>
+                                        <i class="fas fa-caret-up text-[10px]" :class="sortBy === 'due_date' && sortDir === 'asc' ? 'text-blue-600 font-bold' : 'text-slate-300'"></i>
+                                        <i class="fas fa-caret-down text-[10px] -mt-1" :class="sortBy === 'due_date' && sortDir === 'desc' ? 'text-blue-600 font-bold' : 'text-slate-300'"></i>
                                     </div>
                                     {% elif col.name|upper == "FOLLOW_UP_DATE" %}
                                     <div class="flex flex-col ml-1 cursor-pointer" @click.stop="toggleSort('follow_up_date')" title="Sort by Follow-up Date">
-                                        <i class="fas fa-caret-up text-[10px]" :class="sortBy === 'follow_up_date' && sortDir === 'asc' ? 'text-blue-600 font-bold' : 'text-gray-300'"></i>
-                                        <i class="fas fa-caret-down text-[10px] -mt-1" :class="sortBy === 'follow_up_date' && sortDir === 'desc' ? 'text-blue-600 font-bold' : 'text-gray-300'"></i>
+                                        <i class="fas fa-caret-up text-[10px]" :class="sortBy === 'follow_up_date' && sortDir === 'asc' ? 'text-blue-600 font-bold' : 'text-slate-300'"></i>
+                                        <i class="fas fa-caret-down text-[10px] -mt-1" :class="sortBy === 'follow_up_date' && sortDir === 'desc' ? 'text-blue-600 font-bold' : 'text-slate-300'"></i>
                                     </div>
                                     {% elif col.name|upper == "ENQUIRY_NO/QUOTATION_NO" or col.name|upper == "ENQUIRY_NO" or col.name|upper == "QUOTATION_NO" %}
                                     <div class="flex flex-col ml-1 cursor-pointer" @click.stop="toggleSort('enquiry_no')" title="Sort by Enquiry No">
-                                        <i class="fas fa-caret-up text-[10px]" :class="sortBy === 'enquiry_no' && sortDir === 'asc' ? 'text-blue-600 font-bold' : 'text-gray-300'"></i>
-                                        <i class="fas fa-caret-down text-[10px] -mt-1" :class="sortBy === 'enquiry_no' && sortDir === 'desc' ? 'text-blue-600 font-bold' : 'text-gray-300'"></i>
+                                        <i class="fas fa-caret-up text-[10px]" :class="sortBy === 'enquiry_no' && sortDir === 'asc' ? 'text-blue-600 font-bold' : 'text-slate-300'"></i>
+                                        <i class="fas fa-caret-down text-[10px] -mt-1" :class="sortBy === 'enquiry_no' && sortDir === 'desc' ? 'text-blue-600 font-bold' : 'text-slate-300'"></i>
                                     </div>
                                     {% endif %}
                                 </div>
-                                <div class="flex items-center gap-1 ml-2">
+                                <div class="flex items-center gap-1 ml-2 shrink-0">
                                     {% if user.role in 'SUPER_ADMIN,ADMIN,DEPARTMENT_ADMIN' %}
-                                    <button @click.stop="openEditColumnModal({{ col.id }}, '{{ col.name|escapejs }}', '{{ col.data_type }}', '{{ col.options|default:""|escapejs }}', {{ col.is_system_column|yesno:'true,false' }}, {{ col.is_filterable|yesno:'true,false' }})" class="text-blue-500 hover:text-blue-700 focus:outline-none mr-1" title="Edit Column">
+                                    <button @click.stop="openEditColumnModal({{ col.id }}, '{{ col.name|escapejs }}', '{{ col.data_type }}', '{{ col.options|default:""|escapejs }}', {{ col.is_system_column|yesno:'true,false' }}, {{ col.is_filterable|yesno:'true,false' }})" class="text-blue-500 hover:text-blue-700 focus:outline-none mr-0.5" title="Edit Column">
                                         <i class="fas fa-cog text-[9px]"></i>
                                     </button>
-                                    <button @click.stop="moveColumnLeft({{ col.id }})" class="text-gray-400 hover:text-gray-600 focus:outline-none" title="Move Left">
+                                    <button @click.stop="moveColumnLeft({{ col.id }})" class="text-slate-400 hover:text-slate-600 focus:outline-none" title="Move Left">
                                         <i class="fas fa-arrow-left text-[9px]"></i>
                                     </button>
-                                    <button @click.stop="moveColumnRight({{ col.id }})" class="text-gray-400 hover:text-gray-600 focus:outline-none" title="Move Right">
+                                    <button @click.stop="moveColumnRight({{ col.id }})" class="text-slate-400 hover:text-slate-600 focus:outline-none" title="Move Right">
                                         <i class="fas fa-arrow-right text-[9px]"></i>
                                     </button>
                                     {% endif %}
@@ -593,22 +656,38 @@
                             </div>
                         </th>
                         {% endfor %}
-                        <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider min-w-[100px] sticky top-0 bg-gray-50 z-20">Actions</th>
+                        <th scope="col" class="px-3.5 py-2.5 text-left text-xs font-bold text-slate-700 uppercase tracking-wider min-w-[100px] sticky top-0 bg-slate-50 z-20">Actions</th>
                     </tr>
                 </thead>
-                <tbody class="bg-white divide-y divide-gray-200">
+                <tbody class="bg-white divide-y divide-slate-200">
                     <!-- Skeleton Loader rows when isLoading and rows are empty -->
                     <template x-if="isLoading && rows.length === 0">
                         {% for i in "12345" %}
                         <tr>
-                            <td class="p-4 text-center border-r border-gray-200"><div class="skeleton h-4 w-4 mx-auto rounded"></div></td>
+                            <td class="p-4 text-center border-r border-slate-200"><div class="skeleton h-4 w-4 mx-auto rounded"></div></td>
                             {% for col in table.columns.all %}
-                            <td class="p-4 border-r border-gray-200"><div class="skeleton h-4 w-5/6 rounded"></div></td>
+                            <td class="p-4 border-r border-slate-200"><div class="skeleton h-4 w-5/6 rounded"></div></td>
                             {% endfor %}
                             <td class="p-4"><div class="skeleton h-4 w-12 rounded"></div></td>
                         </tr>
                         {% endfor %}
                     </template>
+
+                    <!-- Friendly Centered Empty State for 0 Search / Filter Results -->
+                    <tr x-show="filteredRows().length === 0 && !isLoading">
+                        <td :colspan="{{ table.columns.count }} + 2" class="py-14 text-center bg-white">
+                            <div class="max-w-sm mx-auto flex flex-col items-center">
+                                <div class="w-12 h-12 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center mb-3 border border-slate-200 shadow-sm">
+                                    <i class="fas fa-search text-base"></i>
+                                </div>
+                                <h4 class="text-sm font-bold text-slate-800">No matching records found</h4>
+                                <p class="text-xs text-slate-500 mt-1 leading-relaxed">Try changing your filters or resetting the search.</p>
+                                <button @click="resetFilters" class="mt-3.5 inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-all shadow-sm">
+                                    <i class="fas fa-undo-alt text-[10px]"></i> Reset Filters
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
 
                     <!-- Standard rows -->
                     <template x-for="(row, rowIndex) in filteredRows()" :key="row.id">
@@ -853,10 +932,10 @@
             </table>
         </div>
         <!-- Pagination Footer -->
-        <div class="bg-slate-50 border-t border-gray-200 px-5 py-3.5 flex items-center justify-between flex-wrap gap-4 select-none">
+        <div class="bg-slate-50 border-t border-slate-200 px-6 py-3.5 flex items-center justify-between flex-wrap gap-4 select-none">
             <div class="flex items-center gap-3">
-                <span class="text-xs text-gray-500 font-medium">Rows per page:</span>
-                <select x-model="pageSize" @change="changePageSize" class="bg-white border border-gray-300 rounded-lg py-1 px-2.5 text-xs text-gray-700 font-bold focus:outline-none focus:ring-1 focus:ring-primary shadow-sm cursor-pointer">
+                <span class="text-xs text-slate-500 font-medium">Rows per page:</span>
+                <select x-model="pageSize" @change="changePageSize" class="bg-white border border-slate-200 rounded-xl py-1 px-2.5 text-xs text-slate-700 font-bold focus:outline-none focus:ring-1 focus:ring-blue-500 shadow-sm cursor-pointer">
                     <option value="25">25</option>
                     <option value="50">50</option>
                     <option value="100">100</option>
@@ -867,20 +946,20 @@
             </div>
             
             <div class="flex items-center gap-1.5">
-                <button @click="gotoPage(1)" :disabled="currentPage === 1" class="p-1.5 px-2.5 text-xs font-bold rounded-lg bg-white border border-gray-200 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm">
-                    <i class="fas fa-angle-double-left"></i>
+                <button @click="gotoPage(1)" :disabled="currentPage === 1" class="p-1.5 px-2.5 text-xs font-bold rounded-xl bg-white border border-slate-200 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm">
+                    <i class="fas fa-angle-double-left text-slate-500"></i>
                 </button>
-                <button @click="gotoPage(currentPage - 1)" :disabled="currentPage === 1" class="p-1.5 px-3 text-xs font-bold rounded-lg bg-white border border-gray-200 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm flex items-center gap-1">
+                <button @click="gotoPage(currentPage - 1)" :disabled="currentPage === 1" class="p-1.5 px-3 text-xs font-bold rounded-xl bg-white border border-slate-200 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm flex items-center gap-1 text-slate-700">
                     <i class="fas fa-angle-left"></i> Prev
                 </button>
                 
-                <span class="text-xs font-extrabold text-slate-700 px-3 bg-slate-200/50 py-1.5 rounded-lg border border-slate-300/30" x-text="`Page ${currentPage} of ${totalPages()}`"></span>
+                <span class="text-xs font-extrabold text-slate-700 px-3 bg-slate-200/60 py-1.5 rounded-xl border border-slate-300/40" x-text="`Page ${currentPage} of ${totalPages()}`"></span>
                 
-                <button @click="gotoPage(currentPage + 1)" :disabled="currentPage === totalPages()" class="p-1.5 px-3 text-xs font-bold rounded-lg bg-white border border-gray-200 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm flex items-center gap-1">
+                <button @click="gotoPage(currentPage + 1)" :disabled="currentPage === totalPages()" class="p-1.5 px-3 text-xs font-bold rounded-xl bg-white border border-slate-200 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm flex items-center gap-1 text-slate-700">
                     Next <i class="fas fa-angle-right"></i>
                 </button>
-                <button @click="gotoPage(totalPages())" :disabled="currentPage === totalPages()" class="p-1.5 px-2.5 text-xs font-bold rounded-lg bg-white border border-gray-200 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm">
-                    <i class="fas fa-angle-double-right"></i>
+                <button @click="gotoPage(totalPages())" :disabled="currentPage === totalPages()" class="p-1.5 px-2.5 text-xs font-bold rounded-xl bg-white border border-slate-200 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm">
+                    <i class="fas fa-angle-double-right text-slate-500"></i>
                 </button>
             </div>
         </div>
