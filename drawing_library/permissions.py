@@ -46,14 +46,24 @@ def get_accessible_drawings(user):
     if DrawingAccess.objects.filter(drawing__isnull=True, user=user).exists():
         return EngineeringDrawing.objects.all()
 
-    # Drawing-specific access
-    accessible_drawing_ids = DrawingAccess.objects.filter(drawing__isnull=False, user=user).values_list("drawing_id", flat=True)
-    return EngineeringDrawing.objects.filter(id__in=accessible_drawing_ids)
+    # Drawing-specific access (including children/descendants)
+    accessible_drawing_ids = set(DrawingAccess.objects.filter(drawing__isnull=False, user=user).values_list("drawing_id", flat=True))
+    all_drawings = list(EngineeringDrawing.objects.all())
+    expanded_ids = set(accessible_drawing_ids)
+    changed = True
+    while changed:
+        changed = False
+        for d in all_drawings:
+            if d.parent_id in expanded_ids and d.id not in expanded_ids:
+                expanded_ids.add(d.id)
+                changed = True
+    return EngineeringDrawing.objects.filter(id__in=expanded_ids)
 
 
 def has_drawing_access(user, drawing, required_level="VIEW"):
     """
     Check if user has access to a specific drawing at the required level ('VIEW' or 'EDIT').
+    Inherits access from parent/root drawings.
     """
     if not user.is_authenticated:
         return False
@@ -68,8 +78,14 @@ def has_drawing_access(user, drawing, required_level="VIEW"):
     if DrawingAccess.objects.filter(global_q).exists():
         return True
 
-    # Check drawing specific access
-    drawing_q = Q(drawing=drawing, user=user)
+    # Check drawing specific access (direct or inherited from ancestors)
+    target_ids = [drawing.id]
+    curr = drawing
+    while curr.parent_id:
+        target_ids.append(curr.parent_id)
+        curr = curr.parent
+
+    drawing_q = Q(drawing_id__in=target_ids, user=user)
     if required_level == "EDIT":
         drawing_q &= Q(access_level="EDIT")
 

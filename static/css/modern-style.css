@@ -971,3 +971,62 @@ body {
     background: #94A3B8;
 }
 
+/* ============================================================================
+   Bootstrap Modals & Glassmorphism Stacking
+   ============================================================================ */
+
+.modal-backdrop {
+    z-index: 1050 !important;
+    background-color: rgba(15, 23, 42, 0.6) !important;
+    backdrop-filter: blur(8px) !important;
+    -webkit-backdrop-filter: blur(8px) !important;
+}
+
+.modal {
+    z-index: 1060 !important;
+}
+
+.modal-dialog {
+    z-index: 1065 !important;
+    position: relative;
+}
+
+.modal-content {
+    background: rgba(255, 255, 255, 0.94) !important;
+    backdrop-filter: blur(20px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.6) !important;
+    box-shadow: 0 20px 50px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(255, 255, 255, 0.4) inset !important;
+    color: #1e293b;
+    pointer-events: auto !important;
+    border-radius: 20px !important;
+}
+
+.modal-content .modal-header {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.modal-content .modal-footer {
+    background: rgba(248, 250, 252, 0.75) !important;
+    backdrop-filter: blur(10px) !important;
+    -webkit-backdrop-filter: blur(10px) !important;
+    border-top: 1px solid rgba(226, 232, 240, 0.6) !important;
+}
+
+/* Glassmorphism Generic Tokens */
+.glass-panel {
+    background: rgba(255, 255, 255, 0.75);
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.65);
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.9);
+}
+
+.glass-card-dark {
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.88) 0%, rgba(30, 41, 59, 0.82) 100%);
+    backdrop-filter: blur(20px) saturate(190%);
+    -webkit-backdrop-filter: blur(20px) saturate(190%);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 12px 36px 0 rgba(15, 23, 42, 0.25), inset 0 1px 1px 0 rgba(255, 255, 255, 0.15);
+}
+

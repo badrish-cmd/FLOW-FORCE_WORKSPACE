@@ -5,54 +5,126 @@
 
 {% block extra_css %}
 <style>
-    .pid-group-card {
+    /* ======================================================== */
+    /* FLOW-FORCE LIGHT WORKSPACE WITH ENHANCED TITLE BAR       */
+    /* ======================================================== */
+
+    /* Hero title */
+    .starter-hero-title {
+        font-size: 1.75rem;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        color: #0f172a;
+    }
+
+    /* Search Toolbar */
+    .search-card-clean {
         background: #ffffff;
-        border-radius: 14px;
         border: 1px solid #e2e8f0;
-        box-shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.04), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
-        margin-bottom: 24px;
+        border-radius: 14px;
+        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+    }
+    .clean-input-group {
+        background: #f8fafc;
+        border: 1px solid #cbd5e1;
+        border-radius: 10px;
+        overflow: hidden;
+        transition: all 0.2s ease;
+    }
+    .clean-input-group:focus-within {
+        background: #ffffff;
+        border-color: #2563eb;
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+    }
+    .clean-input-field {
+        background: transparent !important;
+        border: none !important;
+        color: #1e293b !important;
+    }
+    .clean-input-field::placeholder {
+        color: #94a3b8 !important;
+    }
+
+    /* Project Starter Card */
+    .project-starter-card {
+        background: #ffffff;
+        border-radius: 18px;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.06);
+        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        display: flex;
+        flex-direction: column;
+        height: 100%;
         overflow: hidden;
     }
-    .pid-group-header {
-        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+    .project-starter-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 14px 30px -4px rgba(37, 99, 235, 0.14);
+        border-color: #93c5fd;
+    }
+
+    /* Enhanced Bright Title Bar (Vibrant Sapphire - Not Overly Bright) */
+    .starter-header {
+        background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 55%, #1e40af 100%);
+        border-top: 3.5px solid #38bdf8;
         color: #ffffff;
         padding: 16px 22px;
+        position: relative;
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.18);
     }
-    .drawing-item-row {
-        padding: 14px 20px;
-        border-bottom: 1px solid #f1f5f9;
-        transition: background-color 0.15s ease;
+    .starter-header::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        background: radial-gradient(circle at 85% 15%, rgba(255, 255, 255, 0.14) 0%, transparent 60%);
+        pointer-events: none;
     }
-    .drawing-item-row:hover {
-        background-color: #f8fafc;
-    }
-    .drawing-item-row:last-child {
-        border-bottom: none;
-    }
-    .drawing-card {
+
+    .starter-body {
+        padding: 22px 24px;
+        flex-grow: 1;
+        display: flex;
+        flex-direction: column;
         background: #ffffff;
+    }
+    .starter-footer {
+        padding: 14px 24px;
+        background: #f8fafc;
+        border-top: 1px solid #e2e8f0;
+    }
+
+    /* Hierarchy Count Pills */
+    .count-pill {
+        background: #f8fafc;
         border-radius: 12px;
+        padding: 12px 14px;
+        text-align: center;
         border: 1px solid #e2e8f0;
-        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        flex: 1;
+        transition: all 0.2s ease;
     }
-    .drawing-card:hover {
+    .count-pill:hover {
+        background: #eff6ff;
+        border-color: #bfdbfe;
         transform: translateY(-2px);
-        box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.08);
-        border-color: #cbd5e1;
     }
-    .badge-format {
-        font-size: 0.72rem;
-        font-weight: 600;
-        letter-spacing: 0.04em;
+    .count-pill-num {
+        font-size: 1.35rem;
+        font-weight: 800;
+        font-family: monospace;
+        line-height: 1.2;
+    }
+    .count-pill-label {
+        font-size: 0.68rem;
+        font-weight: 700;
         text-transform: uppercase;
-        padding: 4px 8px;
-        border-radius: 6px;
+        letter-spacing: 0.05em;
+        color: #64748b;
+        margin-top: 4px;
     }
-    .badge-zwcad { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
-    .badge-solidworks { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
-    .badge-handsketch { background: #fefce8; color: #854d0e; border: 1px solid #fef08a; }
-    .badge-autocad { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
-    .badge-other { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
 </style>
 {% endblock %}
 
@@ -66,80 +138,49 @@
 
 {% block content %}
 <div class="container-fluid px-4 py-3">
+
     <!-- Top Hero / Banner Header -->
     <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-3">
         <div>
-            <h1 class="h3 font-bold text-slate-800 mb-1 d-flex align-items-center gap-2">
+            <h1 class="starter-hero-title mb-1 d-flex align-items-center gap-2">
                 <i class="fas fa-drafting-compass text-blue-600"></i>
-                Engineering Drawing Library
+                <span>PID Project Starter</span>
             </h1>
-            <p class="text-slate-500 text-sm mb-0">
-                Centralized vault for engineering drawings organized by P&ID project references, revisions, and CAD working files.
+            <p class="text-slate-600 text-sm mb-0">
+                Select a PID project to enter its multi-level drawing tree (Master Parents &rarr; Sub-Assembly Children &rarr; Detail Grandchildren).
             </p>
         </div>
-        <div class="d-flex gap-2">
+        <div class="d-flex gap-2 flex-wrap">
             {% if is_admin %}
-            <a href="{% url 'drawings:global_access_management' %}" class="btn btn-outline-secondary d-flex align-items-center gap-2">
-                <i class="fas fa-user-clock"></i>
-                <span>Activity Logs & Access</span>
+            <a href="{% url 'drawings:global_access_management' %}" class="btn btn-outline-secondary d-flex align-items-center gap-2 rounded-3">
+                <i class="fas fa-user-clock text-blue-600"></i>
+                <span>Audit Logs & Access</span>
             </a>
-            <a href="{% url 'drawings:drawing_create' %}" class="btn btn-primary d-flex align-items-center gap-2" style="background-color: #2563eb; border-color: #2563eb;">
+            <a href="{% url 'drawings:drawing_create' %}" class="btn btn-primary d-flex align-items-center gap-2 rounded-3 font-semibold shadow-sm" style="background-color: #2563eb; border-color: #2563eb;">
                 <i class="fas fa-plus-circle"></i>
-                <span>New Drawing Project</span>
+                <span>+ New PID Project</span>
             </a>
             {% endif %}
         </div>
     </div>
 
-    <!-- Filters, Search Toolbar & View Switcher -->
-    <div class="card border-0 shadow-sm rounded-3 mb-4 p-3 bg-white">
+    <!-- Search Toolbar -->
+    <div class="card border-0 search-card-clean mb-4 p-3">
         <form method="get" class="row g-2 align-items-center">
-            <input type="hidden" name="view" value="{{ view_mode }}">
-
-            <div class="col-lg-5 col-md-4">
-                <div class="input-group">
-                    <span class="input-group-text bg-light border-end-0 text-slate-400">
+            <div class="col-lg-10 col-md-9">
+                <div class="input-group clean-input-group">
+                    <span class="input-group-text bg-transparent border-0 text-slate-400 ps-3">
                         <i class="fas fa-search"></i>
                     </span>
-                    <input type="text" name="q" value="{{ search_query }}" class="form-control border-start-0 ps-0 bg-light" placeholder="Search Customer, P&ID, Drawing Name, Base #...">
+                    <input type="text" name="q" value="{{ search_query }}" class="form-control clean-input-field ps-1" placeholder="Search by PID Reference, Customer Name, Project Name, Drafter Name...">
                 </div>
             </div>
-
-            <div class="col-lg-2 col-md-3">
-                <select name="format" class="form-select bg-light" onchange="this.form.submit()">
-                    <option value="">All Formats (CAD / Sketch)</option>
-                    {% for code, label in format_choices %}
-                    <option value="{{ code }}" {% if format_filter == code %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <div class="col-lg-2 col-md-3">
-                <select name="company" class="form-select bg-light" onchange="this.form.submit()">
-                    <option value="">All Watermark Companies</option>
-                    {% for code, label in company_choices %}
-                    <option value="{{ code }}" {% if company_filter == code %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <div class="col-lg-3 col-md-2 d-flex justify-content-end gap-2">
-                <!-- View Mode Switcher -->
-                <div class="btn-group" role="group">
-                    <a href="?view=pid{% if search_query %}&q={{ search_query }}{% endif %}{% if format_filter %}&format={{ format_filter }}{% endif %}{% if company_filter %}&company={{ company_filter }}{% endif %}" 
-                       class="btn btn-sm {% if view_mode == 'pid' %}btn-primary{% else %}btn-outline-secondary{% endif %}" 
-                       title="Group by P&ID Reference">
-                        <i class="fas fa-layer-group me-1"></i> By P&ID ({{ total_pids }})
-                    </a>
-                    <a href="?view=flat{% if search_query %}&q={{ search_query }}{% endif %}{% if format_filter %}&format={{ format_filter }}{% endif %}{% if company_filter %}&company={{ company_filter }}{% endif %}" 
-                       class="btn btn-sm {% if view_mode == 'flat' %}btn-primary{% else %}btn-outline-secondary{% endif %}" 
-                       title="Flat Grid View">
-                        <i class="fas fa-th-large me-1"></i> Flat ({{ total_drawings }})
-                    </a>
-                </div>
-
-                {% if search_query or format_filter or company_filter %}
-                <a href="{% url 'drawings:drawing_list' %}?view={{ view_mode }}" class="btn btn-sm btn-outline-danger" title="Clear Filters">
+            <div class="col-lg-2 col-md-3 d-flex gap-2">
+                <button type="submit" class="btn btn-primary w-100 font-semibold rounded-3 shadow-sm" style="background-color: #2563eb; border-color: #2563eb;">
+                    <i class="fas fa-filter me-1"></i> Filter
+                </button>
+                {% if search_query %}
+                <a href="{% url 'drawings:drawing_list' %}" class="btn btn-outline-danger rounded-3" title="Clear Search">
                     <i class="fas fa-times"></i>
                 </a>
                 {% endif %}
@@ -147,227 +188,127 @@
         </form>
     </div>
 
-    <!-- VIEW MODE 1: GROUPED BY P&ID (MULTIPLE DRAWINGS UNDER ONE PID) -->
-    {% if view_mode == 'pid' %}
-        {% if pid_groups %}
-            {% for group in pid_groups %}
-            <div class="pid-group-card">
-                <!-- P&ID Group Header -->
-                <div class="pid-group-header d-flex flex-wrap justify-content-between align-items-center gap-2">
-                    <div>
-                        <div class="d-flex align-items-center gap-2">
-                            <span class="badge bg-amber-400 text-slate-900 font-mono font-bold px-2.5 py-1 rounded">
-                                <i class="fas fa-project-diagram me-1"></i> P&ID: {{ group.pid_reference }}
-                            </span>
-                            <span class="text-xs text-slate-300">
-                                <i class="fas fa-building me-1"></i> Customer: <strong class="text-white">{{ group.customer_name }}</strong>
-                            </span>
-                            <span class="badge bg-blue-500/30 text-blue-200 border border-blue-400/30 text-xs">
-                                {{ group.drawings|length }} drawing{{ group.drawings|length|pluralize }} under this P&ID
-                            </span>
+    <!-- PID Starter Projects Grid -->
+    {% if pid_groups %}
+    <div class="row g-4 mb-4">
+        {% for group in pid_groups %}
+        <div class="col-xl-6 col-lg-6">
+            <div class="project-starter-card">
+                <!-- Header: Enhanced Bright Title Bar with PID Reference & Customer -->
+                <div class="starter-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="badge bg-amber-400 text-slate-900 font-mono font-bold px-3 py-1.5 rounded shadow-sm" style="font-size: 0.88rem;">
+                            <i class="fas fa-project-diagram me-1"></i> {{ group.pid_reference }}
+                        </span>
+                    </div>
+                    <div class="text-end">
+                        <span class="badge px-3 py-1.5 text-xs text-white rounded" style="background: rgba(255, 255, 255, 0.18); border: 1px solid rgba(255, 255, 255, 0.3);">
+                            <i class="fas fa-building me-1 text-sky-300"></i> {{ group.customer_name }}
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Body: Project Details & Drafter -->
+                <div class="starter-body">
+                    <div class="mb-3">
+                        <div class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Project Name</div>
+                        <h2 class="h5 font-bold mb-0">
+                            {% if group.root_drawing %}
+                            <a href="{% url 'drawings:drawing_detail' group.root_drawing.pk %}" class="text-decoration-none text-slate-900 hover:text-blue-600 transition-colors">
+                                {{ group.project_name }}
+                            </a>
+                            {% else %}
+                            <span class="text-slate-900">{{ group.project_name }}</span>
+                            {% endif %}
+                        </h2>
+                    </div>
+
+                    <div class="d-flex align-items-center gap-2 text-xs text-slate-500 mb-4 flex-wrap">
+                        <span class="badge bg-slate-100 text-slate-700 border border-slate-200 px-2.5 py-1">
+                            <i class="fas fa-user-edit text-slate-500 me-1"></i> Drafter: <strong class="text-slate-800">{{ group.drafter_name|default:"Not specified" }}</strong>
+                        </span>
+                        {% if group.latest_update %}
+                        <span class="text-slate-500">
+                            <i class="fas fa-clock me-1 text-blue-500"></i> Updated {{ group.latest_update|date:"d M Y, H:i" }}
+                        </span>
+                        {% endif %}
+                    </div>
+
+                    <!-- Hierarchy Breakdown Counters -->
+                    <div class="mt-auto">
+                        <div class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Hierarchy Structure</div>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <div class="count-pill">
+                                <div class="count-pill-num text-blue-600">{{ group.master_count }}</div>
+                                <div class="count-pill-label">L1 Parents</div>
+                            </div>
+                            <div class="count-pill">
+                                <div class="count-pill-num text-sky-600">{{ group.child_count }}</div>
+                                <div class="count-pill-label">L2 Children</div>
+                            </div>
+                            <div class="count-pill">
+                                <div class="count-pill-num text-emerald-600">{{ group.grandchild_count }}</div>
+                                <div class="count-pill-label">L3 Grandchildren</div>
+                            </div>
+                            <div class="count-pill">
+                                <div class="count-pill-num text-purple-600">{{ group.total_revisions }}</div>
+                                <div class="count-pill-label">Revisions</div>
+                            </div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Footer: Click to Open Project Hierarchy -->
+                <div class="starter-footer d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div class="text-xs text-slate-600 font-medium">
+                        <i class="fas fa-layer-group text-blue-600 me-1"></i>
+                        <strong class="text-slate-900">{{ group.total_drawings }}</strong> total drawing{{ group.total_drawings|pluralize }}
                     </div>
 
                     <div class="d-flex gap-2">
+                        {% if group.root_drawing %}
+                        <a href="{% url 'drawings:drawing_detail' group.root_drawing.pk %}" 
+                           class="btn btn-sm btn-primary font-semibold d-flex align-items-center gap-2 px-3 py-1.5 shadow-sm"
+                           style="background-color: #2563eb; border-color: #2563eb;">
+                            <span>Open Project Hierarchy</span>
+                            <i class="fas fa-arrow-right"></i>
+                        </a>
+                        {% endif %}
                         {% if is_admin %}
-                        <a href="{% url 'drawings:drawing_create' %}?pid={{ group.pid_reference|urlencode }}&customer={{ group.customer_name|urlencode }}" 
-                           class="btn btn-sm btn-light font-semibold d-flex align-items-center gap-1 text-slate-800"
-                           title="Add another drawing with different name under this P&ID">
-                            <i class="fas fa-plus text-primary"></i>
-                            <span>Add Drawing to this P&ID</span>
+                        <a href="{% url 'drawings:drawing_create' %}?pid={{ group.pid_reference|urlencode }}&customer={{ group.customer_name|urlencode }}&project_name={{ group.project_name|urlencode }}&drafter_name={{ group.drafter_name|urlencode }}" 
+                           class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+                            title="Add Another Parent Drawing to this PID">
+                            <i class="fas fa-plus text-blue-600"></i>
+                            <span>Add Parent</span>
                         </a>
                         {% endif %}
                     </div>
                 </div>
-
-                <!-- Drawings List under this P&ID -->
-                <div class="bg-white">
-                    {% for drawing in group.drawings %}
-                    <div class="drawing-item-row d-flex flex-wrap justify-content-between align-items-center gap-3">
-                        <div class="d-flex align-items-center gap-3 flex-grow-1" style="min-width: 260px;">
-                            <div class="bg-slate-100 rounded p-2 text-center" style="min-width: 100px;">
-                                <span class="font-mono text-xs font-bold text-slate-800 d-block">{{ drawing.base_drawing_number }}</span>
-                                <span class="badge bg-blue-600 text-white font-bold" style="font-size: 0.68rem;">Rev {{ drawing.active_revision_number }}</span>
-                            </div>
-
-                            <div>
-                                <h4 class="h6 font-bold text-slate-900 mb-1">
-                                    <a href="{% url 'drawings:drawing_detail' drawing.pk %}" class="text-decoration-none text-slate-900 hover:text-blue-600">
-                                        {{ drawing.drawing_name }}
-                                    </a>
-                                </h4>
-                                <div class="d-flex align-items-center gap-2 flex-wrap text-xs text-slate-500">
-                                    <span class="badge-format 
-                                        {% if drawing.format == 'ZWCAD' %}badge-zwcad
-                                        {% elif drawing.format == 'SOLIDWORKS' %}badge-solidworks
-                                        {% elif drawing.format == 'HAND_SKETCH' %}badge-handsketch
-                                        {% elif drawing.format == 'AUTOCAD' %}badge-autocad
-                                        {% else %}badge-other{% endif %}">
-                                        {{ drawing.get_format_display }}
-                                    </span>
-                                    <span><i class="fas fa-user-edit me-1"></i>{{ drawing.drafter_name }}</span>
-                                    <span>&bull;</span>
-                                    <span><i class="fas fa-stamp text-blue-500 me-1"></i>{{ drawing.watermark_company }}</span>
-                                    <span>&bull;</span>
-                                    <span>{{ drawing.revisions.count }} revision{{ drawing.revisions.count|pluralize }}</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Action Buttons for this Drawing -->
-                        <div class="d-flex align-items-center gap-2">
-                            {% if drawing.latest_revision and drawing.latest_revision.pdf_file %}
-                            <a href="{% url 'drawings:download_watermarked_pdf' drawing.latest_revision.pk %}" 
-                               class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1 text-xs" 
-                               title="Download latest watermarked PDF">
-                                <i class="fas fa-file-pdf"></i>
-                                <span>PDF</span>
-                            </a>
-                            {% endif %}
-
-                            {% if drawing.latest_revision and drawing.latest_revision.native_file %}
-                            <a href="{% url 'drawings:download_native_file' drawing.latest_revision.pk %}" 
-                               class="btn btn-sm btn-outline-success d-flex align-items-center gap-1 text-xs" 
-                               title="Download native working CAD file">
-                                <i class="fas fa-file-code"></i>
-                                <span>CAD</span>
-                            </a>
-                            {% endif %}
-
-                            <a href="{% url 'drawings:drawing_detail' drawing.pk %}" class="btn btn-sm btn-primary d-flex align-items-center gap-1 text-xs px-3" style="background-color: #2563eb; border-color: #2563eb;">
-                                <i class="fas fa-folder-open"></i>
-                                <span>View Revisions</span>
-                            </a>
-
-                            {% if is_admin %}
-                            <a href="{% url 'drawings:drawing_edit' drawing.pk %}" class="btn btn-sm btn-light border text-slate-600" title="Edit Metadata">
-                                <i class="fas fa-pen"></i>
-                            </a>
-                            {% endif %}
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
             </div>
-            {% endfor %}
-        {% else %}
-            <div class="card border-0 shadow-sm rounded-4 text-center py-5 bg-white">
-                <div class="card-body py-4">
-                    <i class="fas fa-folder-open fa-3x text-slate-300 mb-3 d-block"></i>
-                    <h4 class="h5 font-bold text-slate-700">No Drawings Found</h4>
-                    <p class="text-slate-500 text-sm max-w-md mx-auto mb-4" style="max-width: 450px;">
-                        No drawings match your search criteria. Try clearing search filters or add a new drawing project.
-                    </p>
-                    {% if is_admin %}
-                    <a href="{% url 'drawings:drawing_create' %}" class="btn btn-primary px-4 py-2 font-semibold">
-                        <i class="fas fa-plus-circle me-1"></i> Add New Drawing Project
-                    </a>
-                    {% endif %}
-                </div>
-            </div>
-        {% endif %}
-
-    <!-- VIEW MODE 2: FLAT GRID OF DRAWINGS -->
+        </div>
+        {% endfor %}
+    </div>
     {% else %}
-        {% if drawings %}
-        <div class="row g-3">
-            {% for drawing in drawings %}
-            <div class="col-xl-6 col-12">
-                <div class="drawing-card p-4">
-                    <div class="d-flex justify-content-between align-items-start mb-2">
-                        <div>
-                            <div class="d-flex align-items-center gap-2 mb-1">
-                                <span class="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-200">
-                                    {{ drawing.base_drawing_number }}
-                                </span>
-                                <span class="badge-format 
-                                    {% if drawing.format == 'ZWCAD' %}badge-zwcad
-                                    {% elif drawing.format == 'SOLIDWORKS' %}badge-solidworks
-                                    {% elif drawing.format == 'HAND_SKETCH' %}badge-handsketch
-                                    {% elif drawing.format == 'AUTOCAD' %}badge-autocad
-                                    {% else %}badge-other{% endif %}">
-                                    {{ drawing.get_format_display }}
-                                </span>
-                            </div>
-                            <h4 class="h5 font-bold text-slate-800 mb-0">
-                                <a href="{% url 'drawings:drawing_detail' drawing.pk %}" class="text-decoration-none text-slate-900 hover:text-blue-600">
-                                    {{ drawing.drawing_name }}
-                                </a>
-                            </h4>
-                        </div>
-
-                        <div class="text-end">
-                            <span class="badge bg-blue-600 text-white font-bold px-2.5 py-1 rounded-pill" style="font-size: 0.75rem;">
-                                Rev {{ drawing.active_revision_number }}
-                            </span>
-                            <div class="text-slate-400 text-xs mt-1">
-                                {{ drawing.revisions.count }} revision{{ drawing.revisions.count|pluralize }}
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Customer & PID Grid -->
-                    <div class="row g-2 text-sm text-slate-600 my-2 pt-2 border-top border-slate-100">
-                        <div class="col-sm-6">
-                            <span class="text-xs text-slate-400 uppercase font-semibold">Customer:</span>
-                            <div class="font-semibold text-slate-700 text-truncate">{{ drawing.customer_name }}</div>
-                        </div>
-                        <div class="col-sm-6">
-                            <span class="text-xs text-slate-400 uppercase font-semibold">P&ID Reference:</span>
-                            <div class="font-mono font-medium text-slate-700 text-truncate">{{ drawing.pid_reference }}</div>
-                        </div>
-                        <div class="col-sm-6">
-                            <span class="text-xs text-slate-400 uppercase font-semibold">Drafter:</span>
-                            <div class="text-slate-700 text-truncate">{{ drawing.drafter_name }}</div>
-                        </div>
-                        <div class="col-sm-6">
-                            <span class="text-xs text-slate-400 uppercase font-semibold">Watermark Company:</span>
-                            <div class="text-truncate">
-                                <span class="badge-watermark d-inline-flex align-items-center gap-1">
-                                    <i class="fas fa-stamp text-blue-500"></i>
-                                    {{ drawing.watermark_company }}
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Footer details & Action Buttons -->
-                    <div class="d-flex justify-content-between align-items-center pt-3 mt-2 border-top border-slate-100">
-                        <div class="text-xs text-slate-400">
-                            Updated {{ drawing.updated_at|date:"M d, Y" }}
-                        </div>
-                        <div class="d-flex gap-2">
-                            <a href="{% url 'drawings:drawing_detail' drawing.pk %}" class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1">
-                                <i class="fas fa-folder-open"></i>
-                                <span>View Revisions</span>
-                            </a>
-                            {% if is_admin %}
-                            <a href="{% url 'drawings:drawing_edit' drawing.pk %}" class="btn btn-sm btn-light border text-slate-600" title="Edit Metadata">
-                                <i class="fas fa-pen"></i>
-                            </a>
-                            {% endif %}
-                        </div>
-                    </div>
-                </div>
+    <div class="card border-0 rounded-4 p-5 text-center search-card-clean">
+        <div class="py-4">
+            <div class="rounded-circle bg-blue-50 border border-blue-200 d-inline-flex p-4 mb-3 text-blue-600">
+                <i class="fas fa-project-diagram fa-3x"></i>
             </div>
-            {% endfor %}
-        </div>
-        {% else %}
-        <div class="card border-0 shadow-sm rounded-4 text-center py-5 bg-white">
-            <div class="card-body py-4">
-                <i class="fas fa-drafting-compass fa-3x text-slate-300 mb-3 d-block"></i>
-                <h4 class="h5 font-bold text-slate-700">No Engineering Drawings Found</h4>
-                <p class="text-slate-500 text-sm max-w-md mx-auto mb-4" style="max-width: 450px;">
-                    Your repository is currently empty or no drawings matched your filter.
-                </p>
-                {% if is_admin %}
-                <a href="{% url 'drawings:drawing_create' %}" class="btn btn-primary px-4 py-2 font-semibold">
-                    <i class="fas fa-plus-circle me-1"></i> Add New Drawing Project
-                </a>
+            <h4 class="font-bold text-slate-800 mb-2">No PID Projects Found</h4>
+            <p class="text-slate-600 text-sm max-w-md mx-auto mb-4" style="max-width: 480px;">
+                {% if search_query %}
+                No project starter matched your search query "<strong>{{ search_query }}</strong>".
+                {% else %}
+                Start by creating your first PID project with customer details, project name, and master parent drawings.
                 {% endif %}
-            </div>
+            </p>
+            {% if is_admin %}
+            <a href="{% url 'drawings:drawing_create' %}" class="btn btn-primary px-4 py-2 font-semibold shadow-sm" style="background-color: #2563eb; border-color: #2563eb;">
+                <i class="fas fa-plus-circle me-1"></i> Create First PID Project
+            </a>
+            {% endif %}
         </div>
-        {% endif %}
+    </div>
     {% endif %}
 
 </div>

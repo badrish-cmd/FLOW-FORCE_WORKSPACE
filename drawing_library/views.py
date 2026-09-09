@@ -35,29 +35,25 @@ def drawing_list(request):
 
     # Search & filters
     q = request.GET.get("q", "").strip()
-    format_filter = request.GET.get("format", "").strip()
-    company_filter = request.GET.get("company", "").strip()
-    view_mode = request.GET.get("view", "pid")  # 'pid' or 'flat'
 
     drawings_qs = accessible_drawings
     if q:
         drawings_qs = drawings_qs.filter(
             Q(customer_name__icontains=q) |
+            Q(project_name__icontains=q) |
             Q(pid_reference__icontains=q) |
             Q(base_drawing_number__icontains=q) |
             Q(drawing_name__icontains=q) |
-            Q(enquiry_number__icontains=q) |
-            Q(po_number__icontains=q) |
             Q(drafter_name__icontains=q)
         )
-    if format_filter:
-        drawings_qs = drawings_qs.filter(format=format_filter)
-    if company_filter:
-        drawings_qs = drawings_qs.filter(watermark_company=company_filter)
 
-    drawings = drawings_qs.prefetch_related("revisions").select_related("created_by")
+    drawings = drawings_qs.prefetch_related(
+        "revisions",
+        "children__revisions",
+        "children__children__revisions"
+    ).select_related("created_by", "parent")
 
-    # Group drawings under P&ID references (multiple drawings under one PID with different names)
+    # Group drawings under PID project starter references
     pid_groups = {}
     for d in drawings:
         pid = d.pid_reference.strip() if d.pid_reference else "UNASSIGNED"
@@ -65,31 +61,51 @@ def drawing_list(request):
             pid_groups[pid] = {
                 "pid_reference": pid,
                 "customer_name": d.customer_name,
-                "drawings": [],
+                "project_name": d.project_name or d.drawing_name,
+                "drafter_name": d.drafter_name,
+                "root_drawing": d.root_drawing,
+                "master_count": 0,
+                "child_count": 0,
+                "grandchild_count": 0,
+                "total_drawings": 0,
                 "total_revisions": 0,
+                "latest_update": d.updated_at,
             }
-        pid_groups[pid]["drawings"].append(d)
-        pid_groups[pid]["total_revisions"] += d.revisions.count()
+        group = pid_groups[pid]
+        group["total_drawings"] += 1
+        group["total_revisions"] += d.revisions.count()
+
+        if d.level == 1:
+            group["master_count"] += 1
+            if not group.get("drafter_name") and d.drafter_name:
+                group["drafter_name"] = d.drafter_name
+            if not group.get("project_name") and d.project_name:
+                group["project_name"] = d.project_name
+            group["root_drawing"] = d
+        elif d.level == 2:
+            group["child_count"] += 1
+        elif d.level == 3:
+            group["grandchild_count"] += 1
+
+        if d.updated_at and (not group["latest_update"] or d.updated_at > group["latest_update"]):
+            group["latest_update"] = d.updated_at
+
+    # Sort pid_groups by latest_update descending
+    sorted_pids = sorted(pid_groups.values(), key=lambda x: x["latest_update"] or timezone.now(), reverse=True)
 
     # Metrics
+    total_projects = len(pid_groups)
     total_drawings = accessible_drawings.count()
-    total_pids = len(pid_groups)
     total_revisions = DrawingRevision.objects.filter(drawing__in=accessible_drawings).count()
 
     is_admin = is_admin_or_superadmin(user)
 
     context = {
-        "drawings": drawings,
-        "pid_groups": pid_groups.values(),
+        "pid_groups": sorted_pids,
+        "total_projects": total_projects,
         "total_drawings": total_drawings,
-        "total_pids": total_pids,
         "total_revisions": total_revisions,
-        "view_mode": view_mode,
         "search_query": q,
-        "format_filter": format_filter,
-        "company_filter": company_filter,
-        "format_choices": EngineeringDrawing.FORMAT_CHOICES,
-        "company_choices": EngineeringDrawing.COMPANY_CHOICES,
         "is_admin": is_admin,
     }
     return render(request, "drawing_library/drawing_list.html", context)
@@ -102,12 +118,14 @@ def drawing_detail(request, pk):
         messages.error(request, "Access Denied: You do not have permission to view this engineering drawing.")
         return redirect("drawings:drawing_list")
 
+    root_project = drawing.root_drawing
+
     # Log employee view activity
     log_drawing_activity(
         user=request.user,
         action="VIEW_DRAWING",
         drawing=drawing,
-        description=f"Viewed project metadata and revision history for {drawing.base_drawing_number}",
+        description=f"Viewed project metadata and tree structure for {drawing.base_drawing_number}",
         request=request
     )
 
@@ -118,7 +136,17 @@ def drawing_detail(request, pk):
     revision_form = DrawingRevisionForm(initial={"drafter_name": drawing.drafter_name})
     access_form = DrawingAccessGrantForm() if is_admin else None
 
-    # Other drawings saved under this same P&ID reference
+    # Load all Level 1 (Parent Branch) drawings associated with this root project / PID
+    # Prefetch children (Level 2: sub-assemblies) and their children (Level 3: detail parts)
+    tree_drawings = EngineeringDrawing.objects.filter(
+        Q(pk=root_project.pk) | Q(pid_reference=root_project.pid_reference, parent__isnull=True)
+    ).distinct().prefetch_related(
+        "revisions",
+        "children__revisions",
+        "children__children__revisions",
+    ).order_by("base_drawing_number")
+
+    # Other drawings saved under this same PID reference
     other_pid_drawings = EngineeringDrawing.objects.filter(
         pid_reference=drawing.pid_reference
     ).exclude(pk=drawing.pk).prefetch_related("revisions")
@@ -131,6 +159,8 @@ def drawing_detail(request, pk):
 
     context = {
         "drawing": drawing,
+        "root_project": root_project,
+        "tree_drawings": tree_drawings,
         "revisions": revisions,
         "other_pid_drawings": other_pid_drawings,
         "revision_form": revision_form,
@@ -156,18 +186,60 @@ def drawing_create(request):
         .order_by("pid_reference")
     )
 
+    parent_id = request.GET.get("parent_id") or request.POST.get("parent")
+    parent_drawing = None
+    if parent_id:
+        try:
+            parent_drawing = EngineeringDrawing.objects.get(pk=parent_id)
+        except (EngineeringDrawing.DoesNotExist, ValueError):
+            parent_drawing = None
+
     if request.method == "POST":
-        form = EngineeringDrawingForm(request.POST, request.FILES)
+        post_data = request.POST.copy()
+        # Auto-inherit project metadata from parent or root project context
+        ref_drawing = parent_drawing
+        return_pk = post_data.get("return_to_pk")
+        if not ref_drawing and return_pk:
+            try:
+                ref_drawing = EngineeringDrawing.objects.get(pk=return_pk)
+            except (EngineeringDrawing.DoesNotExist, ValueError):
+                ref_drawing = None
+
+        if ref_drawing:
+            if not post_data.get("customer_name") and ref_drawing.customer_name:
+                post_data["customer_name"] = ref_drawing.customer_name
+            if not post_data.get("project_name") and ref_drawing.project_name:
+                post_data["project_name"] = ref_drawing.project_name
+            if not post_data.get("pid_reference") and ref_drawing.pid_reference:
+                post_data["pid_reference"] = ref_drawing.pid_reference
+            if not post_data.get("drafter_name") and ref_drawing.drafter_name:
+                post_data["drafter_name"] = ref_drawing.drafter_name
+
+        form = EngineeringDrawingForm(post_data, request.FILES)
         if form.is_valid():
             drawing = form.save(commit=False)
             drawing.created_by = request.user
+            if parent_drawing:
+                drawing.parent = parent_drawing
+                if parent_drawing.level == 1:
+                    drawing.drawing_type = "SUB_ASSEMBLY"
+                else:
+                    drawing.drawing_type = "DETAIL_PART"
+            if not drawing.project_name and ref_drawing:
+                drawing.project_name = ref_drawing.project_name
+            if not drawing.customer_name and ref_drawing:
+                drawing.customer_name = ref_drawing.customer_name
+            if not drawing.pid_reference and ref_drawing:
+                drawing.pid_reference = ref_drawing.pid_reference
+            if not drawing.watermark_company and ref_drawing:
+                drawing.watermark_company = ref_drawing.watermark_company
             drawing.save()
 
             log_drawing_activity(
                 user=request.user,
                 action="CREATE_DRAWING",
                 drawing=drawing,
-                description=f"Created engineering drawing '{drawing.drawing_name}' ({drawing.base_drawing_number}) under P&ID {drawing.pid_reference}",
+                description=f"Created {drawing.get_drawing_type_display()} '{drawing.drawing_name}' ({drawing.base_drawing_number}) under PID {drawing.pid_reference}",
                 request=request
             )
 
@@ -177,13 +249,15 @@ def drawing_create(request):
             init_native = form.cleaned_data.get("initial_native_file")
             init_pdf = form.cleaned_data.get("initial_pdf_file")
 
-            if init_native or init_pdf:
+            if init_native or init_pdf or init_rev:
                 rev = DrawingRevision.objects.create(
                     drawing=drawing,
                     revision_number=init_rev,
                     stage_change_description=init_desc,
                     native_file=init_native,
                     pdf_file=init_pdf,
+                    original_pdf_filename=os.path.basename(init_pdf.name) if init_pdf else "",
+                    original_native_filename=os.path.basename(init_native.name) if init_native else "",
                     drafter_name=drawing.drafter_name,
                     created_by=request.user,
                 )
@@ -198,22 +272,56 @@ def drawing_create(request):
                     request=request
                 )
 
-            messages.success(request, f"Drawing '{drawing.drawing_name}' ({drawing.base_drawing_number}) saved under P&ID '{drawing.pid_reference}'.")
-            return redirect("drawings:drawing_detail", pk=drawing.pk)
+            messages.success(request, f"Drawing '{drawing.drawing_name}' ({drawing.base_drawing_number}) saved under PID '{drawing.pid_reference}'.")
+            return redirect("drawings:drawing_detail", pk=drawing.root_drawing.pk)
+        else:
+            # Extract errors clearly
+            err_msgs = []
+            for field, errs in form.errors.items():
+                err_msgs.append(f"{field}: {', '.join(errs)}")
+            err_summary = "; ".join(err_msgs)
+            messages.error(request, f"Could not create drawing: {err_summary}")
+
+            # If submitted from drawing_detail modal, redirect back smoothly
+            return_pk = request.POST.get("return_to_pk")
+            if not return_pk and parent_drawing:
+                return_pk = parent_drawing.root_drawing.pk
+            if return_pk:
+                return redirect("drawings:drawing_detail", pk=return_pk)
     else:
         initial_data = {}
+        if parent_drawing:
+            initial_data["parent"] = parent_drawing.id
+            initial_data["customer_name"] = parent_drawing.customer_name
+            initial_data["pid_reference"] = parent_drawing.pid_reference
+            initial_data["project_name"] = parent_drawing.project_name
+            initial_data["drafter_name"] = parent_drawing.drafter_name
+            if parent_drawing.level == 1:
+                initial_data["drawing_type"] = "SUB_ASSEMBLY"
+            elif parent_drawing.level == 2:
+                initial_data["drawing_type"] = "DETAIL_PART"
         if request.GET.get("pid"):
             initial_data["pid_reference"] = request.GET.get("pid")
         if request.GET.get("customer"):
             initial_data["customer_name"] = request.GET.get("customer")
-        if request.GET.get("watermark"):
-            initial_data["watermark_company"] = request.GET.get("watermark")
+        if request.GET.get("project_name"):
+            initial_data["project_name"] = request.GET.get("project_name")
+        if request.GET.get("drafter_name"):
+            initial_data["drafter_name"] = request.GET.get("drafter_name")
         form = EngineeringDrawingForm(initial=initial_data)
+
+    form_title = "New Engineering Drawing Project"
+    if parent_drawing:
+        if parent_drawing.level == 1:
+            form_title = f"Add Sub-Assembly (Level 2 Child) for {parent_drawing.base_drawing_number}"
+        elif parent_drawing.level == 2:
+            form_title = f"Add Detail Part (Level 3 Grandchild) for {parent_drawing.base_drawing_number}"
 
     return render(request, "drawing_library/drawing_form.html", {
         "form": form,
         "existing_pids": existing_pids,
-        "title": "New Engineering Drawing Project",
+        "parent_drawing": parent_drawing,
+        "title": form_title,
         "is_create": True,
     })
 
@@ -272,9 +380,11 @@ def drawing_delete(request, pk):
 @drawing_library_access_required
 def revision_create(request, drawing_pk):
     drawing = get_object_or_404(EngineeringDrawing, pk=drawing_pk)
+    root_pk = drawing.root_drawing.pk
+
     if not (is_admin_or_superadmin(request.user) or has_drawing_access(request.user, drawing, required_level="EDIT")):
         messages.error(request, "You do not have permission to upload revisions to this drawing.")
-        return redirect("drawings:drawing_detail", pk=drawing.pk)
+        return redirect("drawings:drawing_detail", pk=root_pk)
 
     if request.method == "POST":
         form = DrawingRevisionForm(request.POST, request.FILES)
@@ -282,6 +392,10 @@ def revision_create(request, drawing_pk):
             revision = form.save(commit=False)
             revision.drawing = drawing
             revision.created_by = request.user
+            if "pdf_file" in request.FILES:
+                revision.original_pdf_filename = os.path.basename(request.FILES["pdf_file"].name)
+            if "native_file" in request.FILES:
+                revision.original_native_filename = os.path.basename(request.FILES["native_file"].name)
             revision.save()
             drawing.sync_active_revision()
 
@@ -290,23 +404,28 @@ def revision_create(request, drawing_pk):
                 action="UPLOAD_REVISION",
                 drawing=drawing,
                 revision=revision,
-                description=f"Uploaded Rev {revision.revision_number}: {revision.stage_change_description[:80]}",
+                description=f"Uploaded Rev {revision.revision_number} for {drawing.base_drawing_number}: {revision.stage_change_description[:80]}",
                 request=request
             )
 
-            messages.success(request, f"Revision {revision.revision_number} added successfully with standardized naming.")
-            return redirect("drawings:drawing_detail", pk=drawing.pk)
+            messages.success(request, f"Revision {revision.revision_number} uploaded successfully for {drawing.base_drawing_number} ({drawing.drawing_name}).")
+            return redirect("drawings:drawing_detail", pk=root_pk)
         else:
-            messages.error(request, "Please correct the errors in the revision upload form.")
-            return redirect("drawings:drawing_detail", pk=drawing.pk)
+            err_details = []
+            for field, err_list in form.errors.items():
+                err_details.append(f"{field}: {', '.join(err_list)}")
+            err_str = "; ".join(err_details) if err_details else "Invalid submission"
+            messages.error(request, f"Revision upload failed: {err_str}")
+            return redirect("drawings:drawing_detail", pk=root_pk)
 
-    return redirect("drawings:drawing_detail", pk=drawing.pk)
+    return redirect("drawings:drawing_detail", pk=root_pk)
 
 
 @admin_or_superadmin_required
 def revision_delete(request, revision_pk):
     revision = get_object_or_404(DrawingRevision, pk=revision_pk)
     drawing = revision.drawing
+    root_pk = drawing.root_drawing.pk
     rev_num = revision.revision_number
 
     log_drawing_activity(
@@ -319,15 +438,15 @@ def revision_delete(request, revision_pk):
 
     revision.delete()
     drawing.sync_active_revision()
-    messages.success(request, f"Revision {rev_num} has been removed.")
-    return redirect("drawings:drawing_detail", pk=drawing.pk)
+    messages.success(request, f"Revision {rev_num} has been removed from {drawing.base_drawing_number}.")
+    return redirect("drawings:drawing_detail", pk=root_pk)
 
 
 @drawing_library_access_required
 def download_watermarked_pdf(request, revision_pk):
     """
-    Download the exported PDF with a light, semi-transparent watermark
-    of the selected company name in the corner.
+    Download the exported PDF clean without any watermark,
+    strictly retaining the original uploaded filename.
     """
     revision = get_object_or_404(DrawingRevision, pk=revision_pk)
     drawing = revision.drawing
@@ -339,15 +458,6 @@ def download_watermarked_pdf(request, revision_pk):
     if not revision.pdf_file or not os.path.exists(revision.pdf_file.path):
         raise Http404("PDF file attachment not found.")
 
-    company_name = drawing.watermark_company or "PT FLOW FORCE INDONESIA"
-
-    try:
-        watermarked_io = apply_company_watermark(revision.pdf_file.path, company_name)
-    except Exception as e:
-        with open(revision.pdf_file.path, "rb") as f:
-            pdf_data = f.read()
-        watermarked_io = io.BytesIO(pdf_data)
-
     filename = revision.expected_pdf_filename()
 
     # Log employee download activity
@@ -356,11 +466,14 @@ def download_watermarked_pdf(request, revision_pk):
         action="DOWNLOAD_PDF",
         drawing=drawing,
         revision=revision,
-        description=f"Downloaded watermarked PDF ({filename}) with {company_name} watermark stamp",
+        description=f"Downloaded clean PDF ({filename}) for {drawing.base_drawing_number} Rev {revision.revision_number}",
         request=request
     )
 
-    response = HttpResponse(watermarked_io.getvalue(), content_type="application/pdf")
+    with open(revision.pdf_file.path, "rb") as f:
+        pdf_data = f.read()
+
+    response = HttpResponse(pdf_data, content_type="application/pdf")
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
 
@@ -368,7 +481,8 @@ def download_watermarked_pdf(request, revision_pk):
 @drawing_library_access_required
 def view_watermarked_pdf(request, revision_pk):
     """
-    View the watermarked PDF directly in the browser (inline viewer/iframe).
+    View the clean PDF directly in the browser (inline viewer/iframe)
+    without any watermark.
     """
     revision = get_object_or_404(DrawingRevision, pk=revision_pk)
     drawing = revision.drawing
@@ -380,15 +494,6 @@ def view_watermarked_pdf(request, revision_pk):
     if not revision.pdf_file or not os.path.exists(revision.pdf_file.path):
         raise Http404("PDF file attachment not found.")
 
-    company_name = drawing.watermark_company or "PT FLOW FORCE INDONESIA"
-
-    try:
-        watermarked_io = apply_company_watermark(revision.pdf_file.path, company_name)
-    except Exception as e:
-        with open(revision.pdf_file.path, "rb") as f:
-            pdf_data = f.read()
-        watermarked_io = io.BytesIO(pdf_data)
-
     filename = revision.expected_pdf_filename()
 
     # Log employee preview activity
@@ -397,11 +502,14 @@ def view_watermarked_pdf(request, revision_pk):
         action="VIEW_PDF",
         drawing=drawing,
         revision=revision,
-        description=f"Previewed watermarked PDF for {drawing.base_drawing_number} Rev {revision.revision_number} in browser",
+        description=f"Previewed clean PDF for {drawing.base_drawing_number} Rev {revision.revision_number} in browser",
         request=request
     )
 
-    response = HttpResponse(watermarked_io.getvalue(), content_type="application/pdf")
+    with open(revision.pdf_file.path, "rb") as f:
+        pdf_data = f.read()
+
+    response = HttpResponse(pdf_data, content_type="application/pdf")
     response["Content-Disposition"] = f'inline; filename="{filename}"'
     return response
 
@@ -409,7 +517,8 @@ def view_watermarked_pdf(request, revision_pk):
 @drawing_library_access_required
 def download_native_file(request, revision_pk):
     """
-    Download the native CAD working file (.dwt, .slddrw, .dwg, etc.).
+    Download the native CAD working file (.dwt, .slddrw, .dwg, etc.),
+    strictly retaining the original uploaded filename.
     """
     revision = get_object_or_404(DrawingRevision, pk=revision_pk)
     drawing = revision.drawing
@@ -421,7 +530,7 @@ def download_native_file(request, revision_pk):
     if not revision.native_file or not os.path.exists(revision.native_file.path):
         raise Http404("Native file attachment not found.")
 
-    filename = os.path.basename(revision.native_file.name)
+    filename = revision.expected_native_filename()
 
     # Log employee native CAD file download activity
     log_drawing_activity(

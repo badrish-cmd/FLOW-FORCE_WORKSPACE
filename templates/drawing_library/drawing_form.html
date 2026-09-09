@@ -3,6 +3,30 @@
 
 {% block title %}{{ title }} | Drawing Library{% endblock %}
 
+{% block extra_css %}
+<style>
+    .glass-form-card {
+        background: rgba(255, 255, 255, 0.78) !important;
+        backdrop-filter: blur(20px) saturate(180%);
+        -webkit-backdrop-filter: blur(20px) saturate(180%);
+        border: 1px solid rgba(255, 255, 255, 0.8) !important;
+        border-radius: 22px;
+        box-shadow: 0 16px 40px -10px rgba(31, 38, 135, 0.08), inset 0 1px 2px rgba(255, 255, 255, 0.9);
+    }
+    .glass-upload-box {
+        background: rgba(248, 250, 252, 0.7) !important;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(226, 232, 240, 0.8) !important;
+        border-radius: 14px;
+        transition: all 0.2s ease;
+    }
+    .glass-upload-box:hover {
+        background: rgba(255, 255, 255, 0.9) !important;
+        border-color: #93c5fd !important;
+    }
+</style>
+{% endblock %}
+
 {% block breadcrumbs %}
 <div class="d-flex align-items-center gap-2 text-sm text-slate-500">
     <a href="{% url 'drawings:drawing_list' %}" class="text-slate-500 text-decoration-none hover:text-blue-600">Drawing Library</a>
@@ -12,17 +36,23 @@
 {% endblock %}
 
 {% block content %}
-<div class="container-fluid px-4 py-3" style="max-width: 1000px;">
-    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
-        <div class="card-header bg-slate-900 text-white py-3 px-4 d-flex justify-content-between align-items-center">
+<div class="container-fluid px-4 py-3" style="max-width: 960px;">
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden mb-4" style="border: 1px solid #e2e8f0 !important;">
+        <div class="card-header py-3 px-4 d-flex justify-content-between align-items-center text-white" style="background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 55%, #1e40af 100%); border-top: 3.5px solid #38bdf8; border-bottom: none;">
             <div>
                 <h1 class="h5 font-bold mb-0 text-white d-flex align-items-center gap-2">
-                    <i class="fas fa-drafting-compass text-blue-400"></i>
+                    <i class="fas fa-drafting-compass text-sky-200"></i>
                     {{ title }}
                 </h1>
-                <span class="text-xs text-slate-400">Specify engineering project metadata and select watermark branding company.</span>
+                <span class="text-xs text-slate-400">
+                    {% if parent_drawing %}
+                        Adding branch node under parent: <strong class="text-white font-mono">{{ parent_drawing.base_drawing_number }}</strong>
+                    {% else %}
+                        Setup project header and initial Level 1 parent drawing.
+                    {% endif %}
+                </span>
             </div>
-            <a href="{% if is_create %}{% url 'drawings:drawing_list' %}{% else %}{% url 'drawings:drawing_detail' drawing.pk %}{% endif %}" class="btn btn-sm btn-outline-light">
+            <a href="{% if is_create %}{% url 'drawings:drawing_list' %}{% else %}{% url 'drawings:drawing_detail' drawing.pk %}{% endif %}" class="btn btn-sm btn-outline-light rounded-3">
                 <i class="fas fa-arrow-left me-1"></i> Back
             </a>
         </div>
@@ -32,80 +62,127 @@
                 {% csrf_token %}
 
                 {% if form.errors %}
-                <div class="alert alert-danger py-2 px-3 text-sm mb-4">
-                    <i class="fas fa-exclamation-circle me-1"></i> Please correct the highlighted errors below.
+                <div class="alert alert-danger py-3 px-4 mb-4 rounded-3 border-0 shadow-sm">
+                    <div class="font-bold d-flex align-items-center gap-2 mb-2 text-danger">
+                        <i class="fas fa-exclamation-triangle"></i> Form submission could not be completed. Please fix the following:
+                    </div>
+                    <ul class="mb-0 ps-3 text-xs">
+                        {% for field in form %}
+                            {% for error in field.errors %}
+                                <li><strong>{{ field.label }}:</strong> {{ error }}</li>
+                            {% endfor %}
+                        {% endfor %}
+                        {% for error in form.non_field_errors %}
+                            <li>{{ error }}</li>
+                        {% endfor %}
+                    </ul>
                 </div>
                 {% endif %}
 
-                <!-- SECTION 1: PROJECT METADATA HEADER -->
+                <!-- Hidden parent/type fields -->
+                {% if parent_drawing %}
+                    <input type="hidden" name="parent" value="{{ parent_drawing.id }}">
+                    <input type="hidden" name="drawing_type" value="{% if parent_drawing.level == 1 %}SUB_ASSEMBLY{% else %}DETAIL_PART{% endif %}">
+                {% else %}
+                    <input type="hidden" name="parent" value="{{ form.parent.value|default:'' }}">
+                    <input type="hidden" name="drawing_type" value="{{ form.drawing_type.value|default:'MASTER' }}">
+                {% endif %}
+
+                <!-- ==================================================== -->
+                <!-- STAGE 1: PROJECT INFORMATION                         -->
+                <!-- Customer Name, Project Name, PID Reference, Drafter  -->
+                <!-- ==================================================== -->
                 <div class="mb-4">
-                    <h2 class="h6 font-bold text-slate-800 uppercase tracking-wider text-xs border-bottom pb-2 mb-3 text-primary d-flex align-items-center gap-2">
-                        <i class="fas fa-info-circle"></i> Project Metadata Header
-                    </h2>
+                    <div class="d-flex align-items-center gap-2 pb-2 mb-3 border-bottom">
+                        <span class="badge bg-primary text-white rounded-circle p-2" style="width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.75rem;">1</span>
+                        <h2 class="h6 font-bold text-slate-800 mb-0 uppercase tracking-wider text-xs">
+                            Project Information (Root Header)
+                        </h2>
+                    </div>
                     
                     <div class="row g-3">
                         <div class="col-md-6">
-                            <label class="form-label font-semibold text-xs text-slate-600 uppercase">Customer Name <span class="text-danger">*</span></label>
+                            <label class="form-label font-semibold text-xs text-slate-600 uppercase">
+                                Customer Name <span class="text-danger">*</span>
+                            </label>
                             {{ form.customer_name }}
                             {% if form.customer_name.errors %}<div class="text-danger text-xs mt-1">{{ form.customer_name.errors }}</div>{% endif %}
                         </div>
 
                         <div class="col-md-6">
-                            <label class="form-label font-semibold text-xs text-slate-600 uppercase">P&ID Reference <span class="text-danger">*</span></label>
+                            <label class="form-label font-semibold text-xs text-slate-600 uppercase">
+                                Project Name <span class="text-danger">*</span>
+                            </label>
+                            {{ form.project_name }}
+                            {% if form.project_name.errors %}<div class="text-danger text-xs mt-1">{{ form.project_name.errors }}</div>{% endif %}
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label font-semibold text-xs text-slate-600 uppercase">
+                                PID Reference <span class="text-danger">*</span>
+                            </label>
                             {{ form.pid_reference }}
                             <datalist id="existingPidsList">
                                 {% for p in existing_pids %}
                                 <option value="{{ p }}">
                                 {% endfor %}
                             </datalist>
-                            <div class="form-text text-xs">
-                                Select an existing P&ID to add multiple drawings under it, or enter a new P&ID reference.
-                            </div>
                             {% if form.pid_reference.errors %}<div class="text-danger text-xs mt-1">{{ form.pid_reference.errors }}</div>{% endif %}
                         </div>
 
                         <div class="col-md-6">
-                            <label class="form-label font-semibold text-xs text-slate-600 uppercase">Enquiry Number</label>
-                            {{ form.enquiry_number }}
-                            {% if form.enquiry_number.errors %}<div class="text-danger text-xs mt-1">{{ form.enquiry_number.errors }}</div>{% endif %}
+                            <label class="form-label font-semibold text-xs text-slate-600 uppercase">
+                                Drafter Name <span class="text-danger">*</span>
+                            </label>
+                            {{ form.drafter_name }}
+                            {% if form.drafter_name.errors %}<div class="text-danger text-xs mt-1">{{ form.drafter_name.errors }}</div>{% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ==================================================== -->
+                <!-- STAGE 2: DRAWING DETAILS & FILE ATTACHMENTS          -->
+                <!-- Drawing Number, Drawing Name, Description, Files     -->
+                <!-- ==================================================== -->
+                <div class="mb-4 pt-2">
+                    <div class="d-flex align-items-center gap-2 pb-2 mb-3 border-bottom">
+                        <span class="badge bg-primary text-white rounded-circle p-2" style="width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.75rem;">2</span>
+                        <h2 class="h6 font-bold text-slate-800 mb-0 uppercase tracking-wider text-xs">
+                            {% if parent_drawing %}
+                                {% if parent_drawing.level == 1 %}Level 2 Sub-Assembly Details{% else %}Level 3 Detail Part Details{% endif %}
+                            {% else %}
+                                First Parent Drawing Details (Level 1 Master)
+                            {% endif %}
+                        </h2>
+                    </div>
+
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label font-semibold text-xs text-slate-600 uppercase">
+                                Drawing Number (Code) <span class="text-danger">*</span>
+                            </label>
+                            {{ form.base_drawing_number }}
+                            {% if form.base_drawing_number.errors %}<div class="text-danger text-xs mt-1">{{ form.base_drawing_number.errors }}</div>{% endif %}
+                            <div class="form-text text-xs">Unique drawing code (e.g. FF-DWG-00101)</div>
                         </div>
 
                         <div class="col-md-6">
-                            <label class="form-label font-semibold text-xs text-slate-600 uppercase">PO Number</label>
-                            {{ form.po_number }}
-                            {% if form.po_number.errors %}<div class="text-danger text-xs mt-1">{{ form.po_number.errors }}</div>{% endif %}
-                        </div>
-
-                        <div class="col-md-6">
-                            <label class="form-label font-semibold text-xs text-slate-600 uppercase">Drawing Name <span class="text-danger">*</span></label>
+                            <label class="form-label font-semibold text-xs text-slate-600 uppercase">
+                                Drawing Name <span class="text-danger">*</span>
+                            </label>
                             {{ form.drawing_name }}
                             {% if form.drawing_name.errors %}<div class="text-danger text-xs mt-1">{{ form.drawing_name.errors }}</div>{% endif %}
                         </div>
 
                         <div class="col-md-6">
-                            <label class="form-label font-semibold text-xs text-slate-600 uppercase">Base Drawing Number <span class="text-danger">*</span></label>
-                            {{ form.base_drawing_number }}
-                            {% if form.base_drawing_number.errors %}<div class="text-danger text-xs mt-1">{{ form.base_drawing_number.errors }}</div>{% endif %}
-                            <div class="form-text text-xs">Unique drawing identifier (e.g. FF-DWG-00109)</div>
-                        </div>
-
-                        <div class="col-md-4">
-                            <label class="form-label font-semibold text-xs text-slate-600 uppercase">Drafter Name <span class="text-danger">*</span></label>
-                            {{ form.drafter_name }}
-                            {% if form.drafter_name.errors %}<div class="text-danger text-xs mt-1">{{ form.drafter_name.errors }}</div>{% endif %}
-                        </div>
-
-                        <div class="col-md-4">
-                            <label class="form-label font-semibold text-xs text-slate-600 uppercase">Format <span class="text-danger">*</span></label>
+                            <label class="form-label font-semibold text-xs text-slate-600 uppercase">CAD Format</label>
                             {{ form.format }}
                             {% if form.format.errors %}<div class="text-danger text-xs mt-1">{{ form.format.errors }}</div>{% endif %}
                         </div>
 
-                        <div class="col-md-4">
-                            <label class="form-label font-semibold text-xs text-slate-600 uppercase">Watermark Company <span class="text-danger">*</span></label>
-                            {{ form.watermark_company }}
-                            {% if form.watermark_company.errors %}<div class="text-danger text-xs mt-1">{{ form.watermark_company.errors }}</div>{% endif %}
-                            <div class="form-text text-xs">Semi-transparent watermark in downloaded PDFs.</div>
+                        <div class="col-md-6">
+                            <label class="form-label font-semibold text-xs text-slate-600 uppercase">Initial Revision #</label>
+                            {{ form.initial_revision_number }}
                         </div>
 
                         <div class="col-12">
@@ -113,54 +190,40 @@
                             {{ form.description }}
                             {% if form.description.errors %}<div class="text-danger text-xs mt-1">{{ form.description.errors }}</div>{% endif %}
                         </div>
-                    </div>
-                </div>
 
-                <!-- SECTION 2: OPTIONAL INITIAL REVISION (ONLY ON CREATE) -->
-                {% if is_create %}
-                <div class="mb-4 pt-3 border-top">
-                    <h2 class="h6 font-bold text-slate-800 uppercase tracking-wider text-xs border-bottom pb-2 mb-3 text-secondary d-flex align-items-center gap-2">
-                        <i class="fas fa-layer-group"></i> Initial Revision & Attachments (Optional)
-                    </h2>
-                    <p class="text-xs text-slate-500 mb-3">
-                        You can upload the initial drawing files now, or add revisions later from the project detail page.
-                    </p>
-
-                    <div class="row g-3">
-                        <div class="col-md-4">
-                            <label class="form-label font-semibold text-xs text-slate-600 uppercase">Initial Revision #</label>
-                            {{ form.initial_revision_number }}
-                        </div>
-                        <div class="col-md-8">
-                            <label class="form-label font-semibold text-xs text-slate-600 uppercase">Stage Change Description</label>
-                            {{ form.initial_stage_description }}
+                        <!-- File Upload Section: PDF and CAD (ZWCAD / Any Form) -->
+                        <div class="col-md-6">
+                            <div class="p-3 bg-light rounded-3 border">
+                                <label class="form-label font-bold text-xs text-slate-800 uppercase d-flex align-items-center gap-1">
+                                    <i class="fas fa-file-pdf text-danger"></i> PDF Drawing File
+                                </label>
+                                {{ form.initial_pdf_file }}
+                                <div class="form-text text-xs text-slate-500 mt-1">
+                                    Clean PDF without watermarks. Retains original uploaded filename.
+                                </div>
+                            </div>
                         </div>
 
                         <div class="col-md-6">
-                            <label class="form-label font-semibold text-xs text-slate-600 uppercase">
-                                Native CAD File (.dwt, .slddrw, .dwg)
-                            </label>
-                            {{ form.initial_native_file }}
-                            <div class="form-text text-xs">Working file format.</div>
-                        </div>
-
-                        <div class="col-md-6">
-                            <label class="form-label font-semibold text-xs text-slate-600 uppercase">Exported PDF File</label>
-                            {{ form.initial_pdf_file }}
-                            <div class="form-text text-xs">
-                                Will be auto-renamed to: <code>[CustomerName]_[PID]_[Rev#].pdf</code>
+                            <div class="p-3 bg-light rounded-3 border">
+                                <label class="form-label font-bold text-xs text-slate-800 uppercase d-flex align-items-center gap-1">
+                                    <i class="fas fa-file-code text-blue-600"></i> CAD Source File (ZWCAD, DWG, etc.)
+                                </label>
+                                {{ form.initial_native_file }}
+                                <div class="form-text text-xs text-slate-500 mt-1">
+                                    Native working file in ZWCAD, SolidWorks, AutoCAD, or any CAD format.
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
-                {% endif %}
 
                 <div class="d-flex justify-content-end gap-2 pt-3 border-top">
                     <a href="{% if is_create %}{% url 'drawings:drawing_list' %}{% else %}{% url 'drawings:drawing_detail' drawing.pk %}{% endif %}" class="btn btn-secondary px-3">
                         Cancel
                     </a>
                     <button type="submit" class="btn btn-primary px-4 font-semibold" style="background-color: #2563eb; border-color: #2563eb;">
-                        <i class="fas fa-save me-1"></i> {% if is_create %}Create Drawing Project{% else %}Save Changes{% endif %}
+                        <i class="fas fa-check me-1"></i> {% if is_create %}Save Drawing Project{% else %}Save Changes{% endif %}
                     </button>
                 </div>
             </form>

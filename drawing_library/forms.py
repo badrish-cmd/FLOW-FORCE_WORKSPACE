@@ -1,3 +1,4 @@
+import os
 from django import forms
 from django.utils import timezone
 from .models import EngineeringDrawing, DrawingRevision, DrawingAccess
@@ -6,7 +7,7 @@ from employee_management.models import Department
 
 
 class EngineeringDrawingForm(forms.ModelForm):
-    # Optional fields for initial revision on creation
+    # Initial revision files and notes
     initial_revision_number = forms.CharField(
         max_length=50,
         required=False,
@@ -18,46 +19,70 @@ class EngineeringDrawingForm(forms.ModelForm):
         max_length=255,
         required=False,
         initial="Initial Release",
-        label="Stage Change Description",
+        label="Stage Notes / Description",
         widget=forms.TextInput(attrs={"placeholder": "e.g. Initial Draft / Released for Review", "class": "form-control"})
     )
     initial_native_file = forms.FileField(
         required=False,
-        label="Native CAD File (.dwt, .slddrw, .dwg, etc.)",
+        label="CAD Source File (ZWCAD, SolidWorks, DWG, etc.)",
         widget=forms.FileInput(attrs={"class": "form-control"})
     )
     initial_pdf_file = forms.FileField(
         required=False,
-        label="Exported PDF File",
+        label="PDF Drawing File",
         widget=forms.FileInput(attrs={"class": "form-control", "accept": ".pdf"})
     )
 
     class Meta:
         model = EngineeringDrawing
         fields = [
+            # Starting Stage: Project Information
             "customer_name",
-            "enquiry_number",
-            "po_number",
+            "project_name",
             "pid_reference",
-            "drawing_name",
-            "base_drawing_number",
             "drafter_name",
-            "format",
-            "watermark_company",
+            # Drawing Details
+            "base_drawing_number",
+            "drawing_name",
             "description",
+            "format",
+            "parent",
+            "drawing_type",
         ]
         widgets = {
-            "customer_name": forms.TextInput(attrs={"class": "form-control", "placeholder": "e.g. Chevron Indonesia"}),
-            "enquiry_number": forms.TextInput(attrs={"class": "form-control", "placeholder": "e.g. ENQ-2026-0042"}),
-            "po_number": forms.TextInput(attrs={"class": "form-control", "placeholder": "e.g. PO-88391"}),
-            "pid_reference": forms.TextInput(attrs={"class": "form-control", "placeholder": "e.g. PID-B-102", "list": "existingPidsList"}),
-            "drawing_name": forms.TextInput(attrs={"class": "form-control", "placeholder": "e.g. Piping Isometric Skid A"}),
-            "base_drawing_number": forms.TextInput(attrs={"class": "form-control", "placeholder": "e.g. FF-DWG-00109"}),
-            "drafter_name": forms.TextInput(attrs={"class": "form-control", "placeholder": "e.g. Budi Santoso"}),
+            "customer_name": forms.TextInput(attrs={"class": "form-control", "placeholder": "e.g. Chevron Indonesia", "required": True}),
+            "project_name": forms.TextInput(attrs={"class": "form-control", "placeholder": "e.g. Fuel Gas Conditioning Skid", "required": True}),
+            "pid_reference": forms.TextInput(attrs={"class": "form-control", "placeholder": "e.g. PID-B-102", "list": "existingPidsList", "required": True}),
+            "drafter_name": forms.TextInput(attrs={"class": "form-control", "placeholder": "e.g. Budi Santoso", "required": True}),
+            "base_drawing_number": forms.TextInput(attrs={"class": "form-control font-mono", "placeholder": "e.g. FF-DWG-00109", "required": True}),
+            "drawing_name": forms.TextInput(attrs={"class": "form-control", "placeholder": "e.g. Piping General Arrangement", "required": True}),
+            "description": forms.Textarea(attrs={"class": "form-control", "rows": 3, "placeholder": "Drawing scope, specifications, or notes..."}),
             "format": forms.Select(attrs={"class": "form-select"}),
-            "watermark_company": forms.Select(attrs={"class": "form-select"}),
-            "description": forms.Textarea(attrs={"class": "form-control", "rows": 3, "placeholder": "Optional project specifications, tolerances, or notes..."}),
+            "parent": forms.Select(attrs={"class": "form-select"}),
+            "drawing_type": forms.Select(attrs={"class": "form-select"}),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["parent"].required = False
+        self.fields["parent"].empty_label = "-- None (Level 1 Parent / Master Drawing) --"
+        self.fields["parent"].queryset = EngineeringDrawing.objects.all().order_by("base_drawing_number")
+        self.fields["drawing_type"].required = False
+        if not self.initial.get("drawing_type"):
+            self.initial["drawing_type"] = "MASTER"
+
+    def clean(self):
+        cleaned_data = super().clean()
+        parent = cleaned_data.get("parent")
+        drawing_type = cleaned_data.get("drawing_type")
+        if not drawing_type:
+            if not parent:
+                cleaned_data["drawing_type"] = "MASTER"
+            elif parent.level == 1:
+                cleaned_data["drawing_type"] = "SUB_ASSEMBLY"
+            else:
+                cleaned_data["drawing_type"] = "DETAIL_PART"
+        return cleaned_data
 
 
 class DrawingRevisionForm(forms.ModelForm):
@@ -82,8 +107,27 @@ class DrawingRevisionForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["revision_date"].required = False
         if not self.initial.get("revision_date"):
             self.initial["revision_date"] = timezone.now().date()
+
+    def clean_revision_date(self):
+        d = self.cleaned_data.get("revision_date")
+        if not d:
+            return timezone.now().date()
+        return d
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        pdf = self.cleaned_data.get("pdf_file")
+        if pdf and hasattr(pdf, "name"):
+            instance.original_pdf_filename = os.path.basename(pdf.name)
+        native = self.cleaned_data.get("native_file")
+        if native and hasattr(native, "name"):
+            instance.original_native_filename = os.path.basename(native.name)
+        if commit:
+            instance.save()
+        return instance
 
 
 class DrawingAccessGrantForm(forms.ModelForm):

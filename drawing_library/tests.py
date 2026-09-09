@@ -60,12 +60,14 @@ class DrawingLibraryTests(TestCase):
 
         # Create test drawing project
         self.drawing = EngineeringDrawing.objects.create(
+            project_name="Fuel Gas Conditioning Skid Project",
             customer_name="PT Pertamina EP",
             enquiry_number="ENQ-2026-099",
             po_number="PO-77401",
             pid_reference="PID-SKID-01",
             drawing_name="Skid Piping General Arrangement",
             base_drawing_number="FF-DWG-1001",
+            drawing_type="MASTER",
             active_revision_number="0",
             drafter_name="Budi Santoso",
             format="ZWCAD",
@@ -74,10 +76,10 @@ class DrawingLibraryTests(TestCase):
         )
 
         # Create dummy PDF file for upload
-        dummy_pdf_bytes = create_dummy_pdf()
+        self.dummy_pdf_bytes = create_dummy_pdf()
         self.pdf_file = SimpleUploadedFile(
             "random_local_title_v2.pdf",
-            dummy_pdf_bytes,
+            self.dummy_pdf_bytes,
             content_type="application/pdf"
         )
         # Dummy native CAD file (.dwg)
@@ -93,75 +95,144 @@ class DrawingLibraryTests(TestCase):
             stage_change_description="Initial IFC Release",
             native_file=self.dwg_file,
             pdf_file=self.pdf_file,
+            original_pdf_filename="random_local_title_v2.pdf",
+            original_native_filename="piping_model.dwg",
             drafter_name="Budi Santoso",
             created_by=self.admin,
         )
 
-    def test_project_metadata_header_fields(self):
-        """Verify all 10 required fields in project metadata header."""
-        self.assertEqual(self.drawing.customer_name, "PT Pertamina EP")
-        self.assertEqual(self.drawing.enquiry_number, "ENQ-2026-099")
-        self.assertEqual(self.drawing.po_number, "PO-77401")
+    def test_project_root_header_fields(self):
+        """Verify Project Root Header fields: PID Reference, Customer Name, Project Name."""
         self.assertEqual(self.drawing.pid_reference, "PID-SKID-01")
-        self.assertEqual(self.drawing.drawing_name, "Skid Piping General Arrangement")
-        self.assertEqual(self.drawing.base_drawing_number, "FF-DWG-1001")
-        self.assertEqual(self.drawing.active_revision_number, "0")
-        self.assertEqual(self.drawing.drafter_name, "Budi Santoso")
-        self.assertEqual(self.drawing.format, "ZWCAD")
-        self.assertEqual(self.drawing.watermark_company, "PT FLOW FORCE INDONESIA")
+        self.assertEqual(self.drawing.customer_name, "PT Pertamina EP")
+        self.assertEqual(self.drawing.project_name, "Fuel Gas Conditioning Skid Project")
 
-    def test_auto_naming_of_pdf_upload(self):
-        """Uploaded PDF must be automatically renamed to [CustomerName]_[PID]_[DrawingName]_[Rev#].pdf."""
-        expected_filename = "PT_Pertamina_EP_PID-SKID-01_Skid_Piping_General_Arrangement_0.pdf"
-        actual_filename = os.path.basename(self.revision.pdf_file.name)
-        self.assertEqual(actual_filename, expected_filename)
-        self.assertEqual(self.revision.expected_pdf_filename(), expected_filename)
-
-    def test_multiple_drawings_under_one_pid_with_different_names(self):
-        """Verify multiple drawings can be saved under one PID with different names and distinct PDF filenames."""
-        # Create second drawing under the same PID reference "PID-SKID-01" with a different name
-        drawing2 = EngineeringDrawing.objects.create(
-            customer_name="PT Pertamina EP",
-            pid_reference="PID-SKID-01",
-            drawing_name="Structural Skid Base Frame",
-            base_drawing_number="FF-DWG-1002",
-            drafter_name="Agus Wijaya",
-            format="SOLIDWORKS",
-            watermark_company="PT FLOW FORCE INDONESIA",
-            created_by=self.admin,
-        )
-
-        pdf2 = SimpleUploadedFile("local_export_frame.pdf", create_dummy_pdf(), content_type="application/pdf")
-        rev2 = DrawingRevision.objects.create(
-            drawing=drawing2,
-            revision_number="0",
-            stage_change_description="Structural steel calculations approved",
-            pdf_file=pdf2,
-            drafter_name="Agus Wijaya",
-            created_by=self.admin,
-        )
-
-        # Both drawings share the same PID
-        self.assertEqual(self.drawing.pid_reference, drawing2.pid_reference)
-        # But have different drawing names
-        self.assertNotEqual(self.drawing.drawing_name, drawing2.drawing_name)
-
-        # Verify their filenames do not collide and clearly distinguish the drawings
-        filename1 = os.path.basename(self.revision.pdf_file.name)
-        filename2 = os.path.basename(rev2.pdf_file.name)
-
-        self.assertEqual(filename1, "PT_Pertamina_EP_PID-SKID-01_Skid_Piping_General_Arrangement_0.pdf")
-        self.assertEqual(filename2, "PT_Pertamina_EP_PID-SKID-01_Structural_Skid_Base_Frame_0.pdf")
-        self.assertNotEqual(filename1, filename2)
-
-        # Check in list view grouping
         client = Client()
         client.force_login(self.admin)
-        resp = client.get(reverse("drawings:drawing_list") + "?view=pid")
+        resp = client.get(reverse("drawings:drawing_detail", args=[self.drawing.pk]))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "PID-SKID-01")
-        self.assertContains(resp, "Skid Piping General Arrangement")
-        self.assertContains(resp, "Structural Skid Base Frame")
+        self.assertContains(resp, "PT Pertamina EP")
+        self.assertContains(resp, "Fuel Gas Conditioning Skid Project")
+
+    def test_preserve_uploaded_filenames_on_download(self):
+        """Downloads must strictly retain the original uploaded filename without auto-renaming."""
+        client = Client()
+        client.force_login(self.admin)
+
+        # Download PDF
+        resp_pdf = client.get(reverse("drawings:download_watermarked_pdf", args=[self.revision.pk]))
+        self.assertEqual(resp_pdf.status_code, 200)
+        self.assertIn('filename="random_local_title_v2.pdf"', resp_pdf["Content-Disposition"])
+
+        # Inline view PDF
+        resp_view = client.get(reverse("drawings:view_watermarked_pdf", args=[self.revision.pk]))
+        self.assertEqual(resp_view.status_code, 200)
+        self.assertIn('inline; filename="random_local_title_v2.pdf"', resp_view["Content-Disposition"])
+
+        # Download CAD file
+        resp_cad = client.get(reverse("drawings:download_native_file", args=[self.revision.pk]))
+        self.assertEqual(resp_cad.status_code, 200)
+        self.assertIn('filename="piping_model.dwg"', resp_cad["Content-Disposition"])
+
+    def test_clean_pdf_without_watermark(self):
+        """PDF download and inline view must return clean PDF data without watermark overlay."""
+        client = Client()
+        client.force_login(self.admin)
+
+        resp_pdf = client.get(reverse("drawings:download_watermarked_pdf", args=[self.revision.pk]))
+        self.assertEqual(resp_pdf.status_code, 200)
+        self.assertEqual(resp_pdf.content, self.dummy_pdf_bytes)
+
+        resp_view = client.get(reverse("drawings:view_watermarked_pdf", args=[self.revision.pk]))
+        self.assertEqual(resp_view.status_code, 200)
+        self.assertEqual(resp_view.content, self.dummy_pdf_bytes)
+
+    def test_3_level_tree_hierarchy_structure(self):
+        """Verify Level 1 (Parent) -> Level 2 (Child) -> Level 3 (Grandchild) tree structure."""
+        # Level 1 is self.drawing (Master)
+        self.assertEqual(self.drawing.level, 1)
+        self.assertTrue(self.drawing.is_master)
+
+        # Create Level 2 Child (Sub-Assembly)
+        child = EngineeringDrawing.objects.create(
+            parent=self.drawing,
+            drawing_type="SUB_ASSEMBLY",
+            project_name=self.drawing.project_name,
+            customer_name=self.drawing.customer_name,
+            pid_reference=self.drawing.pid_reference,
+            drawing_name="Suction Filter Sub-Assembly",
+            base_drawing_number="FF-SUB-01",
+            drafter_name="Agus Wijaya",
+            format="SOLIDWORKS",
+            created_by=self.admin,
+        )
+        child_pdf = SimpleUploadedFile("suction_sub_assy.pdf", self.dummy_pdf_bytes, content_type="application/pdf")
+        child_cad = SimpleUploadedFile("suction_sub_assy.slddrw", b"CAD-SUB-DATA", content_type="application/octet-stream")
+        DrawingRevision.objects.create(
+            drawing=child,
+            revision_number="0",
+            stage_change_description="Sub-assembly released for review",
+            pdf_file=child_pdf,
+            native_file=child_cad,
+            original_pdf_filename="suction_sub_assy.pdf",
+            original_native_filename="suction_sub_assy.slddrw",
+            drafter_name="Agus Wijaya",
+            created_by=self.admin,
+        )
+
+        self.assertEqual(child.level, 2)
+        self.assertTrue(child.is_child)
+        self.assertEqual(child.root_drawing, self.drawing)
+
+        # Create Level 3 Grandchild (Detail Fabrication Part)
+        grandchild = EngineeringDrawing.objects.create(
+            parent=child,
+            drawing_type="DETAIL_PART",
+            project_name=self.drawing.project_name,
+            customer_name=self.drawing.customer_name,
+            pid_reference=self.drawing.pid_reference,
+            drawing_name="Suction Flange Detail Plate",
+            base_drawing_number="FF-DET-001",
+            drafter_name="Dewi Sartika",
+            format="AUTOCAD",
+            created_by=self.admin,
+        )
+        grandchild_pdf = SimpleUploadedFile("flange_detail_p1.pdf", self.dummy_pdf_bytes, content_type="application/pdf")
+        DrawingRevision.objects.create(
+            drawing=grandchild,
+            revision_number="A",
+            stage_change_description="Detail cutting sizes updated",
+            pdf_file=grandchild_pdf,
+            original_pdf_filename="flange_detail_p1.pdf",
+            drafter_name="Dewi Sartika",
+            created_by=self.admin,
+        )
+
+        self.assertEqual(grandchild.level, 3)
+        self.assertTrue(grandchild.is_grandchild)
+        self.assertEqual(grandchild.root_drawing, self.drawing)
+
+        # Verify page renders all 3 levels with interactive tree elements
+        client = Client()
+        client.force_login(self.admin)
+        resp = client.get(reverse("drawings:drawing_detail", args=[self.drawing.pk]))
+        self.assertEqual(resp.status_code, 200)
+
+        # Level 1 elements
+        self.assertContains(resp, "FF-DWG-1001")
+        self.assertContains(resp, "Level 1 (Parent Branch)")
+        self.assertContains(resp, "Add Child Drawing")
+        self.assertContains(resp, "btn-tree-toggle")
+
+        # Level 2 elements
+        self.assertContains(resp, "FF-SUB-01")
+        self.assertContains(resp, "Level 2 (Child Branch - Sub-Assembly)")
+        self.assertContains(resp, "Add Grandchild Drawing")
+
+        # Level 3 elements
+        self.assertContains(resp, "FF-DET-001")
+        self.assertContains(resp, "Level 3 (Grandchild - Detail Part)")
 
     def test_native_file_accepted_without_warning(self):
         """Native files (.dwg, .dwt, .slddrw) must be accepted directly."""
@@ -217,18 +288,61 @@ class DrawingLibraryTests(TestCase):
         # Engineer can now access drawing list
         resp = client.get(reverse("drawings:drawing_list"))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "FF-DWG-1001")
+        self.assertContains(resp, "PID-SKID-01")
 
         # Engineer can view drawing detail
         resp_detail = client.get(reverse("drawings:drawing_detail", args=[self.drawing.pk]))
         self.assertEqual(resp_detail.status_code, 200)
-        self.assertContains(resp, "PT Pertamina EP")
+        self.assertContains(resp_detail, "PT Pertamina EP")
 
-        # Engineer can download watermarked PDF
+        # Engineer can download clean PDF retaining original uploaded filename
         resp_pdf = client.get(reverse("drawings:download_watermarked_pdf", args=[self.revision.pk]))
         self.assertEqual(resp_pdf.status_code, 200)
         self.assertEqual(resp_pdf["Content-Type"], "application/pdf")
-        self.assertIn("PT_Pertamina_EP_PID-SKID-01_Skid_Piping_General_Arrangement_0.pdf", resp_pdf["Content-Disposition"])
+        self.assertIn("random_local_title_v2.pdf", resp_pdf["Content-Disposition"])
+
+    def test_access_control_inherited_to_child_and_grandchild(self):
+        """Clearance granted on Master drawing cascades to sub-assemblies and detail parts."""
+        # Create Child
+        child = EngineeringDrawing.objects.create(
+            parent=self.drawing,
+            drawing_type="SUB_ASSEMBLY",
+            customer_name=self.drawing.customer_name,
+            pid_reference=self.drawing.pid_reference,
+            drawing_name="Sub-Assembly Skid Unit",
+            base_drawing_number="FF-SUB-88",
+            drafter_name="Agus Wijaya",
+            created_by=self.admin,
+        )
+        # Create Grandchild
+        grandchild = EngineeringDrawing.objects.create(
+            parent=child,
+            drawing_type="DETAIL_PART",
+            customer_name=self.drawing.customer_name,
+            pid_reference=self.drawing.pid_reference,
+            drawing_name="Detail Flange Gasket",
+            base_drawing_number="FF-DET-88-01",
+            drafter_name="Dewi",
+            created_by=self.admin,
+        )
+
+        # Grant access ONLY to the Master (self.drawing)
+        DrawingAccess.objects.create(
+            drawing=self.drawing,
+            user=self.engineer,
+            access_level="VIEW",
+            granted_by=self.admin,
+        )
+
+        client = Client()
+        client.force_login(self.engineer)
+
+        # Engineer can access child and grandchild detail pages
+        resp_child = client.get(reverse("drawings:drawing_detail", args=[child.pk]))
+        self.assertEqual(resp_child.status_code, 200)
+
+        resp_grandchild = client.get(reverse("drawings:drawing_detail", args=[grandchild.pk]))
+        self.assertEqual(resp_grandchild.status_code, 200)
 
     def test_admin_and_superadmin_full_access(self):
         """Admins and Super Admins have full access and can grant access."""
@@ -288,4 +402,187 @@ class DrawingLibraryTests(TestCase):
         self.assertTrue(
             DrawingActivityLog.objects.filter(user=self.engineer, action="DOWNLOAD_NATIVE", drawing=self.drawing).exists()
         )
+
+    def test_drawing_create_post_success(self):
+        """Verify submitting the streamlined form creates drawing and initial revision."""
+        client = Client()
+        client.force_login(self.admin)
+
+        post_data = {
+            "customer_name": "Chevron Pacific Indonesia",
+            "project_name": "Steam Injection Manifold",
+            "pid_reference": "PID-STM-900",
+            "drafter_name": "Hendro Pratama",
+            "base_drawing_number": "FF-NEW-9001",
+            "drawing_name": "Steam Header Assembly",
+            "description": "High pressure steam header assembly",
+            "format": "ZWCAD",
+            "initial_revision_number": "0",
+            "initial_stage_description": "Initial design",
+            "initial_pdf_file": SimpleUploadedFile("steam_header_v1.pdf", self.dummy_pdf_bytes, content_type="application/pdf"),
+            "initial_native_file": SimpleUploadedFile("steam_header_v1.dwg", b"NATIVE-DWG", content_type="application/acad"),
+        }
+
+        resp = client.post(reverse("drawings:drawing_create"), post_data)
+        self.assertEqual(resp.status_code, 302)
+
+        new_drawing = EngineeringDrawing.objects.get(base_drawing_number="FF-NEW-9001")
+        self.assertEqual(new_drawing.customer_name, "Chevron Pacific Indonesia")
+        self.assertEqual(new_drawing.project_name, "Steam Injection Manifold")
+        self.assertEqual(new_drawing.level, 1)
+        self.assertEqual(new_drawing.revisions.count(), 1)
+        rev = new_drawing.latest_revision
+        self.assertEqual(rev.original_pdf_filename, "steam_header_v1.pdf")
+        self.assertEqual(rev.original_native_filename, "steam_header_v1.dwg")
+
+    def test_first_page_only_pid_starter_details(self):
+        """First page must display PID starter details (PID reference, customer, project name, drafter) with counts."""
+        client = Client()
+        client.force_login(self.admin)
+
+        resp = client.get(reverse("drawings:drawing_list"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "PID Project Starter")
+        self.assertContains(resp, "PID-SKID-01")
+        self.assertContains(resp, "PT Pertamina EP")
+        self.assertContains(resp, "Fuel Gas Conditioning Skid Project")
+        self.assertContains(resp, "Budi Santoso")
+        self.assertContains(resp, "Open Project Hierarchy")
+
+    def test_revisions_on_parent_child_and_grandchild_with_previous_versions_intact(self):
+        """
+        Revisions can be loaded to all/each childs, parents, grandchilds.
+        After revising, previous versions must remain present and accessible.
+        """
+        client = Client()
+        client.force_login(self.admin)
+
+        # 1. Create Level 2 Child
+        child = EngineeringDrawing.objects.create(
+            parent=self.drawing,
+            drawing_type="SUB_ASSEMBLY",
+            customer_name=self.drawing.customer_name,
+            pid_reference=self.drawing.pid_reference,
+            project_name=self.drawing.project_name,
+            drawing_name="Sub-Assembly Skid Manifold",
+            base_drawing_number="FF-SUB-001",
+            drafter_name="Agus Drafter",
+            created_by=self.admin,
+        )
+        rev0_child_pdf = SimpleUploadedFile("child_rev0.pdf", self.dummy_pdf_bytes, content_type="application/pdf")
+        rev0_child = DrawingRevision.objects.create(
+            drawing=child,
+            revision_number="0",
+            stage_change_description="Initial child release",
+            pdf_file=rev0_child_pdf,
+            original_pdf_filename="child_rev0.pdf",
+            drafter_name="Agus Drafter",
+            created_by=self.admin,
+        )
+        child.sync_active_revision()
+
+        # 2. Create Level 3 Grandchild
+        grandchild = EngineeringDrawing.objects.create(
+            parent=child,
+            drawing_type="DETAIL_PART",
+            customer_name=self.drawing.customer_name,
+            pid_reference=self.drawing.pid_reference,
+            project_name=self.drawing.project_name,
+            drawing_name="Detail Flange Spec",
+            base_drawing_number="FF-DET-001",
+            drafter_name="Siti Drafter",
+            created_by=self.admin,
+        )
+        rev0_gc_pdf = SimpleUploadedFile("gc_rev0.pdf", self.dummy_pdf_bytes, content_type="application/pdf")
+        rev0_gc = DrawingRevision.objects.create(
+            drawing=grandchild,
+            revision_number="0",
+            stage_change_description="Initial detail part release",
+            pdf_file=rev0_gc_pdf,
+            original_pdf_filename="gc_rev0.pdf",
+            drafter_name="Siti Drafter",
+            created_by=self.admin,
+        )
+        grandchild.sync_active_revision()
+
+        # Verify initial states
+        self.assertEqual(self.drawing.level, 1)
+        self.assertEqual(child.level, 2)
+        self.assertEqual(grandchild.level, 3)
+        self.assertEqual(child.active_revision_number, "0")
+        self.assertEqual(grandchild.active_revision_number, "0")
+
+        # 3. Post a revision to Parent (self.drawing)
+        rev1_parent_pdf = SimpleUploadedFile("parent_rev1.pdf", self.dummy_pdf_bytes, content_type="application/pdf")
+        resp_p = client.post(
+            reverse("drawings:revision_create", args=[self.drawing.pk]),
+            {
+                "revision_number": "1",
+                "drafter_name": "Budi Santoso",
+                "stage_change_description": "Piping routing updated per client notes",
+                "pdf_file": rev1_parent_pdf,
+            }
+        )
+        self.assertEqual(resp_p.status_code, 302)
+        self.drawing.refresh_from_db()
+        self.assertEqual(self.drawing.active_revision_number, "1")
+        self.assertEqual(self.drawing.revisions.count(), 2)
+        self.assertEqual(len(self.drawing.previous_revisions), 1)
+
+        # Verify Rev 0 and Rev 1 PDFs both exist on disk
+        rev0_parent = self.drawing.previous_revisions[0]
+        rev1_parent = self.drawing.latest_revision
+        self.assertTrue(os.path.exists(rev0_parent.pdf_file.path))
+        self.assertTrue(os.path.exists(rev1_parent.pdf_file.path))
+        self.assertNotEqual(rev0_parent.pdf_file.path, rev1_parent.pdf_file.path)
+
+        # 4. Post a revision to Level 2 Child
+        rev1_child_pdf = SimpleUploadedFile("child_rev1.pdf", self.dummy_pdf_bytes, content_type="application/pdf")
+        resp_c = client.post(
+            reverse("drawings:revision_create", args=[child.pk]),
+            {
+                "revision_number": "1",
+                "drafter_name": "Agus Drafter",
+                "stage_change_description": "Sub-assembly welds revised",
+                "pdf_file": rev1_child_pdf,
+            }
+        )
+        self.assertEqual(resp_c.status_code, 302)
+        # Verify redirect goes to root_project
+        self.assertIn(reverse("drawings:drawing_detail", args=[self.drawing.pk]), resp_c.url)
+        child.refresh_from_db()
+        self.assertEqual(child.active_revision_number, "1")
+        self.assertEqual(child.revisions.count(), 2)
+        self.assertEqual(len(child.previous_revisions), 1)
+        self.assertTrue(os.path.exists(child.previous_revisions[0].pdf_file.path))
+        self.assertTrue(os.path.exists(child.latest_revision.pdf_file.path))
+
+        # 5. Post a revision to Level 3 Grandchild
+        rev1_gc_pdf = SimpleUploadedFile("gc_rev1.pdf", self.dummy_pdf_bytes, content_type="application/pdf")
+        resp_gc = client.post(
+            reverse("drawings:revision_create", args=[grandchild.pk]),
+            {
+                "revision_number": "A",
+                "drafter_name": "Siti Drafter",
+                "stage_change_description": "Bolt hole tolerances revised",
+                "pdf_file": rev1_gc_pdf,
+            }
+        )
+        self.assertEqual(resp_gc.status_code, 302)
+        self.assertIn(reverse("drawings:drawing_detail", args=[self.drawing.pk]), resp_gc.url)
+        grandchild.refresh_from_db()
+        self.assertEqual(grandchild.active_revision_number, "A")
+        self.assertEqual(grandchild.revisions.count(), 2)
+        self.assertEqual(len(grandchild.previous_revisions), 1)
+        self.assertTrue(os.path.exists(grandchild.previous_revisions[0].pdf_file.path))
+        self.assertTrue(os.path.exists(grandchild.latest_revision.pdf_file.path))
+
+        # 6. Check Project Tree view renders all levels and previous revision sections
+        resp_tree = client.get(reverse("drawings:drawing_detail", args=[self.drawing.pk]))
+        self.assertEqual(resp_tree.status_code, 200)
+        self.assertContains(resp_tree, "FF-DWG-1001")
+        self.assertContains(resp_tree, "FF-SUB-001")
+        self.assertContains(resp_tree, "FF-DET-001")
+        self.assertContains(resp_tree, "Past Revisions (1)")
+
 

@@ -90,9 +90,26 @@
                 if (!form.checkValidity()) {
                     e.preventDefault();
                     e.stopPropagation();
+                    form.reportValidity();
                 }
                 form.classList.add('was-validated');
             });
+        });
+
+        // Ensure any Bootstrap modal is placed directly under document.body
+        // to prevent stacking-context entrapment behind backdrop overlays
+        const relocateModals = () => {
+            document.querySelectorAll('.modal').forEach(modal => {
+                if (modal.parentNode !== document.body) {
+                    document.body.appendChild(modal);
+                }
+            });
+        };
+        relocateModals();
+        document.addEventListener('show.bs.modal', (e) => {
+            if (e.target && e.target.parentNode !== document.body) {
+                document.body.appendChild(e.target);
+            }
         });
     }
 

@@ -19,23 +19,25 @@ class EngineeringDrawingAdmin(admin.ModelAdmin):
     list_display = (
         "base_drawing_number",
         "drawing_name",
+        "project_name",
         "customer_name",
         "pid_reference",
+        "drawing_type",
+        "parent",
         "active_revision_number",
-        "format",
-        "watermark_company",
         "drafter_name",
         "updated_at",
     )
     search_fields = (
         "base_drawing_number",
         "drawing_name",
+        "project_name",
         "customer_name",
         "pid_reference",
         "enquiry_number",
         "po_number",
     )
-    list_filter = ("format", "watermark_company", "updated_at")
+    list_filter = ("drawing_type", "format", "watermark_company", "updated_at")
     inlines = [DrawingRevisionInline, DrawingAccessInline]
 
 
@@ -44,12 +46,13 @@ class DrawingRevisionAdmin(admin.ModelAdmin):
     list_display = (
         "drawing",
         "revision_number",
-        "stage_change_description",
+        "original_pdf_filename",
+        "original_native_filename",
         "drafter_name",
         "revision_date",
         "created_at",
     )
-    search_fields = ("drawing__base_drawing_number", "revision_number", "drafter_name")
+    search_fields = ("drawing__base_drawing_number", "revision_number", "original_pdf_filename", "drafter_name")
     list_filter = ("revision_date",)
 
 

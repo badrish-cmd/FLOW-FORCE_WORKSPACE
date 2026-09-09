@@ -33,32 +33,30 @@ def sanitize_filename_part(val):
 
 def drawing_pdf_upload_path(instance, filename):
     """
-    Automatically rename uploaded PDF to strictly follow:
-    [CustomerName]_[PID]_[DrawingName]_[Rev#].pdf
-    When multiple drawings are saved under one PID with different names,
-    each drawing receives its own unique, standardized filename.
+    Store PDF files retaining clean filename partitioned by drawing ID and revision.
+    Prevents overwriting previous revision files on disk.
     """
-    customer = sanitize_filename_part(instance.drawing.customer_name if instance.drawing else "CUSTOMER")
-    pid = sanitize_filename_part(instance.drawing.pid_reference if instance.drawing else "PID")
-    dwg_name = sanitize_filename_part(instance.drawing.drawing_name if instance.drawing else "")
-    rev = sanitize_filename_part(instance.revision_number or "0")
-    if dwg_name:
-        new_filename = f"{customer}_{pid}_{dwg_name}_{rev}.pdf"
-    else:
-        new_filename = f"{customer}_{pid}_{rev}.pdf"
-    return os.path.join("drawings", "pdf", new_filename)
+    if hasattr(instance, "original_pdf_filename") and not instance.original_pdf_filename:
+        instance.original_pdf_filename = os.path.basename(filename)
+    safe_name = sanitize_filename_part(os.path.splitext(filename)[0]) + os.path.splitext(filename)[1].lower()
+    dwg_id = getattr(instance, "drawing_id", None) or "new"
+    rev_str = sanitize_filename_part(getattr(instance, "revision_number", None) or "rev")
+    return os.path.join("drawings", "pdf", f"dwg_{dwg_id}", f"{rev_str}_{safe_name}")
 
 
 def drawing_native_upload_path(instance, filename):
     """
     Store native working files (.dwt, .slddrw, .dwg, etc.)
-    under drawings/native/
+    partitioned by drawing ID and revision.
     """
+    if hasattr(instance, "original_native_filename") and not instance.original_native_filename:
+        instance.original_native_filename = os.path.basename(filename)
     base, ext = os.path.splitext(filename)
     clean_base = sanitize_filename_part(base)
-    rev = sanitize_filename_part(instance.revision_number or "0")
-    safe_name = f"{clean_base}_rev{rev}{ext.lower()}"
-    return os.path.join("drawings", "native", safe_name)
+    safe_name = f"{clean_base}{ext.lower()}"
+    dwg_id = getattr(instance, "drawing_id", None) or "new"
+    rev_str = sanitize_filename_part(getattr(instance, "revision_number", None) or "rev")
+    return os.path.join("drawings", "native", f"dwg_{dwg_id}", f"{rev_str}_{safe_name}")
 
 
 class EngineeringDrawing(models.Model):
@@ -75,11 +73,35 @@ class EngineeringDrawing(models.Model):
         ("PT FLOW FORCE ENGINEERING", "PT FLOW FORCE ENGINEERING"),
     ]
 
-    # Project Metadata Header
+    DRAWING_TYPE_CHOICES = [
+        ("MASTER", "Level 1: Master / Parent Drawing"),
+        ("SUB_ASSEMBLY", "Level 2: Sub-Assembly (Child)"),
+        ("DETAIL_PART", "Level 3: Detail Part (Grandchild)"),
+    ]
+
+    # Project Root Header Metadata
+    project_name = models.CharField(max_length=255, blank=True, default="", verbose_name="Project Name")
     customer_name = models.CharField(max_length=255, verbose_name="Customer Name")
     enquiry_number = models.CharField(max_length=100, blank=True, null=True, verbose_name="Enquiry Number")
     po_number = models.CharField(max_length=100, blank=True, null=True, verbose_name="PO Number")
-    pid_reference = models.CharField(max_length=150, verbose_name="P&ID Reference")
+    pid_reference = models.CharField(max_length=150, verbose_name="PID Reference")
+
+    # Drawing Tree Hierarchy
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="children",
+        verbose_name="Parent Drawing"
+    )
+    drawing_type = models.CharField(
+        max_length=20,
+        choices=DRAWING_TYPE_CHOICES,
+        default="MASTER",
+        verbose_name="Drawing Type / Level"
+    )
+
     drawing_name = models.CharField(max_length=255, verbose_name="Drawing Name")
     base_drawing_number = models.CharField(max_length=100, unique=True, verbose_name="Base Drawing Number")
     active_revision_number = models.CharField(max_length=50, default="0", verbose_name="Active Revision Number")
@@ -113,8 +135,55 @@ class EngineeringDrawing(models.Model):
         return f"{self.base_drawing_number} - {self.drawing_name} ({self.customer_name})"
 
     @property
+    def level(self):
+        """1 for Master / Parent, 2 for Sub-Assembly (Child), 3 for Detail Part (Grandchild)."""
+        if not self.parent_id:
+            return 1
+        if not self.parent.parent_id:
+            return 2
+        return 3
+
+    @property
+    def is_master(self):
+        return self.level == 1
+
+    @property
+    def is_child(self):
+        return self.level == 2
+
+    @property
+    def is_grandchild(self):
+        return self.level == 3
+
+    @property
+    def root_drawing(self):
+        curr = self
+        while curr.parent:
+            curr = curr.parent
+        return curr
+
+    @property
+    def sub_assemblies(self):
+        return self.children.all().order_by("base_drawing_number")
+
+    @property
+    def detail_parts(self):
+        return self.children.all().order_by("base_drawing_number")
+
+    @property
     def latest_revision(self):
         return self.revisions.order_by("-created_at").first()
+
+    @property
+    def all_revisions(self):
+        """All revisions in descending order."""
+        return self.revisions.all().order_by("-created_at")
+
+    @property
+    def previous_revisions(self):
+        """All revisions except the latest active one."""
+        revs = list(self.revisions.all().order_by("-created_at"))
+        return revs[1:] if len(revs) > 1 else []
 
     def sync_active_revision(self):
         latest = self.latest_revision
@@ -140,13 +209,26 @@ class DrawingRevision(models.Model):
         verbose_name="Native File Attachment"
     )
     
-    # Exported PDF automatically renamed to [CustomerName]_[PID]_[Rev#].pdf
+    # Exported PDF cleanly stored without destructive overwrite
     pdf_file = models.FileField(
         upload_to=drawing_pdf_upload_path,
-        storage=drawing_storage,
         blank=True,
         null=True,
         verbose_name="Exported PDF File"
+    )
+
+    # Strictly retain original uploaded filenames
+    original_pdf_filename = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        verbose_name="Original PDF Filename"
+    )
+    original_native_filename = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        verbose_name="Original Native CAD Filename"
     )
 
     drafter_name = models.CharField(max_length=150, verbose_name="Drafter Name")
@@ -170,6 +252,11 @@ class DrawingRevision(models.Model):
         return f"{self.drawing.base_drawing_number} - Rev {self.revision_number}"
 
     def expected_pdf_filename(self):
+        """Strictly retain original uploaded filename if available."""
+        if self.original_pdf_filename:
+            return self.original_pdf_filename
+        if self.pdf_file and self.pdf_file.name:
+            return os.path.basename(self.pdf_file.name)
         customer = sanitize_filename_part(self.drawing.customer_name if self.drawing else "CUSTOMER")
         pid = sanitize_filename_part(self.drawing.pid_reference if self.drawing else "PID")
         dwg_name = sanitize_filename_part(self.drawing.drawing_name if self.drawing else "")
@@ -178,7 +265,19 @@ class DrawingRevision(models.Model):
             return f"{customer}_{pid}_{dwg_name}_{rev}.pdf"
         return f"{customer}_{pid}_{rev}.pdf"
 
+    def expected_native_filename(self):
+        """Strictly retain original uploaded filename for CAD source file."""
+        if self.original_native_filename:
+            return self.original_native_filename
+        if self.native_file and self.native_file.name:
+            return os.path.basename(self.native_file.name)
+        return "cad_file.dwg"
+
     def save(self, *args, **kwargs):
+        if self.pdf_file and not self.original_pdf_filename:
+            self.original_pdf_filename = os.path.basename(self.pdf_file.name)
+        if self.native_file and not self.original_native_filename:
+            self.original_native_filename = os.path.basename(self.native_file.name)
         super().save(*args, **kwargs)
         # Keep drawing active revision number up to date
         if self.drawing:
