@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     # Local Apps
     'auth_app',
     'employee_management',
+    'drawing_library',
     'rest_framework',
     'tables',
     'tasks',
@@ -90,6 +91,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'tasks.context_processors.global_context',
+                'drawing_library.context_processors.drawing_library_context',
             ],
         },
     },

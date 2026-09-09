@@ -94,6 +94,14 @@
                                     <span>PID Dashboard</span>
                                 </a>
                             </li>
+                            {% if user_has_drawing_access %}
+                            <li>
+                                <a href="{% url 'drawings:drawing_list' %}" class="nav-link {% if request.resolver_match.app_name == 'drawings' %}active{% endif %}">
+                                    <i class="fas fa-drafting-compass"></i>
+                                    <span>Drawing Library</span>
+                                </a>
+                            </li>
+                            {% endif %}
                         </ul>
                     </div>
 
@@ -131,6 +139,12 @@
                                 <a href="{% url 'tables:table_create' %}" class="nav-link {% if request.resolver_match.view_name == 'tables:table_create' %}active{% endif %}">
                                     <i class="fas fa-plus-circle"></i>
                                     <span>Create Table</span>
+                                </a>
+                            </li>
+                            <li>
+                                <a href="{% url 'drawings:global_access_management' %}" class="nav-link {% if request.resolver_match.view_name == 'drawings:global_access_management' %}active{% endif %}">
+                                    <i class="fas fa-user-shield"></i>
+                                    <span>Drawing Access</span>
                                 </a>
                             </li>
                             {% endif %}

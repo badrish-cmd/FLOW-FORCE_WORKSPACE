@@ -1,0 +1,440 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Drawing Library Activity Logs & Clearances | Flow-Force{% endblock %}
+
+{% block extra_css %}
+<style>
+    .kpi-card {
+        background: #ffffff;
+        border-radius: 12px;
+        border: 1px solid #e2e8f0;
+        padding: 16px 20px;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .kpi-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 15px -3px rgba(15, 23, 42, 0.08);
+    }
+    .log-badge {
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        padding: 4px 10px;
+        border-radius: 6px;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+    }
+    .badge-download-pdf { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+    .badge-view-pdf { background: #f5f3ff; color: #6d28d9; border: 1px solid #ddd6fe; }
+    .badge-download-cad { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+    .badge-view-drawing { background: #f8fafc; color: #334155; border: 1px solid #e2e8f0; }
+    .badge-upload-rev { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
+    .badge-create-dwg { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+    .badge-delete { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+    .badge-access { background: #fefce8; color: #a16207; border: 1px solid #fef08a; }
+
+    .table-logs th {
+        font-size: 0.73rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-weight: 700;
+        color: #475569;
+        background-color: #f8fafc;
+        padding: 12px 16px;
+        border-bottom: 1px solid #e2e8f0;
+    }
+    .table-logs td {
+        padding: 12px 16px;
+        vertical-align: middle;
+        font-size: 0.85rem;
+        border-bottom: 1px solid #f1f5f9;
+    }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="d-flex align-items-center gap-2 text-sm text-slate-500">
+    <a href="{% url 'drawings:drawing_list' %}" class="text-slate-500 text-decoration-none hover:text-blue-600">Drawing Library</a>
+    <i class="fas fa-chevron-right text-xs"></i>
+    <span class="text-slate-800 font-semibold">Activity Logs & Access</span>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-3">
+
+    <!-- Top Navigation Header -->
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-3">
+        <div>
+            <h1 class="h4 font-bold text-slate-800 mb-1 d-flex align-items-center gap-2">
+                <i class="fas fa-history text-blue-600"></i>
+                Drawing Library Activity Logs & Clearance
+            </h1>
+            <p class="text-slate-500 text-sm mb-0">
+                Audit trail of every employee's actions in the library: CAD downloads, watermarked PDF previews/downloads, revisions, and clearances.
+            </p>
+        </div>
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-primary btn-sm d-flex align-items-center gap-2 px-3 py-2" data-bs-toggle="modal" data-bs-target="#grantEmployeeAccessModal" style="background-color: #2563eb; border-color: #2563eb;">
+                <i class="fas fa-user-plus"></i>
+                <span>Grant Employee Access</span>
+            </button>
+            <a href="{% url 'drawings:drawing_list' %}" class="btn btn-outline-secondary btn-sm d-flex align-items-center gap-1 px-3 py-2">
+                <i class="fas fa-drafting-compass"></i>
+                <span>Library Vault</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- Navigation Tabs: Activity Logs & Employee Clearances -->
+    <div class="card border-0 shadow-sm rounded-4 bg-white overflow-hidden mb-4">
+        <div class="card-header bg-white border-bottom py-2 px-4">
+            <ul class="nav nav-tabs card-header-tabs border-bottom-0" id="accessActivityTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active font-bold text-sm py-3 px-4 d-flex align-items-center gap-2" id="logs-tab" data-bs-toggle="tab" data-bs-target="#logsTabPane" type="button" role="tab">
+                        <i class="fas fa-user-clock text-primary"></i>
+                        <span>Employee Activity Logs</span>
+                        <span class="badge bg-blue-100 text-blue-800 rounded-pill ms-1">{{ logs_page.paginator.count }}</span>
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link font-bold text-sm py-3 px-4 d-flex align-items-center gap-2" id="clearance-tab" data-bs-toggle="tab" data-bs-target="#clearanceTabPane" type="button" role="tab">
+                        <i class="fas fa-user-shield text-emerald-600"></i>
+                        <span>Employee Clearances</span>
+                        <span class="badge bg-emerald-100 text-emerald-800 rounded-pill ms-1">{{ global_grants|length }}</span>
+                    </button>
+                </li>
+            </ul>
+        </div>
+
+        <div class="tab-content" id="accessActivityTabContent">
+
+            <!-- TAB 1: ACTIVITY LOGS OF EVERY EMPLOYEE -->
+            <div class="tab-pane fade show active p-4" id="logsTabPane" role="tabpanel">
+                
+                <!-- Filter & Search Toolbar -->
+                <form method="get" class="row g-2 mb-4 align-items-center">
+                    <div class="col-lg-4 col-md-4">
+                        <div class="input-group">
+                            <span class="input-group-text bg-light border-end-0 text-slate-400">
+                                <i class="fas fa-search"></i>
+                            </span>
+                            <input type="text" name="q" value="{{ search_q }}" class="form-control border-start-0 ps-0 bg-light" placeholder="Search Drawing #, Description, Customer...">
+                        </div>
+                    </div>
+
+                    <div class="col-lg-3 col-md-3">
+                        <select name="employee" class="form-select bg-light" onchange="this.form.submit()">
+                            <option value="">All Employees</option>
+                            {% for emp in all_employees %}
+                            <option value="{{ emp.id }}" {% if selected_emp == emp.id|stringformat:"s" %}selected{% endif %}>
+                                {{ emp.full_name }} ({{ emp.email }})
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-lg-3 col-md-3">
+                        <select name="action" class="form-select bg-light" onchange="this.form.submit()">
+                            <option value="">All Activity Types</option>
+                            {% for code, label in action_choices %}
+                            <option value="{{ code }}" {% if selected_action == code %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-lg-2 col-md-2 d-flex gap-1">
+                        <button type="submit" class="btn btn-secondary w-100 font-semibold" title="Apply Filter">
+                            <i class="fas fa-filter me-1"></i> Filter
+                        </button>
+                        {% if search_q or selected_emp or selected_action %}
+                        <a href="{% url 'drawings:global_access_management' %}" class="btn btn-outline-danger" title="Clear Filters">
+                            <i class="fas fa-times"></i>
+                        </a>
+                        {% endif %}
+                    </div>
+                </form>
+
+                <!-- Activity Log Table -->
+                <div class="table-responsive">
+                    <table class="table table-logs align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th style="width: 170px;">Timestamp</th>
+                                <th style="width: 220px;">Employee</th>
+                                <th style="width: 210px;">Action Performed</th>
+                                <th style="width: 160px;">Drawing Project</th>
+                                <th>Activity Details & Metadata</th>
+                                <th style="width: 120px;">IP Address</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for log in logs_page %}
+                            <tr>
+                                <!-- Timestamp -->
+                                <td>
+                                    <div class="font-semibold text-slate-800">{{ log.created_at|date:"M d, Y" }}</div>
+                                    <div class="text-xs text-slate-400 font-mono">{{ log.created_at|date:"h:i:s A" }}</div>
+                                </td>
+
+                                <!-- Employee -->
+                                <td>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <div class="bg-slate-800 text-white rounded-circle d-flex align-items-center justify-content-center font-bold text-xs" style="width: 32px; height: 32px; flex-shrink: 0;">
+                                            {{ log.user.full_name|default:"?"|slice:":2"|upper }}
+                                        </div>
+                                        <div class="text-truncate" style="max-width: 170px;">
+                                            <div class="font-bold text-slate-900 text-truncate" title="{{ log.user.full_name }}">{{ log.user.full_name|default:"Unknown Employee" }}</div>
+                                            <div class="text-xs text-slate-400 text-truncate" title="{{ log.user.email }}">{{ log.user.email }}</div>
+                                        </div>
+                                    </div>
+                                </td>
+
+                                <!-- Action Badge -->
+                                <td>
+                                    {% if log.action == 'DOWNLOAD_PDF' %}
+                                    <span class="log-badge badge-download-pdf">
+                                        <i class="fas fa-file-pdf"></i> Downloaded PDF
+                                    </span>
+                                    {% elif log.action == 'VIEW_PDF' %}
+                                    <span class="log-badge badge-view-pdf">
+                                        <i class="fas fa-eye"></i> Previewed PDF
+                                    </span>
+                                    {% elif log.action == 'DOWNLOAD_NATIVE' %}
+                                    <span class="log-badge badge-download-cad">
+                                        <i class="fas fa-file-code"></i> Downloaded CAD
+                                    </span>
+                                    {% elif log.action == 'VIEW_DRAWING' %}
+                                    <span class="log-badge badge-view-drawing">
+                                        <i class="fas fa-folder-open"></i> Viewed Drawing
+                                    </span>
+                                    {% elif log.action == 'UPLOAD_REVISION' %}
+                                    <span class="log-badge badge-upload-rev">
+                                        <i class="fas fa-cloud-upload-alt"></i> Uploaded Revision
+                                    </span>
+                                    {% elif log.action == 'CREATE_DRAWING' %}
+                                    <span class="log-badge badge-create-dwg">
+                                        <i class="fas fa-plus-circle"></i> Created Drawing
+                                    </span>
+                                    {% elif log.action == 'UPDATE_DRAWING' %}
+                                    <span class="log-badge badge-view-drawing">
+                                        <i class="fas fa-pen"></i> Updated Metadata
+                                    </span>
+                                    {% elif 'DELETE' in log.action %}
+                                    <span class="log-badge badge-delete">
+                                        <i class="fas fa-trash-alt"></i> {{ log.get_action_display }}
+                                    </span>
+                                    {% else %}
+                                    <span class="log-badge badge-access">
+                                        <i class="fas fa-key"></i> {{ log.get_action_display }}
+                                    </span>
+                                    {% endif %}
+                                </td>
+
+                                <!-- Drawing Project -->
+                                <td>
+                                    {% if log.drawing %}
+                                    <a href="{% url 'drawings:drawing_detail' log.drawing.pk %}" class="font-mono text-xs font-bold text-blue-600 text-decoration-none hover:underline d-block text-truncate" title="{{ log.drawing.base_drawing_number }}">
+                                        {{ log.drawing.base_drawing_number }}
+                                    </a>
+                                    <span class="text-xs text-slate-500 text-truncate d-block" style="max-width: 140px;" title="{{ log.drawing.drawing_name }}">
+                                        {{ log.drawing.drawing_name }}
+                                    </span>
+                                    {% elif log.drawing_number %}
+                                    <span class="font-mono text-xs font-bold text-slate-700">{{ log.drawing_number }}</span>
+                                    {% else %}
+                                    <span class="text-slate-400 text-xs italic">General Vault</span>
+                                    {% endif %}
+                                </td>
+
+                                <!-- Description / Details -->
+                                <td>
+                                    <div class="text-slate-700 text-xs font-medium">{{ log.description|default:"—" }}</div>
+                                </td>
+
+                                <!-- IP Address -->
+                                <td>
+                                    <span class="font-mono text-xs text-slate-400">{{ log.ip_address|default:"127.0.0.1" }}</span>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="6" class="text-center py-5 text-slate-400">
+                                    <i class="fas fa-history fa-2x mb-2 text-slate-300 d-block"></i>
+                                    <p class="mb-0 text-sm font-semibold">No activity logs recorded matching the criteria.</p>
+                                    <span class="text-xs">As employees view drawings, download watermarked PDFs, or attach CAD files, their actions appear here in real-time.</span>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination -->
+                {% if logs_page.has_other_pages %}
+                <nav class="d-flex justify-content-between align-items-center mt-4">
+                    <span class="text-xs text-slate-500">
+                        Showing page {{ logs_page.number }} of {{ logs_page.paginator.num_pages }} ({{ logs_page.paginator.count }} total actions)
+                    </span>
+                    <ul class="pagination pagination-sm mb-0">
+                        {% if logs_page.has_previous %}
+                        <li class="page-item">
+                            <a class="page-link" href="?page={{ logs_page.previous_page_number }}{% if selected_emp %}&employee={{ selected_emp }}{% endif %}{% if selected_action %}&action={{ selected_action }}{% endif %}{% if search_q %}&q={{ search_q }}{% endif %}">Previous</a>
+                        </li>
+                        {% endif %}
+
+                        <li class="page-item active"><span class="page-link">{{ logs_page.number }}</span></li>
+
+                        {% if logs_page.has_next %}
+                        <li class="page-item">
+                            <a class="page-link" href="?page={{ logs_page.next_page_number }}{% if selected_emp %}&employee={{ selected_emp }}{% endif %}{% if selected_action %}&action={{ selected_action }}{% endif %}{% if search_q %}&q={{ search_q }}{% endif %}">Next</a>
+                        </li>
+                        {% endif %}
+                    </ul>
+                </nav>
+                {% endif %}
+
+            </div>
+
+            <!-- TAB 2: EMPLOYEE ACCESS CLEARANCES -->
+            <div class="tab-pane fade p-4" id="clearanceTabPane" role="tabpanel">
+                <div class="row g-4">
+                    
+                    <!-- Form: Grant Individual Employee Access -->
+                    <div class="col-lg-5">
+                        <div class="card border border-slate-200 rounded-3 p-4 bg-slate-50">
+                            <h2 class="h6 font-bold text-slate-800 mb-1 d-flex align-items-center gap-2">
+                                <i class="fas fa-user-plus text-primary"></i> Grant Employee Clearance
+                            </h2>
+                            <p class="text-xs text-slate-500 mb-3">
+                                Assign viewing or editing permissions to an individual employee.
+                            </p>
+
+                            <form method="post" action="{% url 'drawings:grant_access_global' %}">
+                                {% csrf_token %}
+
+                                <div class="mb-3">
+                                    <label class="form-label font-bold text-xs text-slate-600 uppercase">Select Employee <span class="text-danger">*</span></label>
+                                    {{ form.user }}
+                                </div>
+
+                                <div class="mb-4">
+                                    <label class="form-label font-bold text-xs text-slate-600 uppercase">Access Clearance Level <span class="text-danger">*</span></label>
+                                    {{ form.access_level }}
+                                    <div class="form-text text-xs mt-1">
+                                        <strong>View Only:</strong> View drawing metadata, preview and download watermarked PDFs.<br>
+                                        <strong>Edit & Upload:</strong> Upload new revisions, attach native files, and edit metadata.
+                                    </div>
+                                </div>
+
+                                <button type="submit" class="btn btn-primary w-100 font-semibold py-2" style="background-color: #2563eb; border-color: #2563eb;">
+                                    <i class="fas fa-check-circle me-1"></i> Grant Employee Clearance
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Active Employee Clearances Table -->
+                    <div class="col-lg-7">
+                        <div class="card border border-slate-200 rounded-3 p-4 bg-white">
+                            <h2 class="h6 font-bold text-slate-800 mb-1 d-flex align-items-center gap-2">
+                                <i class="fas fa-users text-primary"></i> Active Employee Clearances
+                            </h2>
+                            <span class="text-xs text-slate-500 mb-3 d-block">
+                                Employees with authorized clearance to access the engineering drawing library.
+                            </span>
+
+                            <div class="table-responsive">
+                                <table class="table table-sm align-middle mb-0">
+                                    <thead>
+                                        <tr class="text-xs text-slate-400 uppercase">
+                                            <th>Employee</th>
+                                            <th>Clearance Level</th>
+                                            <th>Granted By</th>
+                                            <th class="text-end">Revoke</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for grant in global_grants %}
+                                        <tr>
+                                            <td>
+                                                <div class="font-bold text-slate-800 text-sm">
+                                                    {{ grant.user.full_name }}
+                                                </div>
+                                                <div class="text-xs text-slate-400">{{ grant.user.email }}</div>
+                                            </td>
+                                            <td>
+                                                <span class="badge {% if grant.access_level == 'EDIT' %}bg-primary{% else %}bg-secondary{% endif %} text-white">
+                                                    {{ grant.get_access_level_display }}
+                                                </span>
+                                            </td>
+                                            <td class="text-xs text-slate-500">
+                                                {{ grant.granted_by.full_name|default:"Admin" }}
+                                                <div class="text-xs text-slate-400">{{ grant.created_at|date:"M d, Y" }}</div>
+                                            </td>
+                                            <td class="text-end">
+                                                <form method="post" action="{% url 'drawings:revoke_access' grant.pk %}" onsubmit="return confirm('Revoke drawing clearance for {{ grant.user.full_name }}?');">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-2 text-xs">
+                                                        Revoke
+                                                    </button>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                        {% empty %}
+                                        <tr>
+                                            <td colspan="4" class="text-center py-4 text-slate-400 text-xs">
+                                                No individual employee clearances assigned yet. Only Super Admins and Admins currently have library access.
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+</div>
+
+<!-- MODAL: QUICK GRANT ACCESS TO EMPLOYEE -->
+<div class="modal fade" id="grantEmployeeAccessModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4">
+            <form method="post" action="{% url 'drawings:grant_access_global' %}">
+                {% csrf_token %}
+                <div class="modal-header bg-slate-900 text-white rounded-top-4">
+                    <h5 class="modal-title font-bold d-flex align-items-center gap-2">
+                        <i class="fas fa-user-shield text-blue-400"></i>
+                        Grant Drawing Library Clearance
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="mb-3">
+                        <label class="form-label font-bold text-xs text-slate-600 uppercase">Select Employee</label>
+                        {{ form.user }}
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label font-bold text-xs text-slate-600 uppercase">Clearance Level</label>
+                        {{ form.access_level }}
+                    </div>
+                </div>
+                <div class="modal-footer bg-light rounded-bottom-4">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary px-4 font-semibold" style="background-color: #2563eb; border-color: #2563eb;">
+                        Grant Access
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

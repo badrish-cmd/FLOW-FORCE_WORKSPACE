@@ -1,0 +1,684 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ drawing.base_drawing_number }} - {{ drawing.drawing_name }} | Drawing Library{% endblock %}
+
+{% block extra_css %}
+<style>
+    .metadata-header-card {
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+        color: #ffffff;
+        border-radius: 14px;
+        box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.2);
+    }
+    .meta-label {
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #94a3b8;
+        margin-bottom: 2px;
+    }
+    .meta-value {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #f8fafc;
+        word-break: break-word;
+    }
+    .badge-format-pill {
+        font-size: 0.75rem;
+        font-weight: 700;
+        padding: 5px 12px;
+        border-radius: 9999px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .badge-zwcad-pill { background: #dbeafe; color: #1e40af; }
+    .badge-solidworks-pill { background: #fee2e2; color: #991b1b; }
+    .badge-handsketch-pill { background: #fef9c3; color: #854d0e; }
+    .badge-autocad-pill { background: #dcfce7; color: #166534; }
+    .badge-other-pill { background: #e2e8f0; color: #334155; }
+
+    .table-revisions th {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-weight: 700;
+        color: #475569;
+        background-color: #f8fafc;
+        padding: 12px 16px;
+        border-bottom: 1px solid #e2e8f0;
+    }
+    .table-revisions td {
+        padding: 14px 16px;
+        vertical-align: middle;
+        font-size: 0.875rem;
+        border-bottom: 1px solid #f1f5f9;
+    }
+    .pdf-frame-container {
+        width: 100%;
+        height: 75vh;
+        border: none;
+        border-radius: 8px;
+    }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="d-flex align-items-center gap-2 text-sm text-slate-500">
+    <a href="{% url 'drawings:drawing_list' %}" class="text-slate-500 text-decoration-none hover:text-blue-600">Drawing Library</a>
+    <i class="fas fa-chevron-right text-xs"></i>
+    <span class="font-mono text-slate-700 font-semibold">{{ drawing.base_drawing_number }}</span>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-3">
+
+    <!-- 1. PROJECT METADATA HEADER -->
+    <div class="metadata-header-card p-4 mb-4">
+        <!-- Top Title Bar -->
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 pb-3 border-bottom border-slate-700">
+            <div>
+                <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+                    <span class="font-mono text-xs font-bold px-2.5 py-1 rounded bg-blue-500/20 text-blue-300 border border-blue-400/30">
+                        {{ drawing.base_drawing_number }}
+                    </span>
+                    <span class="badge-format-pill 
+                        {% if drawing.format == 'ZWCAD' %}badge-zwcad-pill
+                        {% elif drawing.format == 'SOLIDWORKS' %}badge-solidworks-pill
+                        {% elif drawing.format == 'HAND_SKETCH' %}badge-handsketch-pill
+                        {% elif drawing.format == 'AUTOCAD' %}badge-autocad-pill
+                        {% else %}badge-other-pill{% endif %}">
+                        {{ drawing.get_format_display }}
+                    </span>
+                    <span class="badge bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2.5 py-1 rounded-pill text-xs font-semibold">
+                        <i class="fas fa-stamp me-1"></i>{{ drawing.watermark_company }}
+                    </span>
+                </div>
+                <h1 class="h3 font-bold text-white mb-0">{{ drawing.drawing_name }}</h1>
+            </div>
+
+            <div class="d-flex align-items-center gap-2">
+                {% if can_edit %}
+                <button type="button" class="btn btn-primary btn-sm d-flex align-items-center gap-2 px-3 py-2" data-bs-toggle="modal" data-bs-target="#uploadRevisionModal" style="background-color: #2563eb; border-color: #2563eb;">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                    <span>Upload New Revision</span>
+                </button>
+                {% endif %}
+
+                {% if is_admin %}
+                <button type="button" class="btn btn-outline-light btn-sm d-flex align-items-center gap-1 px-3 py-2" data-bs-toggle="modal" data-bs-target="#manageDrawingAccessModal">
+                    <i class="fas fa-shield-alt"></i>
+                    <span>Manage Access</span>
+                </button>
+                <a href="{% url 'drawings:drawing_edit' drawing.pk %}" class="btn btn-light btn-sm px-3 py-2" title="Edit Metadata">
+                    <i class="fas fa-pen"></i>
+                </a>
+                <button type="button" class="btn btn-outline-danger btn-sm px-3 py-2" data-bs-toggle="modal" data-bs-target="#deleteDrawingModal" title="Delete Drawing">
+                    <i class="fas fa-trash-alt"></i>
+                </button>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- 10 Field Metadata Grid -->
+        <div class="row g-3 pt-3">
+            <div class="col-lg-3 col-md-4 col-6">
+                <div class="meta-label">Customer Name</div>
+                <div class="meta-value text-blue-200">{{ drawing.customer_name }}</div>
+            </div>
+            <div class="col-lg-3 col-md-4 col-6">
+                <div class="meta-label">Enquiry Number</div>
+                <div class="meta-value">{{ drawing.enquiry_number|default:"—" }}</div>
+            </div>
+            <div class="col-lg-3 col-md-4 col-6">
+                <div class="meta-label">PO Number</div>
+                <div class="meta-value">{{ drawing.po_number|default:"—" }}</div>
+            </div>
+            <div class="col-lg-3 col-md-4 col-6">
+                <div class="meta-label">P&ID Reference</div>
+                <div class="meta-value font-mono text-amber-300">{{ drawing.pid_reference }}</div>
+            </div>
+
+            <div class="col-lg-3 col-md-4 col-6">
+                <div class="meta-label">Drawing Name</div>
+                <div class="meta-value">{{ drawing.drawing_name }}</div>
+            </div>
+            <div class="col-lg-3 col-md-4 col-6">
+                <div class="meta-label">Base Drawing Number</div>
+                <div class="meta-value font-mono text-cyan-300">{{ drawing.base_drawing_number }}</div>
+            </div>
+            <div class="col-lg-3 col-md-4 col-6">
+                <div class="meta-label">Active Revision Number</div>
+                <div class="meta-value">
+                    <span class="badge bg-blue-500 text-white px-2 py-1 font-bold">
+                        Rev {{ drawing.active_revision_number }}
+                    </span>
+                </div>
+            </div>
+            <div class="col-lg-3 col-md-4 col-6">
+                <div class="meta-label">Drafter Name</div>
+                <div class="meta-value"><i class="fas fa-user-edit text-xs text-slate-400 me-1"></i>{{ drawing.drafter_name }}</div>
+            </div>
+
+            <div class="col-lg-3 col-md-4 col-6">
+                <div class="meta-label">Format</div>
+                <div class="meta-value">{{ drawing.get_format_display }}</div>
+            </div>
+            <div class="col-lg-5 col-md-8 col-12">
+                <div class="meta-label">Watermark Company</div>
+                <div class="meta-value text-emerald-300 d-flex align-items-center gap-1">
+                    <i class="fas fa-certificate text-xs"></i>
+                    {{ drawing.watermark_company }}
+                </div>
+            </div>
+            {% if drawing.description %}
+            <div class="col-12 pt-2">
+                <div class="meta-label">Project Description / Notes</div>
+                <div class="text-sm text-slate-300">{{ drawing.description }}</div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- P&ID PROJECT DRAWINGS BAR (Multiple drawings under this PID) -->
+    <div class="card border-0 shadow-sm rounded-3 mb-4 bg-white p-3 border-start border-4 border-amber-400">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-amber-100 text-amber-900 font-mono font-bold px-2 py-1">
+                    <i class="fas fa-project-diagram me-1"></i> P&ID: {{ drawing.pid_reference }}
+                </span>
+                <span class="text-xs text-slate-500">
+                    Drawings saved under this P&ID for <strong>{{ drawing.customer_name }}</strong>:
+                </span>
+            </div>
+            {% if is_admin %}
+            <a href="{% url 'drawings:drawing_create' %}?pid={{ drawing.pid_reference|urlencode }}&customer={{ drawing.customer_name|urlencode }}&watermark={{ drawing.watermark_company|urlencode }}" 
+               class="btn btn-sm btn-outline-primary py-1 px-2.5 text-xs font-semibold d-flex align-items-center gap-1">
+                <i class="fas fa-plus"></i>
+                <span>Add Another Drawing to this P&ID</span>
+            </a>
+            {% endif %}
+        </div>
+
+        <div class="d-flex flex-wrap gap-2 pt-1">
+            <!-- Current Drawing -->
+            <span class="badge bg-slate-900 text-white p-2 d-inline-flex align-items-center gap-2 border border-slate-700" style="font-size: 0.8rem;">
+                <i class="fas fa-check-circle text-emerald-400"></i>
+                <span>{{ drawing.drawing_name }}</span>
+                <span class="font-mono text-xs opacity-75">({{ drawing.base_drawing_number }})</span>
+                <span class="badge bg-blue-600">Rev {{ drawing.active_revision_number }}</span>
+            </span>
+
+            <!-- Other Drawings under this PID -->
+            {% for other in other_pid_drawings %}
+            <a href="{% url 'drawings:drawing_detail' other.pk %}" class="btn btn-sm btn-light border p-2 d-inline-flex align-items-center gap-2 text-decoration-none text-slate-700 hover:bg-slate-100" style="font-size: 0.8rem;">
+                <i class="fas fa-file-alt text-blue-500"></i>
+                <span class="font-semibold">{{ other.drawing_name }}</span>
+                <span class="font-mono text-xs text-slate-500">({{ other.base_drawing_number }})</span>
+                <span class="badge bg-slate-200 text-slate-700">Rev {{ other.active_revision_number }}</span>
+            </a>
+            {% empty %}
+            <span class="text-xs text-slate-400 italic py-1">
+                No other drawings saved under this P&ID yet. Click "+ Add Another Drawing to this P&ID" to save additional drawings with different names under this P&ID.
+            </span>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- 2. REVISION LOG TABLE -->
+    <div class="card border-0 shadow-sm rounded-3 mb-4 bg-white overflow-hidden">
+        <div class="card-header bg-white py-3 px-4 d-flex justify-content-between align-items-center border-bottom">
+            <div>
+                <h2 class="h5 font-bold text-slate-800 mb-0 d-flex align-items-center gap-2">
+                    <i class="fas fa-history text-blue-600"></i>
+                    Revision Log & Attachments
+                </h2>
+                <span class="text-xs text-slate-500">
+                    Chronological revision history, native working files (.dwt, .slddrw, .dwg), and auto-renamed watermarked PDFs.
+                </span>
+            </div>
+            <div>
+                {% if can_edit %}
+                <button type="button" class="btn btn-outline-primary btn-sm d-flex align-items-center gap-1" data-bs-toggle="modal" data-bs-target="#uploadRevisionModal">
+                    <i class="fas fa-plus"></i>
+                    <span>Add Revision</span>
+                </button>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-revisions align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th style="width: 110px;">Revision #</th>
+                        <th>Stage Change Description</th>
+                        <th style="width: 200px;">Native File Attachment</th>
+                        <th style="width: 250px;">PDF Viewer / Download</th>
+                        <th style="width: 150px;">Drafter Name</th>
+                        <th style="width: 120px;">Date</th>
+                        {% if is_admin %}
+                        <th style="width: 80px;" class="text-center">Actions</th>
+                        {% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rev in revisions %}
+                    <tr>
+                        <!-- Revision # -->
+                        <td>
+                            <div class="d-flex align-items-center gap-1">
+                                <span class="badge bg-slate-900 text-white font-mono px-2.5 py-1.5 rounded" style="font-size: 0.82rem;">
+                                    Rev {{ rev.revision_number }}
+                                </span>
+                                {% if forloop.first %}
+                                <span class="badge bg-success-subtle text-success border border-success-subtle text-xs" title="Current Active Revision">
+                                    Latest
+                                </span>
+                                {% endif %}
+                            </div>
+                        </td>
+
+                        <!-- Stage Change Description -->
+                        <td>
+                            <div class="font-medium text-slate-800">{{ rev.stage_change_description }}</div>
+                            <div class="text-xs text-slate-400">Uploaded by {{ rev.created_by.full_name|default:"System" }}</div>
+                        </td>
+
+                        <!-- Native File Attachment -->
+                        <td>
+                            {% if rev.native_file %}
+                            <a href="{% url 'drawings:download_native_file' rev.pk %}" class="btn btn-sm btn-light border d-inline-flex align-items-center gap-2 text-slate-700 hover:bg-slate-100" title="Download native working file">
+                                <i class="fas fa-file-code text-blue-600"></i>
+                                <span class="font-mono text-xs font-semibold text-truncate" style="max-width: 140px;">
+                                    Download CAD
+                                </span>
+                                <i class="fas fa-download text-xs text-slate-400"></i>
+                            </a>
+                            {% else %}
+                            <span class="text-slate-400 text-xs italic">No native file</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- PDF Viewer / Download Link with Watermark -->
+                        <td>
+                            {% if rev.pdf_file %}
+                            <div class="d-flex align-items-center gap-1 flex-wrap">
+                                <!-- In-Browser Watermarked PDF Viewer Trigger -->
+                                <button type="button" 
+                                        class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1 text-xs"
+                                        onclick="openPdfModal('{% url 'drawings:view_watermarked_pdf' rev.pk %}', '{{ rev.expected_pdf_filename }}')">
+                                    <i class="fas fa-eye text-primary"></i>
+                                    <span>Preview</span>
+                                </button>
+
+                                <!-- Direct Download Watermarked PDF -->
+                                <a href="{% url 'drawings:download_watermarked_pdf' rev.pk %}" 
+                                   class="btn btn-sm btn-primary d-inline-flex align-items-center gap-1 text-xs font-semibold"
+                                   style="background-color: #2563eb; border-color: #2563eb;"
+                                   title="Download PDF with semi-transparent {{ drawing.watermark_company }} watermark">
+                                    <i class="fas fa-file-pdf"></i>
+                                    <span>Download PDF</span>
+                                </a>
+                            </div>
+                            <div class="font-mono text-xs text-slate-400 mt-1 text-truncate" style="max-width: 230px;" title="{{ rev.expected_pdf_filename }}">
+                                <i class="fas fa-tag text-xs me-1"></i>{{ rev.expected_pdf_filename }}
+                            </div>
+                            {% else %}
+                            <span class="text-slate-400 text-xs italic">No PDF uploaded</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Drafter Name -->
+                        <td>
+                            <span class="text-slate-700 font-medium">{{ rev.drafter_name }}</span>
+                        </td>
+
+                        <!-- Date -->
+                        <td>
+                            <div class="text-slate-700 font-medium">{{ rev.revision_date|date:"d M Y" }}</div>
+                        </td>
+
+                        <!-- Admin Actions -->
+                        {% if is_admin %}
+                        <td class="text-center">
+                            <form method="post" action="{% url 'drawings:revision_delete' rev.pk %}" onsubmit="return confirm('Are you sure you want to delete Revision {{ rev.revision_number }}?');">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-sm btn-light text-danger p-1 border-0" title="Delete Revision">
+                                    <i class="fas fa-trash-alt"></i>
+                                </button>
+                            </form>
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="{% if is_admin %}7{% else %}6{% endif %}" class="text-center py-5 text-slate-500">
+                            <div class="mb-2"><i class="fas fa-file-upload fa-2x text-slate-300"></i></div>
+                            <p class="mb-2 font-medium">No revisions logged yet for this drawing.</p>
+                            {% if can_edit %}
+                            <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#uploadRevisionModal">
+                                Upload First Revision
+                            </button>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Active Access & Audit Activity Section (For Admins) -->
+    {% if is_admin %}
+    <div class="row g-4">
+        <!-- Drawing Activity Log -->
+        <div class="col-lg-7">
+            <div class="card border-0 shadow-sm rounded-3 bg-white p-4 h-100">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <h3 class="h6 font-bold text-slate-800 mb-0 d-flex align-items-center gap-2">
+                            <i class="fas fa-history text-blue-600"></i>
+                            Drawing Activity History
+                        </h3>
+                        <span class="text-xs text-slate-500">Live audit log of every employee who viewed, downloaded CAD/PDF, or edited this drawing.</span>
+                    </div>
+                </div>
+
+                {% if recent_activities %}
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead>
+                            <tr class="text-xs text-slate-400 uppercase">
+                                <th>Timestamp</th>
+                                <th>Employee</th>
+                                <th>Action</th>
+                                <th>Details</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for act in recent_activities %}
+                            <tr>
+                                <td class="text-xs text-slate-500 text-nowrap">
+                                    {{ act.created_at|date:"M d, H:i" }}
+                                </td>
+                                <td>
+                                    <div class="font-bold text-xs text-slate-800 text-truncate" style="max-width: 130px;" title="{{ act.user.full_name }}">
+                                        {{ act.user.full_name|default:"Unknown" }}
+                                    </div>
+                                </td>
+                                <td>
+                                    <span class="badge 
+                                        {% if act.action == 'DOWNLOAD_PDF' %}bg-primary
+                                        {% elif act.action == 'DOWNLOAD_NATIVE' %}bg-success
+                                        {% elif act.action == 'VIEW_PDF' %}bg-purple text-white
+                                        {% elif act.action == 'UPLOAD_REVISION' %}bg-warning text-dark
+                                        {% else %}bg-secondary{% endif %} text-xs" style="font-size: 0.68rem;">
+                                        {{ act.get_action_display }}
+                                    </span>
+                                </td>
+                                <td class="text-xs text-slate-600 text-truncate" style="max-width: 180px;" title="{{ act.description }}">
+                                    {{ act.description }}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-4 text-slate-400 text-xs">
+                    <i class="fas fa-user-clock fa-2x mb-2 text-slate-300 d-block"></i>
+                    No activity logs recorded yet for this drawing.
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Drawing Specific Employee Access Grants -->
+        <div class="col-lg-5">
+            <div class="card border-0 shadow-sm rounded-3 bg-white p-4 h-100">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <h3 class="h6 font-bold text-slate-800 mb-0 d-flex align-items-center gap-2">
+                            <i class="fas fa-user-lock text-slate-600"></i>
+                            Employee Clearances
+                        </h3>
+                        <span class="text-xs text-slate-500">Authorized employees.</span>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#manageDrawingAccessModal">
+                        <i class="fas fa-user-plus me-1"></i> Grant
+                    </button>
+                </div>
+
+                {% if access_grants %}
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead>
+                            <tr class="text-xs text-slate-400 uppercase">
+                                <th>Employee</th>
+                                <th>Level</th>
+                                <th class="text-end">Revoke</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for grant in access_grants %}
+                            <tr>
+                                <td>
+                                    <div class="font-bold text-xs text-slate-800">{{ grant.user.full_name }}</div>
+                                    <div class="text-xs text-slate-400">{{ grant.user.email }}</div>
+                                </td>
+                                <td>
+                                    <span class="badge {% if grant.access_level == 'EDIT' %}bg-primary{% else %}bg-secondary{% endif %} text-white text-xs">
+                                        {{ grant.get_access_level_display }}
+                                    </span>
+                                </td>
+                                <td class="text-end">
+                                    <form method="post" action="{% url 'drawings:revoke_access' grant.pk %}" onsubmit="return confirm('Revoke clearance for {{ grant.user.full_name }}?');">
+                                        {% csrf_token %}
+                                        <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-2 text-xs">
+                                            Revoke
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-slate-400 text-xs py-3 text-center">
+                    No individual clearances assigned for this drawing yet.
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+
+<!-- MODAL: UPLOAD NEW REVISION -->
+{% if can_edit %}
+<div class="modal fade" id="uploadRevisionModal" tabindex="-1" aria-labelledby="uploadRevisionModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content border-0 shadow-lg rounded-4">
+            <form method="post" action="{% url 'drawings:revision_create' drawing.pk %}" enctype="multipart/form-data">
+                {% csrf_token %}
+                <div class="modal-header bg-slate-900 text-white rounded-top-4">
+                    <h5 class="modal-title font-bold d-flex align-items-center gap-2" id="uploadRevisionModalLabel">
+                        <i class="fas fa-cloud-upload-alt text-blue-400"></i>
+                        Upload New Drawing Revision
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="alert alert-info py-2 px-3 text-xs mb-3 d-flex align-items-center gap-2">
+                        <i class="fas fa-info-circle fa-lg"></i>
+                        <div>
+                            Exported PDF will be automatically standardized and renamed strictly to:
+                            <strong class="font-mono text-slate-800">[{{ drawing.customer_name }}]_[{{ drawing.pid_reference }}]_[Rev#].pdf</strong>
+                        </div>
+                    </div>
+
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label font-bold text-xs text-slate-600 uppercase">Revision # <span class="text-danger">*</span></label>
+                            {{ revision_form.revision_number }}
+                            <div class="form-text text-xs">e.g. 0, A, B, 01, R1</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label font-bold text-xs text-slate-600 uppercase">Drafter Name <span class="text-danger">*</span></label>
+                            {{ revision_form.drafter_name }}
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label font-bold text-xs text-slate-600 uppercase">Revision Date <span class="text-danger">*</span></label>
+                            {{ revision_form.revision_date }}
+                        </div>
+
+                        <div class="col-12">
+                            <label class="form-label font-bold text-xs text-slate-600 uppercase">Stage Change Description <span class="text-danger">*</span></label>
+                            {{ revision_form.stage_change_description }}
+                            <div class="form-text text-xs">Describe what changed in this revision (e.g. "Issued for Approval", "Flange rating revised", "As-Built").</div>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label font-bold text-xs text-slate-600 uppercase">
+                                Native Working File (.dwt, .slddrw, .dwg)
+                            </label>
+                            {{ revision_form.native_file }}
+                            <div class="form-text text-xs">CAD working source file.</div>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label font-bold text-xs text-slate-600 uppercase">
+                                Exported PDF File
+                            </label>
+                            {{ revision_form.pdf_file }}
+                            <div class="form-text text-xs">Will be auto-renamed and stamped with {{ drawing.watermark_company }} watermark.</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light rounded-bottom-4">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary px-4 font-semibold" style="background-color: #2563eb; border-color: #2563eb;">
+                        <i class="fas fa-save me-1"></i> Save Revision
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- MODAL: IN-BROWSER WATERMARKED PDF VIEWER -->
+<div class="modal fade" id="pdfViewerModal" tabindex="-1" aria-labelledby="pdfViewerModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-fullscreen-lg-down modal-xl modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4">
+            <div class="modal-header bg-slate-900 text-white rounded-top-4 py-3">
+                <div class="d-flex align-items-center gap-2">
+                    <i class="fas fa-file-pdf text-red-400"></i>
+                    <h5 class="modal-title font-mono text-sm font-bold text-truncate" id="pdfViewerModalLabel" style="max-width: 600px;">
+                        PDF Preview
+                    </h5>
+                    <span class="badge bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-xs">
+                        Watermarked: {{ drawing.watermark_company }}
+                    </span>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-0 bg-slate-800">
+                <iframe id="pdfViewerIframe" class="pdf-frame-container" src="about:blank"></iframe>
+            </div>
+            <div class="modal-footer bg-light rounded-bottom-4 py-2">
+                <span class="text-xs text-slate-500 me-auto">
+                    <i class="fas fa-info-circle me-1"></i> Light semi-transparent company watermark applied in the corner.
+                </span>
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL: MANAGE ACCESS (FOR ADMINS) -->
+{% if is_admin %}
+<div class="modal fade" id="manageDrawingAccessModal" tabindex="-1" aria-labelledby="manageDrawingAccessModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4">
+            <form method="post" action="{% url 'drawings:grant_access_drawing' drawing.pk %}">
+                {% csrf_token %}
+                <div class="modal-header bg-slate-900 text-white rounded-top-4">
+                    <h5 class="modal-title font-bold d-flex align-items-center gap-2" id="manageDrawingAccessModalLabel">
+                        <i class="fas fa-user-shield text-blue-400"></i>
+                        Grant Access to Drawing
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <p class="text-xs text-slate-500 mb-3">
+                        Those who have not been granted access by Admin or Super Admin cannot view this drawing.
+                    </p>
+
+                    <div class="mb-3">
+                        <label class="form-label font-bold text-xs text-slate-600 uppercase">Select Employee <span class="text-danger">*</span></label>
+                        {{ access_form.user }}
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label font-bold text-xs text-slate-600 uppercase">Clearance Level <span class="text-danger">*</span></label>
+                        {{ access_form.access_level }}
+                        <div class="form-text text-xs mt-1">
+                            <strong>View Only:</strong> View metadata and download watermarked PDFs.<br>
+                            <strong>Edit & Upload:</strong> Upload revisions and update metadata.
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light rounded-bottom-4">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary px-4 font-semibold" style="background-color: #2563eb; border-color: #2563eb;">
+                        Grant Clearance
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL: DELETE DRAWING -->
+<div class="modal fade" id="deleteDrawingModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4">
+            <form method="post" action="{% url 'drawings:drawing_delete' drawing.pk %}">
+                {% csrf_token %}
+                <div class="modal-header bg-danger text-white rounded-top-4">
+                    <h5 class="modal-title font-bold"><i class="fas fa-exclamation-triangle me-2"></i>Delete Drawing Project</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <p class="text-sm text-slate-700">
+                        Are you sure you want to delete <strong>{{ drawing.base_drawing_number }} - {{ drawing.drawing_name }}</strong>?
+                    </p>
+                    <p class="text-xs text-danger mb-0">
+                        This will permanently delete all logged revisions, native CAD attachments, and uploaded PDFs. This action cannot be undone.
+                    </p>
+                </div>
+                <div class="modal-footer bg-light rounded-bottom-4">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger font-semibold">Delete Permanently</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<script>
+    function openPdfModal(url, filename) {
+        document.getElementById('pdfViewerModalLabel').innerText = filename;
+        document.getElementById('pdfViewerIframe').src = url;
+        var modal = new bootstrap.Modal(document.getElementById('pdfViewerModal'));
+        modal.show();
+    }
+</script>
+{% endblock %}
