@@ -64,6 +64,9 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
+# Allow same-origin iframe embedding for clean in-browser PDF previews
+X_FRAME_OPTIONS = 'SAMEORIGIN'
+
 # --------------------------------------------------
 # URLS
 # --------------------------------------------------

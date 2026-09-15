@@ -1,7 +1,8 @@
 import os
 import io
 from django.shortcuts import render, get_object_or_404, redirect
-from django.http import HttpResponse, Http404, JsonResponse
+from django.http import HttpResponse, Http404, JsonResponse, FileResponse
+from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.contrib import messages
 from django.db.models import Q, Count
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
@@ -532,6 +533,7 @@ def download_watermarked_pdf(request, revision_pk):
     return response
 
 
+@xframe_options_sameorigin
 @drawing_library_access_required
 def view_watermarked_pdf(request, revision_pk):
     """
@@ -560,11 +562,9 @@ def view_watermarked_pdf(request, revision_pk):
         request=request
     )
 
-    with open(revision.pdf_file.path, "rb") as f:
-        pdf_data = f.read()
-
-    response = HttpResponse(pdf_data, content_type="application/pdf")
+    response = FileResponse(open(revision.pdf_file.path, "rb"), content_type="application/pdf")
     response["Content-Disposition"] = f'inline; filename="{filename}"'
+    response["X-Frame-Options"] = "SAMEORIGIN"
     return response
 
 

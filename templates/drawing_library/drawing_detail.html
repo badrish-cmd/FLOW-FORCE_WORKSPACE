@@ -1373,6 +1373,10 @@
                     </div>
                 </div>
                 <div class="d-flex align-items-center gap-2">
+                    <a id="cleanPdfNewTabBtn" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-light d-flex align-items-center gap-1 font-semibold" title="Open in Full Browser Tab">
+                        <i class="fas fa-external-link-alt"></i>
+                        <span>Open in Tab</span>
+                    </a>
                     <a id="cleanPdfDownloadBtn" href="#" class="btn btn-sm btn-primary d-flex align-items-center gap-1 font-semibold" style="background-color: #2563eb; border-color: #2563eb;">
                         <i class="fas fa-download"></i>
                         <span>Download Clean PDF</span>
@@ -1622,6 +1626,10 @@
         document.getElementById('cleanPdfViewerModalLabel').innerText = filename;
         document.getElementById('cleanPdfViewerIframe').src = viewUrl;
         document.getElementById('cleanPdfDownloadBtn').href = downloadUrl;
+        var newTabBtn = document.getElementById('cleanPdfNewTabBtn');
+        if (newTabBtn) {
+            newTabBtn.href = viewUrl;
+        }
         var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
         modal.show();
     }
@@ -1634,6 +1642,14 @@
                 document.body.appendChild(el);
             }
         });
+
+        var cleanPdfModal = document.getElementById('cleanPdfViewerModal');
+        if (cleanPdfModal) {
+            cleanPdfModal.addEventListener('hidden.bs.modal', function() {
+                var iframe = document.getElementById('cleanPdfViewerIframe');
+                if (iframe) iframe.src = 'about:blank';
+            });
+        }
 
         var childForm = document.getElementById('addChildForm');
         if (childForm) {

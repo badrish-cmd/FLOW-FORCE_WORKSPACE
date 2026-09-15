@@ -39,11 +39,13 @@ jobs:
             # Collect static files
             python manage.py collectstatic --noinput
 
-            # Configure Nginx for large DWG & PDF uploads (up to 500MB)
-            echo "Configuring Nginx upload limits and timeouts..."
+            # Configure Nginx for large DWG & PDF uploads (up to 500MB) and allow SAMEORIGIN framing
+            echo "Configuring Nginx upload limits, timeouts, and framing headers..."
             sudo bash -c 'printf "client_max_body_size 500M;\nclient_body_timeout 300s;\nproxy_read_timeout 300s;\nproxy_connect_timeout 300s;\nproxy_send_timeout 300s;\n" > /etc/nginx/conf.d/upload_limits.conf'
             sudo sed -i 's/client_max_body_size [^;]*;/client_max_body_size 500M;/g' /etc/nginx/sites-enabled/* 2>/dev/null || true
             sudo sed -i 's/client_max_body_size [^;]*;/client_max_body_size 500M;/g' /etc/nginx/sites-available/* 2>/dev/null || true
+            sudo sed -i -E 's/add_header\s+X-Frame-Options\s+[^;]+;/add_header X-Frame-Options "SAMEORIGIN" always;/gI' /etc/nginx/sites-enabled/* 2>/dev/null || true
+            sudo sed -i -E 's/add_header\s+X-Frame-Options\s+[^;]+;/add_header X-Frame-Options "SAMEORIGIN" always;/gI' /etc/nginx/sites-available/* 2>/dev/null || true
 
             echo "Testing and reloading Nginx..."
             sudo nginx -t && sudo systemctl reload nginx
