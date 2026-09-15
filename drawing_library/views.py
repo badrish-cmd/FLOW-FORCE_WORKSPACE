@@ -414,22 +414,54 @@ def drawing_edit(request, pk):
     })
 
 
-@admin_or_superadmin_required
+@drawing_library_access_required
 def drawing_delete(request, pk):
     drawing = get_object_or_404(EngineeringDrawing, pk=pk)
+    root_drawing = drawing.root_drawing
+    root_pk = root_drawing.pk
+    is_root = (drawing.pk == root_pk)
+    pid_ref = drawing.pid_reference
+
+    if not (is_admin_or_superadmin(request.user) or has_drawing_access(request.user, drawing, required_level="EDIT")):
+        messages.error(request, "Access Denied: You do not have permission to delete this drawing.")
+        return redirect("drawings:drawing_detail", pk=root_pk)
+
     if request.method == "POST":
         drawing_num = drawing.base_drawing_number
+        if drawing.level == 1:
+            level_name = "Parent Drawing"
+        elif drawing.level == 2:
+            level_name = "Sub-Assembly (Child)"
+        else:
+            level_name = "Detail Part (Grandchild)"
+
         log_drawing_activity(
             user=request.user,
             action="DELETE_DRAWING",
             drawing=drawing,
-            description=f"Deleted drawing project {drawing_num} and all its revisions",
+            description=f"Deleted {level_name} {drawing_num} ({drawing.drawing_name}) and all associated revisions",
             request=request
         )
         drawing.delete()
-        messages.success(request, f"Drawing '{drawing_num}' and its revisions have been deleted.")
+        messages.success(request, f"{level_name} '{drawing_num}' and its revisions have been permanently deleted.")
+
+        next_url = request.POST.get("next")
+        if next_url and next_url.startswith("/"):
+            return redirect(next_url)
+
+        if not is_root:
+            return redirect("drawings:drawing_detail", pk=root_pk)
+
+        # Root drawing deleted: check if another parent drawing exists for this PID
+        other_root = EngineeringDrawing.objects.filter(
+            pid_reference=pid_ref, parent__isnull=True
+        ).exclude(pk=root_pk).first()
+        if other_root:
+            return redirect("drawings:drawing_detail", pk=other_root.pk)
         return redirect("drawings:drawing_list")
-    return redirect("drawings:drawing_detail", pk=pk)
+
+    return redirect("drawings:drawing_detail", pk=root_pk)
+
 
 
 @drawing_library_access_required
@@ -476,25 +508,31 @@ def revision_create(request, drawing_pk):
     return redirect("drawings:drawing_detail", pk=root_pk)
 
 
-@admin_or_superadmin_required
+@drawing_library_access_required
 def revision_delete(request, revision_pk):
     revision = get_object_or_404(DrawingRevision, pk=revision_pk)
     drawing = revision.drawing
     root_pk = drawing.root_drawing.pk
     rev_num = revision.revision_number
 
-    log_drawing_activity(
-        user=request.user,
-        action="DELETE_REVISION",
-        drawing=drawing,
-        description=f"Deleted Revision {rev_num} from drawing {drawing.base_drawing_number}",
-        request=request
-    )
+    if not (is_admin_or_superadmin(request.user) or has_drawing_access(request.user, drawing, required_level="EDIT")):
+        messages.error(request, "Access Denied: You do not have permission to delete revisions for this drawing.")
+        return redirect("drawings:drawing_detail", pk=root_pk)
 
-    revision.delete()
-    drawing.sync_active_revision()
-    messages.success(request, f"Revision {rev_num} has been removed from {drawing.base_drawing_number}.")
+    if request.method == "POST":
+        log_drawing_activity(
+            user=request.user,
+            action="DELETE_REVISION",
+            drawing=drawing,
+            description=f"Deleted Revision {rev_num} from drawing {drawing.base_drawing_number}",
+            request=request
+        )
+
+        revision.delete()
+        drawing.sync_active_revision()
+        messages.success(request, f"Revision {rev_num} has been removed from {drawing.base_drawing_number}.")
     return redirect("drawings:drawing_detail", pk=root_pk)
+
 
 
 @drawing_library_access_required

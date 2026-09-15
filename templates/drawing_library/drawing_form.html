@@ -243,15 +243,29 @@
                     </div>
                 </div>
 
-                <div class="d-flex justify-content-end gap-2 pt-3 border-top">
-                    <a href="{% if is_create %}{% url 'drawings:drawing_list' %}{% else %}{% url 'drawings:drawing_detail' drawing.pk %}{% endif %}" class="btn btn-secondary px-3">
-                        Cancel
-                    </a>
-                    <button type="submit" id="saveDrawingSubmitBtn" class="btn btn-primary px-4 font-semibold" style="background-color: #2563eb; border-color: #2563eb;">
-                        <i class="fas fa-check me-1"></i> {% if is_create %}Save Drawing Project{% else %}Save Changes{% endif %}
-                    </button>
+                <div class="d-flex justify-content-between align-items-center gap-2 pt-3 border-top">
+                    <div>
+                        {% if not is_create and drawing %}
+                        <button type="button" class="btn btn-outline-danger btn-sm" onclick="if(confirm('Are you sure you want to permanently delete drawing {{ drawing.base_drawing_number }}? This will remove all associated revisions and nested components.')) { document.getElementById('deleteFormDrawing').submit(); }">
+                            <i class="fas fa-trash-alt me-1"></i> Delete Drawing
+                        </button>
+                        {% endif %}
+                    </div>
+                    <div class="d-flex gap-2">
+                        <a href="{% if is_create %}{% url 'drawings:drawing_list' %}{% else %}{% url 'drawings:drawing_detail' drawing.pk %}{% endif %}" class="btn btn-secondary px-3">
+                            Cancel
+                        </a>
+                        <button type="submit" id="saveDrawingSubmitBtn" class="btn btn-primary px-4 font-semibold" style="background-color: #2563eb; border-color: #2563eb;">
+                            <i class="fas fa-check me-1"></i> {% if is_create %}Save Drawing Project{% else %}Save Changes{% endif %}
+                        </button>
+                    </div>
                 </div>
             </form>
+            {% if not is_create and drawing %}
+            <form id="deleteFormDrawing" method="post" action="{% url 'drawings:drawing_delete' drawing.pk %}" style="display: none;">
+                {% csrf_token %}
+            </form>
+            {% endif %}
         </div>
     </div>
 </div>

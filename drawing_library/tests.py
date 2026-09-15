@@ -146,7 +146,7 @@ class DrawingLibraryTests(TestCase):
 
         resp_view = client.get(reverse("drawings:view_watermarked_pdf", args=[self.revision.pk]))
         self.assertEqual(resp_view.status_code, 200)
-        self.assertEqual(resp_view.content, self.dummy_pdf_bytes)
+        self.assertEqual(b"".join(resp_view.streaming_content), self.dummy_pdf_bytes)
 
     def test_3_level_tree_hierarchy_structure(self):
         """Verify Level 1 (Parent) -> Level 2 (Child) -> Level 3 (Grandchild) tree structure."""
@@ -679,6 +679,160 @@ class DrawingLibraryTests(TestCase):
         child_dwg = EngineeringDrawing.objects.get(base_drawing_number="FF-ENG-0500-CH1")
         self.assertEqual(child_dwg.parent, created_dwg)
         self.assertEqual(child_dwg.level, 2)
+
+    def test_delete_grandchild_drawing(self):
+        """Test deleting a Level 3 (Grandchild) drawing leaves Parent and Child intact."""
+        child = EngineeringDrawing.objects.create(
+            parent=self.drawing,
+            drawing_type="SUB_ASSEMBLY",
+            project_name=self.drawing.project_name,
+            customer_name=self.drawing.customer_name,
+            pid_reference=self.drawing.pid_reference,
+            drawing_name="Sub Assembly 1",
+            base_drawing_number="FF-DEL-CH1",
+            active_revision_number="0",
+            drafter_name="Drafter",
+            format="ZWCAD",
+            created_by=self.admin,
+        )
+        grandchild = EngineeringDrawing.objects.create(
+            parent=child,
+            drawing_type="DETAIL_PART",
+            project_name=self.drawing.project_name,
+            customer_name=self.drawing.customer_name,
+            pid_reference=self.drawing.pid_reference,
+            drawing_name="Detail Part 1",
+            base_drawing_number="FF-DEL-GC1",
+            active_revision_number="0",
+            drafter_name="Drafter",
+            format="ZWCAD",
+            created_by=self.admin,
+        )
+
+        client = Client()
+        client.force_login(self.admin)
+
+        resp = client.post(reverse("drawings:drawing_delete", args=[grandchild.pk]))
+        # Should redirect back to root drawing detail
+        self.assertRedirects(resp, reverse("drawings:drawing_detail", args=[self.drawing.pk]))
+
+        # Grandchild deleted, child and parent intact
+        self.assertFalse(EngineeringDrawing.objects.filter(pk=grandchild.pk).exists())
+        self.assertTrue(EngineeringDrawing.objects.filter(pk=child.pk).exists())
+        self.assertTrue(EngineeringDrawing.objects.filter(pk=self.drawing.pk).exists())
+
+    def test_delete_child_drawing_cascades_grandchildren(self):
+        """Test deleting a Level 2 (Child) drawing deletes its grandchildren while keeping parent intact."""
+        child = EngineeringDrawing.objects.create(
+            parent=self.drawing,
+            drawing_type="SUB_ASSEMBLY",
+            project_name=self.drawing.project_name,
+            customer_name=self.drawing.customer_name,
+            pid_reference=self.drawing.pid_reference,
+            drawing_name="Sub Assembly 2",
+            base_drawing_number="FF-DEL-CH2",
+            active_revision_number="0",
+            drafter_name="Drafter",
+            format="ZWCAD",
+            created_by=self.admin,
+        )
+        grandchild = EngineeringDrawing.objects.create(
+            parent=child,
+            drawing_type="DETAIL_PART",
+            project_name=self.drawing.project_name,
+            customer_name=self.drawing.customer_name,
+            pid_reference=self.drawing.pid_reference,
+            drawing_name="Detail Part 2",
+            base_drawing_number="FF-DEL-GC2",
+            active_revision_number="0",
+            drafter_name="Drafter",
+            format="ZWCAD",
+            created_by=self.admin,
+        )
+
+        client = Client()
+        client.force_login(self.admin)
+
+        resp = client.post(reverse("drawings:drawing_delete", args=[child.pk]))
+        self.assertRedirects(resp, reverse("drawings:drawing_detail", args=[self.drawing.pk]))
+
+        self.assertFalse(EngineeringDrawing.objects.filter(pk=child.pk).exists())
+        self.assertFalse(EngineeringDrawing.objects.filter(pk=grandchild.pk).exists())
+        self.assertTrue(EngineeringDrawing.objects.filter(pk=self.drawing.pk).exists())
+
+    def test_delete_parent_drawing_cascades_entire_branch(self):
+        """Test deleting a Level 1 (Parent) drawing deletes the entire branch and redirects to list or other parent."""
+        child = EngineeringDrawing.objects.create(
+            parent=self.drawing,
+            drawing_type="SUB_ASSEMBLY",
+            project_name=self.drawing.project_name,
+            customer_name=self.drawing.customer_name,
+            pid_reference=self.drawing.pid_reference,
+            drawing_name="Sub Assembly 3",
+            base_drawing_number="FF-DEL-CH3",
+            active_revision_number="0",
+            drafter_name="Drafter",
+            format="ZWCAD",
+            created_by=self.admin,
+        )
+        grandchild = EngineeringDrawing.objects.create(
+            parent=child,
+            drawing_type="DETAIL_PART",
+            project_name=self.drawing.project_name,
+            customer_name=self.drawing.customer_name,
+            pid_reference=self.drawing.pid_reference,
+            drawing_name="Detail Part 3",
+            base_drawing_number="FF-DEL-GC3",
+            active_revision_number="0",
+            drafter_name="Drafter",
+            format="ZWCAD",
+            created_by=self.admin,
+        )
+
+        client = Client()
+        client.force_login(self.admin)
+
+        resp = client.post(reverse("drawings:drawing_delete", args=[self.drawing.pk]))
+        self.assertRedirects(resp, reverse("drawings:drawing_list"))
+
+        self.assertFalse(EngineeringDrawing.objects.filter(pk=self.drawing.pk).exists())
+        self.assertFalse(EngineeringDrawing.objects.filter(pk=child.pk).exists())
+        self.assertFalse(EngineeringDrawing.objects.filter(pk=grandchild.pk).exists())
+
+    def test_delete_drawing_at_different_stages_and_revisions(self):
+        """Test deleting a drawing at different stages (with multiple revisions and stage notes)."""
+        rev1 = DrawingRevision.objects.create(
+            drawing=self.drawing,
+            revision_number="1",
+            drafter_name="Senior Drafter",
+            stage_change_description="HAZOP Stage Review Completed",
+            created_by=self.admin,
+        )
+        self.drawing.sync_active_revision()
+        self.assertEqual(self.drawing.active_revision_number, "1")
+
+        client = Client()
+        client.force_login(self.admin)
+
+        # First test deleting individual revision stage
+        resp_rev = client.post(reverse("drawings:revision_delete", args=[rev1.pk]))
+        self.assertRedirects(resp_rev, reverse("drawings:drawing_detail", args=[self.drawing.pk]))
+        self.assertFalse(DrawingRevision.objects.filter(pk=rev1.pk).exists())
+
+        # Then test deleting drawing itself at initial stage
+        resp_dwg = client.post(reverse("drawings:drawing_delete", args=[self.drawing.pk]))
+        self.assertRedirects(resp_dwg, reverse("drawings:drawing_list"))
+        self.assertFalse(EngineeringDrawing.objects.filter(pk=self.drawing.pk).exists())
+
+    def test_unauthorized_user_cannot_delete_drawing(self):
+        """Users without admin or edit clearance cannot delete drawings."""
+        client = Client()
+        client.force_login(self.unauthorized_user)
+
+        resp = client.post(reverse("drawings:drawing_delete", args=[self.drawing.pk]))
+        # Should be denied and drawing still exists
+        self.assertEqual(EngineeringDrawing.objects.filter(pk=self.drawing.pk).count(), 1)
+
 
 
 
