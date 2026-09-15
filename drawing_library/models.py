@@ -286,8 +286,8 @@ class DrawingRevision(models.Model):
 
 class DrawingAccess(models.Model):
     ACCESS_LEVEL_CHOICES = [
-        ("VIEW", "View Only"),
-        ("EDIT", "Edit & Upload Revisions"),
+        ("VIEW", "View & Download Only"),
+        ("EDIT", "Full Access (Create, Edit, Upload & Download)"),
     ]
 
     # If drawing is null, access applies to the entire Drawing Library

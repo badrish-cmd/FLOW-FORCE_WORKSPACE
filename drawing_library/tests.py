@@ -585,4 +585,100 @@ class DrawingLibraryTests(TestCase):
         self.assertContains(resp_tree, "FF-DET-001")
         self.assertContains(resp_tree, "Past Revisions (1)")
 
+    def test_full_access_edit_clearance_allows_create_edit_upload_download(self):
+        """
+        When an employee is given EDIT (Full Access) clearance:
+        They have full access to create drawings, edit metadata, upload revisions, and download files.
+        """
+        # Grant global EDIT ("Full Access") to engineer
+        DrawingAccess.objects.create(
+            drawing=None,
+            user=self.engineer,
+            access_level="EDIT",
+            granted_by=self.admin,
+        )
+
+        client = Client()
+        client.force_login(self.engineer)
+
+        # 1. Check list view has + New PID Project button visible
+        resp_list = client.get(reverse("drawings:drawing_list"))
+        self.assertEqual(resp_list.status_code, 200)
+        self.assertContains(resp_list, "+ New PID Project")
+        self.assertContains(resp_list, "Add Parent")
+
+        # 2. Engineer can CREATE a new drawing project
+        post_data = {
+            "customer_name": "TotalEnergies E&P",
+            "project_name": "Condensate Booster System",
+            "pid_reference": "PID-BOOST-500",
+            "drafter_name": "Design Engineer",
+            "base_drawing_number": "FF-ENG-0500",
+            "drawing_name": "Booster Skid Layout",
+            "format": "ZWCAD",
+            "initial_revision_number": "0",
+            "initial_stage_description": "First draft release",
+        }
+        resp_create = client.post(reverse("drawings:drawing_create"), post_data)
+        self.assertEqual(resp_create.status_code, 302)
+        created_dwg = EngineeringDrawing.objects.get(base_drawing_number="FF-ENG-0500")
+        self.assertEqual(created_dwg.customer_name, "TotalEnergies E&P")
+
+        # 3. Engineer can EDIT metadata
+        edit_data = {
+            "customer_name": "TotalEnergies E&P",
+            "project_name": "Condensate Booster System",
+            "pid_reference": "PID-BOOST-500",
+            "drafter_name": "Design Engineer",
+            "base_drawing_number": "FF-ENG-0500",
+            "drawing_name": "Booster Skid Layout - Finalized Name",
+            "format": "ZWCAD",
+        }
+        resp_edit = client.post(reverse("drawings:drawing_edit", args=[created_dwg.pk]), edit_data)
+        self.assertEqual(resp_edit.status_code, 302)
+        created_dwg.refresh_from_db()
+        self.assertEqual(created_dwg.drawing_name, "Booster Skid Layout - Finalized Name")
+
+        # 4. Engineer can UPLOAD revisions
+        rev_pdf = SimpleUploadedFile("booster_rev1.pdf", self.dummy_pdf_bytes, content_type="application/pdf")
+        resp_rev = client.post(
+            reverse("drawings:revision_create", args=[created_dwg.pk]),
+            {
+                "revision_number": "1",
+                "drafter_name": "Design Engineer",
+                "stage_change_description": "Approved for HAZOP",
+                "pdf_file": rev_pdf,
+            }
+        )
+        self.assertEqual(resp_rev.status_code, 302)
+        created_dwg.refresh_from_db()
+        self.assertEqual(created_dwg.active_revision_number, "1")
+
+        # 5. Engineer can DOWNLOAD PDF and CAD
+        latest_rev = created_dwg.latest_revision
+        resp_dl = client.get(reverse("drawings:download_watermarked_pdf", args=[latest_rev.pk]))
+        self.assertEqual(resp_dl.status_code, 200)
+        self.assertEqual(resp_dl["Content-Type"], "application/pdf")
+
+        # 6. Engineer can CREATE a child drawing under created_dwg
+        child_post = {
+            "customer_name": created_dwg.customer_name,
+            "project_name": created_dwg.project_name,
+            "pid_reference": created_dwg.pid_reference,
+            "drafter_name": "Design Engineer",
+            "base_drawing_number": "FF-ENG-0500-CH1",
+            "drawing_name": "Booster Piping Loop",
+            "format": "ZWCAD",
+            "parent": created_dwg.pk,
+            "drawing_type": "SUB_ASSEMBLY",
+            "initial_revision_number": "0",
+            "initial_stage_description": "Sub-assembly draft",
+        }
+        resp_child = client.post(reverse("drawings:drawing_create"), child_post)
+        self.assertEqual(resp_child.status_code, 302)
+        child_dwg = EngineeringDrawing.objects.get(base_drawing_number="FF-ENG-0500-CH1")
+        self.assertEqual(child_dwg.parent, created_dwg)
+        self.assertEqual(child_dwg.level, 2)
+
+
 

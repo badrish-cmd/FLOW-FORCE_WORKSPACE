@@ -32,6 +32,38 @@ def has_library_access(user):
     return DrawingAccess.objects.filter(user=user).exists()
 
 
+def has_library_edit_access(user):
+    """
+    Check if user has full edit/management access to the whole library.
+    - Super Admin / Admin: Always True
+    - Users with global DrawingAccess with access_level="EDIT": True
+    """
+    if not user.is_authenticated:
+        return False
+    if is_admin_or_superadmin(user):
+        return True
+    return DrawingAccess.objects.filter(drawing__isnull=True, user=user, access_level="EDIT").exists()
+
+
+def can_create_drawing(user, parent_drawing=None):
+    """
+    Check if user has permission to create drawings.
+    - Admin / Super Admin: Always True
+    - If parent_drawing is None (new Level 1 Project): User must have global library edit access.
+    - If parent_drawing is provided (Level 2 Child / Level 3 Grandchild):
+      User must have global library edit access OR EDIT access on the parent drawing tree.
+    """
+    if not user.is_authenticated:
+        return False
+    if is_admin_or_superadmin(user):
+        return True
+    if has_library_edit_access(user):
+        return True
+    if parent_drawing and has_drawing_access(user, parent_drawing, required_level="EDIT"):
+        return True
+    return False
+
+
 def get_accessible_drawings(user):
     """
     Return queryset of drawings accessible to the user.

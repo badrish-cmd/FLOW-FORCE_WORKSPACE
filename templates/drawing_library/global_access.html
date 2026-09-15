@@ -338,8 +338,8 @@
                                     <label class="form-label font-bold text-xs text-slate-600 uppercase">Access Clearance Level <span class="text-danger">*</span></label>
                                     {{ form.access_level }}
                                     <div class="form-text text-xs mt-1">
-                                        <strong>View Only:</strong> View drawing metadata, preview and download watermarked PDFs.<br>
-                                        <strong>Edit & Upload:</strong> Upload new revisions, attach native files, and edit metadata.
+                                        <strong>View & Download Only:</strong> View drawing metadata, preview and download clean PDFs and native CAD files.<br>
+                                        <strong>Full Access (Create, Edit, Upload & Download):</strong> Full access across the library to create new PID projects, add sub-assemblies and detail parts, upload revisions, edit drawing metadata, and download files.
                                     </div>
                                 </div>
 
@@ -439,6 +439,9 @@
                     <div class="mb-3">
                         <label class="form-label font-bold text-xs text-slate-600 uppercase">Clearance Level</label>
                         {{ form.access_level }}
+                        <div class="form-text text-xs mt-1">
+                            Selecting <strong>Full Access</strong> grants permission to create, edit, upload revisions, and download all drawings.
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer bg-light rounded-bottom-4">

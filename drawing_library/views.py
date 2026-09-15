@@ -20,6 +20,8 @@ from .permissions import (
     is_admin_or_superadmin,
     can_manage_drawing_access,
     has_library_access,
+    has_library_edit_access,
+    can_create_drawing,
     get_accessible_drawings,
     has_drawing_access,
     drawing_library_access_required,
@@ -99,6 +101,7 @@ def drawing_list(request):
     total_revisions = DrawingRevision.objects.filter(drawing__in=accessible_drawings).count()
 
     is_admin = is_admin_or_superadmin(user)
+    can_create = is_admin or has_library_edit_access(user)
 
     context = {
         "pid_groups": sorted_pids,
@@ -107,6 +110,7 @@ def drawing_list(request):
         "total_revisions": total_revisions,
         "search_query": q,
         "is_admin": is_admin,
+        "can_create": can_create,
     }
     return render(request, "drawing_library/drawing_list.html", context)
 
@@ -175,8 +179,16 @@ def drawing_detail(request, pk):
 
 @drawing_library_access_required
 def drawing_create(request):
-    if not is_admin_or_superadmin(request.user):
-        messages.error(request, "Only Admins and Super Admins can create new drawing projects.")
+    parent_id = request.GET.get("parent_id") or request.POST.get("parent")
+    parent_drawing = None
+    if parent_id:
+        try:
+            parent_drawing = EngineeringDrawing.objects.get(pk=parent_id)
+        except (EngineeringDrawing.DoesNotExist, ValueError):
+            parent_drawing = None
+
+    if not can_create_drawing(request.user, parent_drawing):
+        messages.error(request, "Access Denied: You do not have permission to create drawings here.")
         return redirect("drawings:drawing_list")
 
     # Existing PIDs list for easy autocomplete / datalist
@@ -185,14 +197,6 @@ def drawing_create(request):
         .distinct()
         .order_by("pid_reference")
     )
-
-    parent_id = request.GET.get("parent_id") or request.POST.get("parent")
-    parent_drawing = None
-    if parent_id:
-        try:
-            parent_drawing = EngineeringDrawing.objects.get(pk=parent_id)
-        except (EngineeringDrawing.DoesNotExist, ValueError):
-            parent_drawing = None
 
     if request.method == "POST":
         post_data = request.POST.copy()
