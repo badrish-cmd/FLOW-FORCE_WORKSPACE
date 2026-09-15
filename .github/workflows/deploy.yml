@@ -41,14 +41,7 @@ jobs:
 
             # Configure Nginx for large DWG & PDF uploads (up to 500MB)
             echo "Configuring Nginx upload limits and timeouts..."
-            sudo bash -c 'cat << "EOF" > /etc/nginx/conf.d/upload_limits.conf
-client_max_body_size 500M;
-client_body_timeout 300s;
-proxy_read_timeout 300s;
-proxy_connect_timeout 300s;
-proxy_send_timeout 300s;
-EOF'
-            # Also update client_max_body_size in sites-available / sites-enabled if explicitly defined
+            sudo bash -c 'printf "client_max_body_size 500M;\nclient_body_timeout 300s;\nproxy_read_timeout 300s;\nproxy_connect_timeout 300s;\nproxy_send_timeout 300s;\n" > /etc/nginx/conf.d/upload_limits.conf'
             sudo sed -i 's/client_max_body_size [^;]*;/client_max_body_size 500M;/g' /etc/nginx/sites-enabled/* 2>/dev/null || true
             sudo sed -i 's/client_max_body_size [^;]*;/client_max_body_size 500M;/g' /etc/nginx/sites-available/* 2>/dev/null || true
 
