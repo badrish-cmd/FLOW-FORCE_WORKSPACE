@@ -337,10 +337,54 @@ def drawing_edit(request, pk):
         messages.error(request, "Access Denied: You do not have permission to edit this drawing.")
         return redirect("drawings:drawing_detail", pk=pk)
 
+    existing_pids = list(
+        EngineeringDrawing.objects.values_list("pid_reference", flat=True)
+        .distinct()
+        .order_by("pid_reference")
+    )
+
     if request.method == "POST":
-        form = EngineeringDrawingForm(request.POST, instance=drawing)
+        form = EngineeringDrawingForm(request.POST, request.FILES, instance=drawing)
         if form.is_valid():
             form.save()
+
+            # Handle optional revision files attached during drawing edit
+            init_rev = form.cleaned_data.get("initial_revision_number") or drawing.active_revision_number
+            init_desc = form.cleaned_data.get("initial_stage_description") or "Updated via Edit Form"
+            init_native = form.cleaned_data.get("initial_native_file")
+            init_pdf = form.cleaned_data.get("initial_pdf_file")
+
+            if init_native or init_pdf:
+                latest = drawing.latest_revision
+                if latest and not latest.native_file and not latest.pdf_file:
+                    if init_native:
+                        latest.native_file = init_native
+                        latest.original_native_filename = os.path.basename(init_native.name)
+                    if init_pdf:
+                        latest.pdf_file = init_pdf
+                        latest.original_pdf_filename = os.path.basename(init_pdf.name)
+                    if init_rev:
+                        latest.revision_number = init_rev
+                    if init_desc:
+                        latest.stage_change_description = init_desc
+                    latest.save()
+                    drawing.sync_active_revision()
+                else:
+                    rev_num = init_rev if (init_rev and (not latest or init_rev != latest.revision_number)) else (
+                        str(int(drawing.active_revision_number) + 1) if drawing.active_revision_number.isdigit() else f"{drawing.active_revision_number}.1"
+                    )
+                    rev = DrawingRevision.objects.create(
+                        drawing=drawing,
+                        revision_number=rev_num,
+                        stage_change_description=init_desc,
+                        native_file=init_native,
+                        pdf_file=init_pdf,
+                        original_pdf_filename=os.path.basename(init_pdf.name) if init_pdf else "",
+                        original_native_filename=os.path.basename(init_native.name) if init_native else "",
+                        drafter_name=drawing.drafter_name,
+                        created_by=request.user,
+                    )
+                    drawing.sync_active_revision()
 
             log_drawing_activity(
                 user=request.user,
@@ -353,11 +397,17 @@ def drawing_edit(request, pk):
             messages.success(request, f"Drawing '{drawing.base_drawing_number}' updated successfully.")
             return redirect("drawings:drawing_detail", pk=drawing.pk)
     else:
-        form = EngineeringDrawingForm(instance=drawing)
+        latest_rev = drawing.latest_revision
+        initial_data = {
+            "initial_revision_number": drawing.active_revision_number,
+            "initial_stage_description": latest_rev.stage_change_description if latest_rev else "Initial Release",
+        }
+        form = EngineeringDrawingForm(instance=drawing, initial=initial_data)
 
     return render(request, "drawing_library/drawing_form.html", {
         "form": form,
         "drawing": drawing,
+        "existing_pids": existing_pids,
         "title": f"Edit Drawing - {drawing.base_drawing_number}",
         "is_create": False,
     })

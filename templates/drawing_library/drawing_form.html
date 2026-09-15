@@ -194,10 +194,19 @@
                         <!-- File Upload Section: PDF and CAD (ZWCAD / Any Form) -->
                         <div class="col-md-6">
                             <div class="p-3 bg-light rounded-3 border">
-                                <label class="form-label font-bold text-xs text-slate-800 uppercase d-flex align-items-center gap-1">
-                                    <i class="fas fa-file-pdf text-danger"></i> PDF Drawing File
-                                </label>
+                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                    <label class="form-label font-bold text-xs text-slate-800 uppercase d-flex align-items-center gap-1 mb-0">
+                                        <i class="fas fa-file-pdf text-danger"></i> PDF Drawing File
+                                    </label>
+                                    <span class="badge bg-slate-200 text-slate-700 text-xs">Up to 500MB</span>
+                                </div>
                                 {{ form.initial_pdf_file }}
+                                {% if not is_create and drawing.latest_revision and drawing.latest_revision.pdf_file %}
+                                <div class="mt-2 text-xs text-slate-600 bg-white p-2 rounded border d-flex align-items-center gap-2">
+                                    <i class="fas fa-check-circle text-success"></i>
+                                    <span class="text-truncate">Current: <strong class="font-mono">{{ drawing.latest_revision.expected_pdf_filename }}</strong></span>
+                                </div>
+                                {% endif %}
                                 <div class="form-text text-xs text-slate-500 mt-1">
                                     Clean PDF without watermarks. Retains original uploaded filename.
                                 </div>
@@ -206,10 +215,19 @@
 
                         <div class="col-md-6">
                             <div class="p-3 bg-light rounded-3 border">
-                                <label class="form-label font-bold text-xs text-slate-800 uppercase d-flex align-items-center gap-1">
-                                    <i class="fas fa-file-code text-blue-600"></i> CAD Source File (ZWCAD, DWG, etc.)
-                                </label>
+                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                    <label class="form-label font-bold text-xs text-slate-800 uppercase d-flex align-items-center gap-1 mb-0">
+                                        <i class="fas fa-file-code text-blue-600"></i> CAD Source File (ZWCAD, DWG, etc.)
+                                    </label>
+                                    <span class="badge bg-slate-200 text-slate-700 text-xs">Up to 500MB</span>
+                                </div>
                                 {{ form.initial_native_file }}
+                                {% if not is_create and drawing.latest_revision and drawing.latest_revision.native_file %}
+                                <div class="mt-2 text-xs text-slate-600 bg-white p-2 rounded border d-flex align-items-center gap-2">
+                                    <i class="fas fa-check-circle text-success"></i>
+                                    <span class="text-truncate">Current: <strong class="font-mono">{{ drawing.latest_revision.expected_native_filename }}</strong></span>
+                                </div>
+                                {% endif %}
                                 <div class="form-text text-xs text-slate-500 mt-1">
                                     Native working file in ZWCAD, SolidWorks, AutoCAD, or any CAD format.
                                 </div>
@@ -218,11 +236,18 @@
                     </div>
                 </div>
 
+                <div id="uploadProgressNotice" class="alert alert-primary py-2 px-3 mb-3 rounded-3 d-none align-items-center gap-2 text-xs">
+                    <i class="fas fa-spinner fa-spin fa-lg text-primary"></i>
+                    <div>
+                        <strong>Uploading engineering drawing files...</strong> Please do not close or reload this window.
+                    </div>
+                </div>
+
                 <div class="d-flex justify-content-end gap-2 pt-3 border-top">
                     <a href="{% if is_create %}{% url 'drawings:drawing_list' %}{% else %}{% url 'drawings:drawing_detail' drawing.pk %}{% endif %}" class="btn btn-secondary px-3">
                         Cancel
                     </a>
-                    <button type="submit" class="btn btn-primary px-4 font-semibold" style="background-color: #2563eb; border-color: #2563eb;">
+                    <button type="submit" id="saveDrawingSubmitBtn" class="btn btn-primary px-4 font-semibold" style="background-color: #2563eb; border-color: #2563eb;">
                         <i class="fas fa-check me-1"></i> {% if is_create %}Save Drawing Project{% else %}Save Changes{% endif %}
                     </button>
                 </div>
@@ -230,4 +255,32 @@
         </div>
     </div>
 </div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        var form = document.querySelector("form");
+        var submitBtn = document.getElementById("saveDrawingSubmitBtn");
+        var progressNotice = document.getElementById("uploadProgressNotice");
+
+        if (form && submitBtn) {
+            form.addEventListener("submit", function() {
+                var pdfInput = document.querySelector('input[name="initial_pdf_file"]');
+                var cadInput = document.querySelector('input[name="initial_native_file"]');
+                var hasFiles = (pdfInput && pdfInput.files && pdfInput.files.length > 0) ||
+                               (cadInput && cadInput.files && cadInput.files.length > 0);
+
+                submitBtn.disabled = true;
+                if (hasFiles) {
+                    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Uploading Files...';
+                    if (progressNotice) {
+                        progressNotice.classList.remove("d-none");
+                        progressNotice.classList.add("d-flex");
+                    }
+                } else {
+                    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Saving...';
+                }
+            });
+        }
+    });
+</script>
 {% endblock %}

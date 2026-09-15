@@ -228,6 +228,14 @@ CSRF_TRUSTED_ORIGINS = [
     'https://www.flowforceworkspace.cloud',
 ]
 
+# --------------------------------------------------
+# FILE UPLOAD LIMITS
+# --------------------------------------------------
+# Allow large CAD drawings (DWG, DXF, ZWCAD) and high-resolution PDFs up to 500MB
+DATA_UPLOAD_MAX_MEMORY_SIZE = 524288000  # 500 MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 524288000  # 500 MB
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 10000
+
 SITE_URL = os.getenv('SITE_URL', 'https://flowforceworkspace.cloud')
 
 # --------------------------------------------------
