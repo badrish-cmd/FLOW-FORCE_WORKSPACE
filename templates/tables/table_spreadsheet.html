@@ -148,9 +148,23 @@
                 </div>
                 {% endif %}
 
-                <!-- Primary: Add Column (Strongest Action) -->
-                <button @click="openColumnModal" class="h-9 inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg px-3.5 shadow-sm hover:shadow transition-all">
-                    <i class="fas fa-plus text-xs"></i> Add Column
+                <!-- Primary: Add Record / Add PID via Line-Below-Line Drawer -->
+                {% if has_edit_access %}
+                <button @click="openRecordDrawer('CREATE')" 
+                        class="h-9 inline-flex items-center gap-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-800 text-white text-xs font-bold rounded-lg px-4 shadow-sm hover:shadow-md transition-all transform hover:-translate-y-0.5"
+                        title="Open Line-Below-Line Form Drawer">
+                    <i class="fas fa-plus-circle text-xs"></i>
+                    {% if table.job_type == 'LIST_PID' %}
+                        <span>+ Add PID Record</span>
+                    {% else %}
+                        <span>+ Add Record</span>
+                    {% endif %}
+                </button>
+                {% endif %}
+
+                <!-- Secondary: Add Column -->
+                <button @click="openColumnModal" class="h-9 inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 hover:border-slate-300 text-xs font-semibold rounded-lg px-3.5 shadow-sm hover:shadow transition-all">
+                    <i class="fas fa-columns text-slate-400 text-xs"></i> Add Column
                 </button>
             </div>
         </div>
@@ -701,7 +715,7 @@
                                       isCellDragged(row.id, {{ col.id }}) ? 'bg-blue-50 border-2 border-blue-400' : '',
                                       isMultilineColumn('{{ col.name }}') ? 'min-w-[260px] whitespace-normal' : 'whitespace-nowrap'
                                   ]"
-                                  @dblclick="if (rowEditingRowId !== row.id) editCell(row.id, {{ col.id }}, getCellValue(row, '{{ col.name }}'), '{{ col.data_type }}')">
+                                  @dblclick="if (rowEditingRowId !== row.id) { openRecordDrawer('VIEW', row); }">
                                   
                                   <!-- Row-Level Editing Inputs -->
                                   <div x-show="rowEditingRowId === row.id" class="p-1">
@@ -747,15 +761,40 @@
                                       <div x-show="editingRowId !== row.id || editingColumnId !== {{ col.id }}"
                                            class="px-4 py-3 min-h-[40px] flex items-center justify-between cursor-pointer">
                                            
-                                           <!-- Display Status Badge or simple text -->
+                                           <!-- Display Status Badge, Code Pill, or formatted text -->
                                            <template x-if="'{{ col.name }}' === 'S_NO'">
-                                               <span class="font-medium" x-text="getCellValue(row, '{{ col.name }}')"></span>
+                                               <span class="font-bold text-slate-500 text-xs" x-text="getCellValue(row, '{{ col.name }}')"></span>
+                                           </template>
+                                           <template x-if="'{{ col.name }}' === 'PID' || '{{ col.name }}' === 'NEW_PID_NO'">
+                                               <span class="inline-flex items-center font-mono font-bold text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200/80 shadow-2xs" x-text="getCellValue(row, '{{ col.name }}') || '-'"></span>
+                                           </template>
+                                           <template x-if="'{{ col.name }}' === 'STATUS'">
+                                               <div>
+                                                   <template x-if="getCellValue(row, 'STATUS')">
+                                                       <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold shadow-2xs"
+                                                             :class="{
+                                                                 'bg-emerald-100 text-emerald-800 border border-emerald-200': String(getCellValue(row, 'STATUS')).toUpperCase().includes('COMPLET') || String(getCellValue(row, 'STATUS')).toUpperCase().includes('RETURNED') || String(getCellValue(row, 'STATUS')).toUpperCase().includes('APPROV'),
+                                                                 'bg-amber-100 text-amber-800 border border-amber-200': String(getCellValue(row, 'STATUS')).toUpperCase().includes('PENDING') || String(getCellValue(row, 'STATUS')).toUpperCase().includes('WAIT'),
+                                                                 'bg-blue-100 text-blue-800 border border-blue-200': String(getCellValue(row, 'STATUS')).toUpperCase().includes('PROGRESS') || String(getCellValue(row, 'STATUS')).toUpperCase().includes('REVIEW'),
+                                                                 'bg-rose-100 text-rose-800 border border-rose-200': String(getCellValue(row, 'STATUS')).toUpperCase().includes('HOLD') || String(getCellValue(row, 'STATUS')).toUpperCase().includes('CANCEL'),
+                                                                 'bg-slate-100 text-slate-700 border border-slate-200': !String(getCellValue(row, 'STATUS')).toUpperCase().includes('COMPLET') && !String(getCellValue(row, 'STATUS')).toUpperCase().includes('PENDING') && !String(getCellValue(row, 'STATUS')).toUpperCase().includes('PROGRESS')
+                                                             }"
+                                                             x-text="getCellValue(row, 'STATUS')">
+                                                       </span>
+                                                   </template>
+                                                   <template x-if="!getCellValue(row, 'STATUS')">
+                                                       <span class="text-slate-400 italic text-xs">-</span>
+                                                   </template>
+                                               </div>
+                                           </template>
+                                           <template x-if="'{{ col.name }}' === 'COMPANY_NAME'">
+                                               <span class="font-bold text-slate-900" x-text="getCellValue(row, '{{ col.name }}') || '-'"></span>
                                            </template>
                                            <template x-if="'{{ col.name }}' === 'TASK_NAME' || '{{ col.name }}' === 'CUSTOMER_NAME' || '{{ col.name }}' === 'TOOL_NAME'">
-                                               <span class="font-semibold" x-text="getCellValue(row, '{{ col.name }}')"></span>
+                                               <span class="font-semibold text-slate-800" x-text="getCellValue(row, '{{ col.name }}')"></span>
                                            </template>
-                                           <template x-if="'{{ col.name }}' === 'DUE_DATE' || '{{ col.name }}' === 'FOLLOW_UP_DATE' || '{{ col.name }}' === 'RETURN_DATE'">
-                                               <span :class="isCellOverdue(row, {name: '{{ col.name }}', data_type: '{{ col.data_type }}'}) ? 'text-red-600 font-bold' : ''" x-text="getCellValue(row, '{{ col.name }}')"></span>
+                                           <template x-if="'{{ col.name }}' === 'DUE_DATE' || '{{ col.name }}' === 'FOLLOW_UP_DATE' || '{{ col.name }}' === 'RETURN_DATE' || '{{ col.name }}' === 'DUE_DATE_FLOW_FORCE' || '{{ col.name }}' === 'DUE_DATE_CUSTOMER'">
+                                               <span :class="isCellOverdue(row, {name: '{{ col.name }}', data_type: '{{ col.data_type }}'}) ? 'text-red-600 font-bold bg-red-50 px-1.5 py-0.5 rounded border border-red-200' : 'text-slate-700'" x-text="getCellValue(row, '{{ col.name }}') || '-'"></span>
                                            </template>
                                            <template x-if="isMultilineColumn('{{ col.name }}')">
                                                <span class="whitespace-pre-wrap break-words text-xs text-gray-800 leading-relaxed block py-1" x-text="getCellValue(row, '{{ col.name }}') || '-'"></span>
@@ -823,28 +862,21 @@
                             {% endfor %}
                             
                             <!-- Action buttons -->
-                            <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500 flex gap-2 items-center">
+                            <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500 flex gap-1.5 items-center">
+                                <!-- Inspect Full Record in Slide-Over Drawer -->
+                                <button @click="openRecordDrawer('VIEW', row)" class="text-slate-500 hover:text-blue-600 p-1.5 rounded-lg hover:bg-blue-50 transition-colors" title="View Full Record (Vertical Details Sheet)">
+                                    <i class="fas fa-eye text-base"></i>
+                                </button>
+
                                 {% if has_edit_access %}
-                                <!-- Edit/Save Row Actions -->
-                                <template x-if="rowEditingRowId !== row.id">
-                                    <button @click="startRowEdit(row)" class="text-amber-500 hover:text-amber-700 font-medium" title="Edit Row">
-                                        <i class="fas fa-edit text-lg"></i>
-                                    </button>
-                                </template>
-                                <template x-if="rowEditingRowId === row.id">
-                                    <div class="flex gap-1.5 items-center">
-                                        <button @click="saveRowEdit" class="text-emerald-600 hover:text-emerald-800" title="Save Row">
-                                            <i class="fas fa-check-circle text-lg"></i>
-                                        </button>
-                                        <button @click="cancelRowEdit" class="text-gray-400 hover:text-gray-600" title="Cancel Edit">
-                                            <i class="fas fa-times-circle text-lg"></i>
-                                        </button>
-                                    </div>
-                                </template>
+                                <!-- Edit in Vertical Line-Below-Line Drawer -->
+                                <button @click="openRecordDrawer('EDIT', row)" class="text-amber-500 hover:text-amber-700 p-1.5 rounded-lg hover:bg-amber-50 transition-colors" title="Edit in Vertical Form (Line-Below-Line)">
+                                    <i class="fas fa-edit text-base"></i>
+                                </button>
                                 {% endif %}
 
-                                <button @click="openTaskModal(row)" class="text-blue-600 hover:text-blue-900" title="Task & Comments">
-                                    <i class="fas fa-comment-dots text-lg"></i>
+                                <button @click="openTaskModal(row)" class="text-blue-600 hover:text-blue-900 p-1.5 rounded-lg hover:bg-blue-50 transition-colors" title="Task & Comments">
+                                    <i class="fas fa-comment-dots text-base"></i>
                                 </button>
                                 <template x-if="row.task_details">
                                     <button @click="toggleTaskCompletion(row.task_details.id, row.task_details.status)" 
@@ -1508,13 +1540,657 @@
                 </div>
             </div>
         </div>
-    </template>  </div>
+    </template>
+
+    <!-- Slide-Over Record Drawer (Option A: Vertical Line-Below-Line Form & Inspector) -->
+    <template x-teleport="body">
+        <div x-show="isRecordDrawerOpen" 
+             class="fixed inset-0 z-50 flex justify-end bg-slate-900/50 backdrop-blur-sm" 
+             style="display: none;" 
+             x-transition:enter="transition ease-out duration-300"
+             x-transition:enter-start="opacity-0"
+             x-transition:enter-end="opacity-100"
+             x-transition:leave="transition ease-in duration-200"
+             x-transition:leave-start="opacity-100"
+             x-transition:leave-end="opacity-0"
+             @keydown.window.escape="if (isRecordDrawerOpen) closeRecordDrawer()"
+             @keydown.window.ctrl.enter="if (isRecordDrawerOpen && recordDrawerMode !== 'VIEW') saveRecordDrawer()">
+             
+            <div id="recordDrawerContainer"
+                 class="bg-slate-50 w-full max-w-xl sm:max-w-2xl h-full shadow-2xl flex flex-col border-l border-slate-200 relative overflow-hidden" 
+                 @click.away="closeRecordDrawer()" 
+                 x-transition:enter="transition ease-out duration-300 transform" 
+                 x-transition:enter-start="translate-x-full" 
+                 x-transition:enter-end="translate-x-0" 
+                 x-transition:leave="transition ease-in duration-200 transform" 
+                 x-transition:leave-start="translate-x-0" 
+                 x-transition:leave-end="translate-x-full">
+                
+                <!-- Drawer Header -->
+                <div class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shrink-0 shadow-sm z-10">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-white shadow-sm"
+                             :class="{
+                                 'bg-gradient-to-tr from-blue-600 to-indigo-600': recordDrawerMode === 'CREATE',
+                                 'bg-gradient-to-tr from-amber-500 to-orange-500': recordDrawerMode === 'EDIT',
+                                 'bg-gradient-to-tr from-emerald-600 to-teal-600': recordDrawerMode === 'VIEW'
+                             }">
+                            <i :class="{
+                                'fas fa-plus': recordDrawerMode === 'CREATE',
+                                'fas fa-edit': recordDrawerMode === 'EDIT',
+                                'fas fa-id-card': recordDrawerMode === 'VIEW'
+                            }" class="text-base"></i>
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <h3 class="text-base font-extrabold text-slate-900 tracking-tight"
+                                    x-text="recordDrawerMode === 'CREATE' ? ('{{ table.job_type }}' === 'LIST_PID' ? 'Add New PID Project Record' : 'Add New Record') : (recordDrawerMode === 'EDIT' ? ('{{ table.job_type }}' === 'LIST_PID' ? 'Edit PID Record' : 'Edit Record') : ('{{ table.job_type }}' === 'LIST_PID' ? 'PID Record Inspector' : 'Record Details'))">
+                                </h3>
+                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
+                                      :class="{
+                                          'bg-blue-100 text-blue-800 border border-blue-200': recordDrawerMode === 'CREATE',
+                                          'bg-amber-100 text-amber-800 border border-amber-200': recordDrawerMode === 'EDIT',
+                                          'bg-emerald-100 text-emerald-800 border border-emerald-200': recordDrawerMode === 'VIEW'
+                                      }"
+                                      x-text="recordDrawerMode === 'CREATE' ? 'New Entry' : (recordDrawerMode === 'EDIT' ? 'Editing' : 'Full Overview')">
+                                </span>
+                            </div>
+                            <p class="text-xs text-slate-500 font-medium mt-0.5">
+                                <span x-show="recordDrawerMode !== 'VIEW'">Vertical line-below-line layout with clear field organization.</span>
+                                <span x-show="recordDrawerMode === 'VIEW'">High readability vertical summary of all project details.</span>
+                            </p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <template x-if="recordDrawerMode === 'VIEW' && {{ has_edit_access|yesno:'true,false' }}">
+                            <button @click="recordDrawerMode = 'EDIT'" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold transition-all shadow-sm">
+                                <i class="fas fa-pencil-alt text-[10px]"></i> Edit Record
+                            </button>
+                        </template>
+                        <template x-if="recordDrawerMode === 'EDIT' && activeDrawerRow">
+                            <button @click="recordDrawerMode = 'VIEW'" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg text-xs font-bold transition-all shadow-sm">
+                                <i class="fas fa-eye text-[10px]"></i> View Details
+                            </button>
+                        </template>
+                        <button @click="closeRecordDrawer()" class="text-slate-400 hover:text-slate-700 p-2 hover:bg-slate-100 rounded-lg transition-colors" title="Close Drawer (Esc)">
+                            <i class="fas fa-times text-sm"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Toast notification inside drawer for copy actions -->
+                <div x-show="drawerCopyNotice" x-transition class="bg-slate-800 text-white text-xs px-4 py-2 mx-6 mt-3 rounded-lg flex items-center justify-between shadow-md">
+                    <span class="flex items-center gap-2">
+                        <i class="fas fa-check-circle text-emerald-400"></i>
+                        <span x-text="drawerCopyNotice"></span>
+                    </span>
+                    <button @click="drawerCopyNotice = ''" class="text-slate-400 hover:text-white"><i class="fas fa-times text-xs"></i></button>
+                </div>
+
+                <!-- Drawer Scrollable Content -->
+                <div class="flex-grow overflow-y-auto p-6 space-y-6 scrollbar-thin">
+                    
+                    <!-- ============================================== -->
+                    <!-- CASE A: LIST_PID SPECIFIC OPTIMIZED UI -->
+                    <!-- ============================================== -->
+                    <template x-if="'{{ table.job_type }}' === 'LIST_PID'">
+                        <div class="space-y-6">
+                            
+                            <!-- SECTION 1: PID & Project Identification -->
+                            <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+                                <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
+                                    <div class="flex items-center gap-2">
+                                        <div class="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center text-xs">
+                                            <i class="fas fa-project-diagram"></i>
+                                        </div>
+                                        <h4 class="text-xs font-extrabold uppercase tracking-wider text-slate-800">1. PID & Project Identification</h4>
+                                    </div>
+                                    <span class="text-[10px] text-slate-400 font-semibold">Core Identification</span>
+                                </div>
+
+                                <div class="space-y-4">
+                                    <!-- Field: Enquiry No / Quotation No -->
+                                    <div class="space-y-1">
+                                        <div class="flex items-center justify-between">
+                                            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide">
+                                                Enquiry No / Quotation No <span class="text-rose-500">*</span>
+                                            </label>
+                                            <span x-show="recordDrawerMode === 'VIEW' && getDrawerFormValue('ENQUIRY_NO/QUOTATION_NO')" 
+                                                  @click="copyDrawerText(getDrawerFormValue('ENQUIRY_NO/QUOTATION_NO'), 'Enquiry No copied!')"
+                                                  class="text-[10px] text-blue-600 hover:text-blue-800 font-bold cursor-pointer flex items-center gap-1">
+                                                <i class="fas fa-copy"></i> Copy
+                                            </span>
+                                        </div>
+                                        <template x-if="recordDrawerMode !== 'VIEW'">
+                                            <div>
+                                                <input type="text" 
+                                                       x-model="recordFormValues['ENQUIRY_NO/QUOTATION_NO']"
+                                                       @input="recordFormValues['ENQUIRY_NO'] = $event.target.value"
+                                                       placeholder="e.g. ENQ-2026-089 or QUOT-9021" 
+                                                       :class="recordDrawerErrors['ENQUIRY_NO/QUOTATION_NO'] ? 'border-rose-400 focus:ring-rose-500/20' : 'border-slate-300 focus:ring-blue-500/20 focus:border-blue-600'"
+                                                       class="w-full bg-white border rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 shadow-sm transition-all">
+                                                <p x-show="recordDrawerErrors['ENQUIRY_NO/QUOTATION_NO']" class="text-xs text-rose-500 font-semibold mt-1" x-text="recordDrawerErrors['ENQUIRY_NO/QUOTATION_NO']"></p>
+                                            </div>
+                                        </template>
+                                        <template x-if="recordDrawerMode === 'VIEW'">
+                                            <div class="bg-slate-50 border border-slate-200/80 rounded-lg px-3.5 py-2 text-sm font-bold text-slate-800"
+                                                 x-text="getDrawerFormValue('ENQUIRY_NO/QUOTATION_NO') || '-'">
+                                            </div>
+                                        </template>
+                                    </div>
+
+                                    <!-- Grid for PID and NEW_PID_NO -->
+                                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <!-- Field: PID Reference -->
+                                        <div class="space-y-1">
+                                            <div class="flex items-center justify-between">
+                                                <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide">
+                                                    PID Reference Code
+                                                </label>
+                                                <span x-show="recordDrawerMode === 'VIEW' && getDrawerFormValue('PID')" 
+                                                      @click="copyDrawerText(getDrawerFormValue('PID'), 'PID Reference copied!')"
+                                                      class="text-[10px] text-blue-600 hover:text-blue-800 font-bold cursor-pointer flex items-center gap-1">
+                                                    <i class="fas fa-copy"></i> Copy
+                                                </span>
+                                            </div>
+                                            <template x-if="recordDrawerMode !== 'VIEW'">
+                                                <input type="text" 
+                                                       x-model="recordFormValues['PID']" 
+                                                       placeholder="e.g. PID-4402" 
+                                                       class="w-full bg-blue-50/40 border border-blue-300 focus:border-blue-600 rounded-lg px-3.5 py-2 text-sm font-bold text-blue-900 placeholder-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm transition-all">
+                                            </template>
+                                            <template x-if="recordDrawerMode === 'VIEW'">
+                                                <div class="bg-blue-50 border border-blue-200 rounded-lg px-3.5 py-2 text-sm font-mono font-bold text-blue-800"
+                                                     x-text="getDrawerFormValue('PID') || '-'">
+                                                </div>
+                                            </template>
+                                        </div>
+
+                                        <!-- Field: New PID No -->
+                                        <div class="space-y-1">
+                                            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide">
+                                                New PID No (Revision)
+                                            </label>
+                                            <template x-if="recordDrawerMode !== 'VIEW'">
+                                                <input type="text" 
+                                                       x-model="recordFormValues['NEW_PID_NO']" 
+                                                       placeholder="e.g. PID-4402-R1" 
+                                                       class="w-full bg-white border border-slate-300 focus:border-blue-600 rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm transition-all">
+                                            </template>
+                                            <template x-if="recordDrawerMode === 'VIEW'">
+                                                <div class="bg-slate-50 border border-slate-200/80 rounded-lg px-3.5 py-2 text-sm font-mono font-semibold text-slate-800"
+                                                     x-text="getDrawerFormValue('NEW_PID_NO') || '-'">
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </div>
+
+                                    <!-- Field: Project -->
+                                    <div class="space-y-1">
+                                        <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide">
+                                            Project Name
+                                        </label>
+                                        <template x-if="recordDrawerMode !== 'VIEW'">
+                                            <input type="text" 
+                                                   x-model="recordFormValues['PROJECT']" 
+                                                   placeholder="e.g. Phase 2 Water Treatment Plant / Skid Unit" 
+                                                   class="w-full bg-white border border-slate-300 focus:border-blue-600 rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm transition-all">
+                                        </template>
+                                        <template x-if="recordDrawerMode === 'VIEW'">
+                                            <div class="bg-slate-50 border border-slate-200/80 rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800"
+                                                 x-text="getDrawerFormValue('PROJECT') || '-'">
+                                            </div>
+                                        </template>
+                                    </div>
+
+                                    <!-- Field: Description -->
+                                    <div class="space-y-1">
+                                        <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide">
+                                            Description / Scope of Work
+                                        </label>
+                                        <template x-if="recordDrawerMode !== 'VIEW'">
+                                            <textarea x-model="recordFormValues['DESCRIPTION']" 
+                                                      rows="3" 
+                                                      placeholder="Enter detailed technical description, piping specifications, notes..." 
+                                                      class="w-full bg-white border border-slate-300 focus:border-blue-600 rounded-lg p-3 text-sm font-normal text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm resize-y leading-relaxed transition-all min-h-[75px]"></textarea>
+                                        </template>
+                                        <template x-if="recordDrawerMode === 'VIEW'">
+                                            <div class="bg-slate-50 border border-slate-200/80 rounded-lg p-3 text-sm font-normal text-slate-800 whitespace-pre-wrap leading-relaxed min-h-[60px]"
+                                                 x-text="getDrawerFormValue('DESCRIPTION') || 'No description provided.'">
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- SECTION 2: Client & Commercial Details -->
+                            <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+                                <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
+                                    <div class="flex items-center gap-2">
+                                        <div class="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center text-xs">
+                                            <i class="fas fa-building"></i>
+                                        </div>
+                                        <h4 class="text-xs font-extrabold uppercase tracking-wider text-slate-800">2. Client & Commercial Details</h4>
+                                    </div>
+                                    <span class="text-[10px] text-slate-400 font-semibold">Orders & Quantities</span>
+                                </div>
+
+                                <div class="space-y-4">
+                                    <!-- Field: Company Name -->
+                                    <div class="space-y-1">
+                                        <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide">
+                                            Company / Customer Name
+                                        </label>
+                                        <template x-if="recordDrawerMode !== 'VIEW'">
+                                            <input type="text" 
+                                                   x-model="recordFormValues['COMPANY_NAME']" 
+                                                   placeholder="e.g. Shell Singapore / ExxonMobil / Petrochem Ltd" 
+                                                   class="w-full bg-white border border-slate-300 focus:border-blue-600 rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm transition-all">
+                                        </template>
+                                        <template x-if="recordDrawerMode === 'VIEW'">
+                                            <div class="bg-slate-50 border border-slate-200/80 rounded-lg px-3.5 py-2 text-sm font-bold text-slate-900"
+                                                 x-text="getDrawerFormValue('COMPANY_NAME') || '-'">
+                                            </div>
+                                        </template>
+                                    </div>
+
+                                    <!-- Grid for Sales Order and PO -->
+                                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <!-- Field: Sales Order -->
+                                        <div class="space-y-1">
+                                            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide">
+                                                Sales Order (SO)
+                                            </label>
+                                            <template x-if="recordDrawerMode !== 'VIEW'">
+                                                <input type="text" 
+                                                       x-model="recordFormValues['SALES_ORDER']" 
+                                                       placeholder="e.g. SO-88401" 
+                                                       class="w-full bg-white border border-slate-300 focus:border-blue-600 rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm transition-all">
+                                            </template>
+                                            <template x-if="recordDrawerMode === 'VIEW'">
+                                                <div class="bg-slate-50 border border-slate-200/80 rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800"
+                                                     x-text="getDrawerFormValue('SALES_ORDER') || '-'">
+                                                </div>
+                                            </template>
+                                        </div>
+
+                                        <!-- Field: Purchase Order (PO) -->
+                                        <div class="space-y-1">
+                                            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide">
+                                                Purchase Order (PO)
+                                            </label>
+                                            <template x-if="recordDrawerMode !== 'VIEW'">
+                                                <input type="text" 
+                                                       x-model="recordFormValues['PO']" 
+                                                       placeholder="e.g. PO-77192" 
+                                                       class="w-full bg-white border border-slate-300 focus:border-blue-600 rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm transition-all">
+                                            </template>
+                                            <template x-if="recordDrawerMode === 'VIEW'">
+                                                <div class="bg-slate-50 border border-slate-200/80 rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800"
+                                                     x-text="getDrawerFormValue('PO') || '-'">
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </div>
+
+                                    <!-- Grid for QTY and FFE Singapore -->
+                                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <!-- Field: Quantity -->
+                                        <div class="space-y-1">
+                                            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide">
+                                                Quantity (QTY)
+                                            </label>
+                                            <template x-if="recordDrawerMode !== 'VIEW'">
+                                                <input type="number" 
+                                                       x-model="recordFormValues['QTY']" 
+                                                       placeholder="e.g. 1" 
+                                                       class="w-full bg-white border border-slate-300 focus:border-blue-600 rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm transition-all">
+                                            </template>
+                                            <template x-if="recordDrawerMode === 'VIEW'">
+                                                <div class="bg-slate-50 border border-slate-200/80 rounded-lg px-3.5 py-2 text-sm font-extrabold text-slate-800"
+                                                     x-text="getDrawerFormValue('QTY') || '-'">
+                                                </div>
+                                            </template>
+                                        </div>
+
+                                        <!-- Field: FFE Singapore -->
+                                        <div class="space-y-1">
+                                            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide">
+                                                FFE Singapore Reference
+                                            </label>
+                                            <template x-if="recordDrawerMode !== 'VIEW'">
+                                                <input type="text" 
+                                                       x-model="recordFormValues['FFE_SINGAPORE']" 
+                                                       placeholder="e.g. FFES-2026-90" 
+                                                       class="w-full bg-white border border-slate-300 focus:border-blue-600 rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm transition-all">
+                                            </template>
+                                            <template x-if="recordDrawerMode === 'VIEW'">
+                                                <div class="bg-slate-50 border border-slate-200/80 rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800"
+                                                     x-text="getDrawerFormValue('FFE_SINGAPORE') || '-'">
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- SECTION 3: Deadlines & Milestones -->
+                            <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+                                <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
+                                    <div class="flex items-center gap-2">
+                                        <div class="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center text-xs">
+                                            <i class="fas fa-calendar-alt"></i>
+                                        </div>
+                                        <h4 class="text-xs font-extrabold uppercase tracking-wider text-slate-800">3. Deadlines & Milestones</h4>
+                                    </div>
+                                    <span class="text-[10px] text-slate-400 font-semibold">Timeline</span>
+                                </div>
+
+                                <div class="space-y-4">
+                                    <!-- Field: Date Created / Recorded -->
+                                    <div class="space-y-1">
+                                        <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide">
+                                            Creation / Recorded Date
+                                        </label>
+                                        <template x-if="recordDrawerMode !== 'VIEW'">
+                                            <input type="date" 
+                                                   x-model="recordFormValues['DATE']" 
+                                                   class="w-full bg-white border border-slate-300 focus:border-blue-600 rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm transition-all">
+                                        </template>
+                                        <template x-if="recordDrawerMode === 'VIEW'">
+                                            <div class="bg-slate-50 border border-slate-200/80 rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800"
+                                                 x-text="getDrawerFormValue('DATE') || '-'">
+                                            </div>
+                                        </template>
+                                    </div>
+
+                                    <!-- Grid for Customer Due Date and Flow Force Due Date -->
+                                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <!-- Field: Due Date Customer -->
+                                        <div class="space-y-1">
+                                            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide">
+                                                Customer Due Date
+                                            </label>
+                                            <template x-if="recordDrawerMode !== 'VIEW'">
+                                                <input type="date" 
+                                                       x-model="recordFormValues['DUE_DATE_CUSTOMER']" 
+                                                       class="w-full bg-white border border-slate-300 focus:border-blue-600 rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm transition-all">
+                                            </template>
+                                            <template x-if="recordDrawerMode === 'VIEW'">
+                                                <div class="bg-slate-50 border border-slate-200/80 rounded-lg px-3.5 py-2 text-sm font-bold"
+                                                     :class="isDatePast(getDrawerFormValue('DUE_DATE_CUSTOMER')) ? 'text-rose-600' : 'text-slate-800'"
+                                                     x-text="getDrawerFormValue('DUE_DATE_CUSTOMER') || '-'">
+                                                </div>
+                                            </template>
+                                        </div>
+
+                                        <!-- Field: Due Date Flow Force -->
+                                        <div class="space-y-1">
+                                            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide">
+                                                Flow Force Target Due Date
+                                            </label>
+                                            <template x-if="recordDrawerMode !== 'VIEW'">
+                                                <input type="date" 
+                                                       x-model="recordFormValues['DUE_DATE_FLOW_FORCE']" 
+                                                       class="w-full bg-white border border-slate-300 focus:border-blue-600 rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm transition-all">
+                                            </template>
+                                            <template x-if="recordDrawerMode === 'VIEW'">
+                                                <div class="bg-slate-50 border border-slate-200/80 rounded-lg px-3.5 py-2 text-sm font-bold"
+                                                     :class="isDatePast(getDrawerFormValue('DUE_DATE_FLOW_FORCE')) ? 'text-rose-600' : 'text-slate-800'"
+                                                     x-text="getDrawerFormValue('DUE_DATE_FLOW_FORCE') || '-'">
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- SECTION 4: Status & Notifications -->
+                            <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+                                <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
+                                    <div class="flex items-center gap-2">
+                                        <div class="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center text-xs">
+                                            <i class="fas fa-bell"></i>
+                                        </div>
+                                        <h4 class="text-xs font-extrabold uppercase tracking-wider text-slate-800">4. Status & Automated Alerts</h4>
+                                    </div>
+                                    <span class="text-[10px] text-slate-400 font-semibold">Operational Status</span>
+                                </div>
+
+                                <div class="space-y-4">
+                                    <!-- Field: Status -->
+                                    <div class="space-y-1">
+                                        <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide">
+                                            Project Status
+                                        </label>
+                                        <template x-if="recordDrawerMode !== 'VIEW'">
+                                            <select x-model="recordFormValues['STATUS']" 
+                                                    class="w-full bg-white border border-slate-300 focus:border-blue-600 rounded-lg px-3.5 py-2 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm cursor-pointer transition-all">
+                                                <option value="Pending">Pending</option>
+                                                <option value="In Progress">In Progress</option>
+                                                <option value="Review">Under Review</option>
+                                                <option value="Completed">Completed</option>
+                                                <option value="On Hold">On Hold</option>
+                                                <option value="Cancelled">Cancelled</option>
+                                            </select>
+                                        </template>
+                                        <template x-if="recordDrawerMode === 'VIEW'">
+                                            <div>
+                                                <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold"
+                                                      :class="{
+                                                          'bg-emerald-100 text-emerald-800 border border-emerald-200': String(getDrawerFormValue('STATUS')).toUpperCase().includes('COMPLET') || String(getDrawerFormValue('STATUS')).toUpperCase().includes('RETURNED') || String(getDrawerFormValue('STATUS')).toUpperCase().includes('APPROV'),
+                                                          'bg-amber-100 text-amber-800 border border-amber-200': String(getDrawerFormValue('STATUS')).toUpperCase().includes('PENDING') || String(getDrawerFormValue('STATUS')).toUpperCase().includes('WAIT'),
+                                                          'bg-blue-100 text-blue-800 border border-blue-200': String(getDrawerFormValue('STATUS')).toUpperCase().includes('PROGRESS') || String(getDrawerFormValue('STATUS')).toUpperCase().includes('REVIEW'),
+                                                          'bg-rose-100 text-rose-800 border border-rose-200': String(getDrawerFormValue('STATUS')).toUpperCase().includes('HOLD') || String(getDrawerFormValue('STATUS')).toUpperCase().includes('CANCEL'),
+                                                          'bg-slate-100 text-slate-700 border border-slate-200': !String(getDrawerFormValue('STATUS')).toUpperCase().includes('COMPLET') && !String(getDrawerFormValue('STATUS')).toUpperCase().includes('PENDING') && !String(getDrawerFormValue('STATUS')).toUpperCase().includes('PROGRESS')
+                                                      }"
+                                                      x-text="getDrawerFormValue('STATUS') || 'No Status'">
+                                                </span>
+                                            </div>
+                                        </template>
+                                    </div>
+
+                                    <!-- Grid for Initial Mail and Alert Mail -->
+                                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <!-- Field: Initial Mail -->
+                                        <div class="space-y-1">
+                                            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide">
+                                                Initial Email Sent
+                                            </label>
+                                            <template x-if="recordDrawerMode !== 'VIEW'">
+                                                <select x-model="recordFormValues['INITIAL_MAIL']" 
+                                                        class="w-full bg-white border border-slate-300 focus:border-blue-600 rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm cursor-pointer transition-all">
+                                                    <option value="NO">NO (Not sent)</option>
+                                                    <option value="YES">YES (Sent)</option>
+                                                </select>
+                                            </template>
+                                            <template x-if="recordDrawerMode === 'VIEW'">
+                                                <div class="bg-slate-50 border border-slate-200/80 rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800"
+                                                     x-text="getDrawerFormValue('INITIAL_MAIL') || 'NO'">
+                                                </div>
+                                            </template>
+                                        </div>
+
+                                        <!-- Field: Alert Mail -->
+                                        <div class="space-y-1">
+                                            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide">
+                                                Alert Email Sent
+                                            </label>
+                                            <template x-if="recordDrawerMode !== 'VIEW'">
+                                                <select x-model="recordFormValues['ALERT_MAIL']" 
+                                                        class="w-full bg-white border border-slate-300 focus:border-blue-600 rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm cursor-pointer transition-all">
+                                                    <option value="NO">NO (Not sent)</option>
+                                                    <option value="YES">YES (Sent)</option>
+                                                </select>
+                                            </template>
+                                            <template x-if="recordDrawerMode === 'VIEW'">
+                                                <div class="bg-slate-50 border border-slate-200/80 rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800"
+                                                     x-text="getDrawerFormValue('ALERT_MAIL') || 'NO'">
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- SECTION 5: Custom / Additional Fields (if any exist) -->
+                            <template x-if="getCustomColumns().length > 0">
+                                <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+                                    <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
+                                        <div class="flex items-center gap-2">
+                                            <div class="w-7 h-7 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center text-xs">
+                                                <i class="fas fa-puzzle-piece"></i>
+                                            </div>
+                                            <h4 class="text-xs font-extrabold uppercase tracking-wider text-slate-800">5. Additional Custom Fields</h4>
+                                        </div>
+                                        <span class="text-[10px] text-slate-400 font-semibold" x-text="`${getCustomColumns().length} field(s)`"></span>
+                                    </div>
+
+                                    <div class="space-y-4">
+                                        <template x-for="col in getCustomColumns()" :key="col.id">
+                                            <div class="space-y-1">
+                                                <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide" x-text="col.name"></label>
+                                                <template x-if="recordDrawerMode !== 'VIEW'">
+                                                    <div>
+                                                        <template x-if="col.data_type === 'DATE' || col.data_type === 'DATETIME'">
+                                                            <input type="date" x-model="recordFormValues[col.name]" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+                                                        </template>
+                                                        <template x-if="col.data_type === 'NUMBER'">
+                                                            <input type="number" x-model="recordFormValues[col.name]" :placeholder="col.name" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+                                                        </template>
+                                                        <template x-if="col.data_type === 'DROPDOWN'">
+                                                            <select x-model="recordFormValues[col.name]" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+                                                                <option value="">-- Select --</option>
+                                                                <template x-for="opt in (col.options || '').split(',').map(s => s.trim()).filter(Boolean)" :key="opt">
+                                                                    <option :value="opt" x-text="opt"></option>
+                                                                </template>
+                                                            </select>
+                                                        </template>
+                                                        <template x-if="col.data_type === 'CHECKBOX'">
+                                                            <input type="checkbox" :checked="recordFormValues[col.name] === 'true' || recordFormValues[col.name] === true" @change="recordFormValues[col.name] = $event.target.checked ? 'true' : 'false'" class="h-4 w-4 text-blue-600 rounded">
+                                                        </template>
+                                                        <template x-if="col.data_type !== 'DATE' && col.data_type !== 'DATETIME' && col.data_type !== 'NUMBER' && col.data_type !== 'DROPDOWN' && col.data_type !== 'CHECKBOX'">
+                                                            <input type="text" x-model="recordFormValues[col.name]" :placeholder="col.name" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+                                                        </template>
+                                                    </div>
+                                                </template>
+                                                <template x-if="recordDrawerMode === 'VIEW'">
+                                                    <div class="bg-slate-50 border border-slate-200/80 rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800" x-text="getDrawerFormValue(col.name) || '-'"></div>
+                                                </template>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+
+                    <!-- ============================================== -->
+                    <!-- CASE B: GENERAL / OTHER TABLE TYPES DYNAMIC UI -->
+                    <!-- ============================================== -->
+                    <template x-if="'{{ table.job_type }}' !== 'LIST_PID'">
+                        <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm space-y-4">
+                            <div class="flex items-center justify-between pb-3 mb-2 border-b border-slate-100">
+                                <h4 class="text-xs font-extrabold uppercase tracking-wider text-slate-800">Record Fields</h4>
+                                <span class="text-[10px] text-slate-400 font-semibold" x-text="`${columns.filter(c => c.name !== 'S_NO').length} field(s)`"></span>
+                            </div>
+
+                            <template x-for="col in columns.filter(c => c.name !== 'S_NO')" :key="col.id">
+                                <div class="space-y-1">
+                                    <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide" x-text="col.name"></label>
+                                    <template x-if="recordDrawerMode !== 'VIEW'">
+                                        <div>
+                                            <template x-if="col.data_type === 'DATE' || col.data_type === 'DATETIME'">
+                                                <input type="date" x-model="recordFormValues[col.name]" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+                                            </template>
+                                            <template x-if="col.data_type === 'NUMBER'">
+                                                <input type="number" x-model="recordFormValues[col.name]" :placeholder="col.name" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+                                            </template>
+                                            <template x-if="col.data_type === 'DROPDOWN'">
+                                                <select x-model="recordFormValues[col.name]" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+                                                    <option value="">-- Select --</option>
+                                                    <template x-for="opt in (col.options || '').split(',').map(s => s.trim()).filter(Boolean)" :key="opt">
+                                                        <option :value="opt" x-text="opt"></option>
+                                                    </template>
+                                                </select>
+                                            </template>
+                                            <template x-if="col.data_type === 'CHECKBOX'">
+                                                <input type="checkbox" :checked="recordFormValues[col.name] === 'true' || recordFormValues[col.name] === true" @change="recordFormValues[col.name] = $event.target.checked ? 'true' : 'false'" class="h-4 w-4 text-blue-600 rounded">
+                                            </template>
+                                            <template x-if="col.data_type !== 'DATE' && col.data_type !== 'DATETIME' && col.data_type !== 'NUMBER' && col.data_type !== 'DROPDOWN' && col.data_type !== 'CHECKBOX'">
+                                                <div>
+                                                    <template x-if="isMultilineColumn(col.name)">
+                                                        <textarea x-model="recordFormValues[col.name]" rows="3" :placeholder="col.name" class="w-full bg-white border border-slate-300 rounded-lg p-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-y"></textarea>
+                                                    </template>
+                                                    <template x-if="!isMultilineColumn(col.name)">
+                                                        <input type="text" x-model="recordFormValues[col.name]" :placeholder="col.name" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+                                                    </template>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </template>
+                                    <template x-if="recordDrawerMode === 'VIEW'">
+                                        <div class="bg-slate-50 border border-slate-200/80 rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800" x-text="getDrawerFormValue(col.name) || '-'"></div>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- Drawer Sticky Footer -->
+                <div class="bg-white border-t border-slate-200 px-6 py-4 flex items-center justify-between shrink-0 shadow-lg z-10">
+                    <div class="text-[11px] text-slate-400 font-medium hidden sm:flex items-center gap-1.5 select-none">
+                        <template x-if="recordDrawerMode !== 'VIEW'">
+                            <span>Press <kbd class="px-1.5 py-0.5 bg-slate-100 border border-slate-300 rounded text-[10px] font-mono text-slate-600 font-bold">Ctrl + Enter</kbd> to save</span>
+                        </template>
+                        <template x-if="recordDrawerMode === 'VIEW'">
+                            <span>Press <kbd class="px-1.5 py-0.5 bg-slate-100 border border-slate-300 rounded text-[10px] font-mono text-slate-600 font-bold">Esc</kbd> to close</span>
+                        </template>
+                    </div>
+
+                    <div class="flex items-center gap-2.5 ml-auto">
+                        <button type="button" @click="closeRecordDrawer()" 
+                                class="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition-all shadow-sm">
+                            <span x-text="recordDrawerMode === 'VIEW' ? 'Close' : 'Cancel'"></span>
+                        </button>
+                        
+                        <template x-if="recordDrawerMode !== 'VIEW'">
+                            <button type="button" @click="saveRecordDrawer()" 
+                                    :disabled="isSubmittingRecord"
+                                    class="inline-flex items-center gap-2 px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-all shadow-md hover:shadow-lg">
+                                <span x-show="isSubmittingRecord"><i class="fas fa-spinner fa-spin text-xs"></i> Saving...</span>
+                                <span x-show="!isSubmittingRecord"><i class="fas fa-check-circle text-xs"></i> Save Record</span>
+                            </button>
+                        </template>
+                        <template x-if="recordDrawerMode === 'VIEW' && {{ has_edit_access|yesno:'true,false' }}">
+                            <button type="button" @click="recordDrawerMode = 'EDIT'" 
+                                    class="inline-flex items-center gap-2 px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-all shadow-md hover:shadow-lg">
+                                <i class="fas fa-edit text-xs"></i> Edit Record
+                            </button>
+                        </template>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </template>
+
+  </div>
 </div>
 
 <script>
     function spreadsheetApp(tableId) {
         return {
             tableId: tableId,
+            // Record Drawer (Option A: Slide-over right drawer)
+            isRecordDrawerOpen: false,
+            recordDrawerMode: 'CREATE', // 'CREATE', 'EDIT', 'VIEW'
+            activeDrawerRow: null,
+            recordFormValues: {},
+            recordDrawerErrors: {},
+            isSubmittingRecord: false,
+            drawerCopyNotice: '',
             isEditTableModalOpen: false,
             activeDrawerTab: 'properties',
             editTableName: '{{ table.name|escapejs }}',
@@ -3405,7 +4081,236 @@ comments: [],
                     alert("An error occurred: " + err);
                     this.isLoading = false;
                 });
-            }
+            },
+
+            // Record Drawer Helper Methods (Option A)
+            getCustomColumns() {
+                const standardNames = [
+                    "S_NO", "ENQUIRY_NO/QUOTATION_NO", "ENQUIRY_NO", "PID", "NEW_PID_NO", 
+                    "SALES_ORDER", "PO", "DATE", "FFE_SINGAPORE", "COMPANY_NAME", 
+                    "DESCRIPTION", "QTY", "DUE_DATE_CUSTOMER", "DUE_DATE_FLOW_FORCE", 
+                    "PROJECT", "STATUS", "INITIAL_MAIL", "ALERT_MAIL"
+                ];
+                return this.columns.filter(c => !standardNames.includes(c.name));
+            },
+
+            getDrawerFormValue(colName) {
+                if (colName === 'ENQUIRY_NO/QUOTATION_NO' || colName === 'ENQUIRY_NO') {
+                    if (this.recordFormValues['ENQUIRY_NO/QUOTATION_NO']) return this.recordFormValues['ENQUIRY_NO/QUOTATION_NO'];
+                    if (this.recordFormValues['ENQUIRY_NO']) return this.recordFormValues['ENQUIRY_NO'];
+                    return '';
+                }
+                return this.recordFormValues[colName] !== undefined ? this.recordFormValues[colName] : '';
+            },
+
+            copyDrawerText(text, msg = 'Copied to clipboard!') {
+                if (!text) return;
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text).then(() => {
+                        this.drawerCopyNotice = msg;
+                        setTimeout(() => this.drawerCopyNotice = '', 3000);
+                    }).catch(() => {
+                        this.drawerCopyNotice = msg;
+                        setTimeout(() => this.drawerCopyNotice = '', 3000);
+                    });
+                } else {
+                    this.drawerCopyNotice = msg;
+                    setTimeout(() => this.drawerCopyNotice = '', 3000);
+                }
+            },
+
+            isDatePast(dateStr) {
+                if (!dateStr) return false;
+                const d = new Date(dateStr);
+                if (isNaN(d.getTime())) return false;
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                d.setHours(0, 0, 0, 0);
+                return d < today;
+            },
+
+            openRecordDrawer(mode, row = null) {
+                this.recordDrawerMode = mode;
+                this.activeDrawerRow = row;
+                this.recordDrawerErrors = {};
+                this.recordFormValues = {};
+                this.drawerCopyNotice = '';
+
+                const isSales = '{{ table.job_type }}' === 'SALES';
+                const isLogs = '{{ table.job_type }}' === 'LOGS';
+                const isListPid = '{{ table.job_type }}' === 'LIST_PID';
+
+                if (mode === 'CREATE') {
+                    this.columns.forEach(col => {
+                        this.recordFormValues[col.name] = '';
+                    });
+
+                    if (isListPid) {
+                        this.recordFormValues['DATE'] = new Date().toISOString().split('T')[0];
+                        this.recordFormValues['INITIAL_MAIL'] = 'NO';
+                        this.recordFormValues['ALERT_MAIL'] = 'NO';
+                        this.recordFormValues['STATUS'] = 'Pending';
+                        if (this.selectedPidFilter) {
+                            this.recordFormValues['PID'] = this.selectedPidFilter;
+                        }
+                    } else if (isSales) {
+                        this.recordFormValues['DATE'] = new Date().toISOString().split('T')[0];
+                        this.recordFormValues['INITIAL_MAIL'] = 'NO';
+                        this.recordFormValues['ALERT_MAIL'] = 'NO';
+                    } else if (isLogs) {
+                        const todayStr = new Date().toISOString().split('T')[0];
+                        this.recordFormValues['ISSUE_DATE'] = todayStr;
+                        this.recordFormValues['RETURN_DATE'] = todayStr;
+                        this.recordFormValues['STATUS'] = 'Not Returned';
+                    }
+                } else if (mode === 'EDIT' || mode === 'VIEW') {
+                    if (row) {
+                        this.columns.forEach(col => {
+                            this.recordFormValues[col.name] = this.getCellValue(row, col.name) || '';
+                        });
+                        // Synchronize alternate enquiry column names
+                        if (this.recordFormValues['ENQUIRY_NO/QUOTATION_NO'] && !this.recordFormValues['ENQUIRY_NO']) {
+                            this.recordFormValues['ENQUIRY_NO'] = this.recordFormValues['ENQUIRY_NO/QUOTATION_NO'];
+                        } else if (this.recordFormValues['ENQUIRY_NO'] && !this.recordFormValues['ENQUIRY_NO/QUOTATION_NO']) {
+                            this.recordFormValues['ENQUIRY_NO/QUOTATION_NO'] = this.recordFormValues['ENQUIRY_NO'];
+                        }
+                    }
+                }
+
+                this.isRecordDrawerOpen = true;
+
+                // Focus first non-readonly input after animation
+                setTimeout(() => {
+                    const firstInput = document.querySelector('#recordDrawerContainer input:not([disabled]):not([readonly]), #recordDrawerContainer textarea:not([disabled])');
+                    if (firstInput) firstInput.focus();
+                }, 200);
+            },
+
+            closeRecordDrawer() {
+                this.isRecordDrawerOpen = false;
+                this.activeDrawerRow = null;
+                this.recordDrawerErrors = {};
+            },
+
+            saveRecordDrawer() {
+                if (this.recordDrawerMode === 'VIEW') {
+                    this.recordDrawerMode = 'EDIT';
+                    return;
+                }
+
+                const isSales = '{{ table.job_type }}' === 'SALES';
+                const isListPid = '{{ table.job_type }}' === 'LIST_PID';
+                const isPersonal = '{{ table.job_type }}' === 'PERSONAL';
+                const isLogs = '{{ table.job_type }}' === 'LOGS';
+
+                this.recordDrawerErrors = {};
+                if (isListPid) {
+                    const enqVal = this.recordFormValues['ENQUIRY_NO/QUOTATION_NO'] || this.recordFormValues['ENQUIRY_NO'];
+                    if (!enqVal && !this.recordFormValues['PID']) {
+                        this.recordDrawerErrors['ENQUIRY_NO/QUOTATION_NO'] = 'Enquiry/Quotation No or PID Reference is required';
+                    }
+                    if (this.recordFormValues['ENQUIRY_NO/QUOTATION_NO']) {
+                        this.recordFormValues['ENQUIRY_NO'] = this.recordFormValues['ENQUIRY_NO/QUOTATION_NO'];
+                    } else if (this.recordFormValues['ENQUIRY_NO']) {
+                        this.recordFormValues['ENQUIRY_NO/QUOTATION_NO'] = this.recordFormValues['ENQUIRY_NO'];
+                    }
+                } else if (isSales) {
+                    if (!this.recordFormValues['CUSTOMER_NAME']) {
+                        this.recordDrawerErrors['CUSTOMER_NAME'] = 'Customer Name is required';
+                    }
+                    if (!this.recordFormValues['FOLLOW_UP_DATE']) {
+                        this.recordDrawerErrors['FOLLOW_UP_DATE'] = 'Follow-up Date is required';
+                    }
+                } else if (isLogs) {
+                    if (!this.recordFormValues['TOOL_NAME']) {
+                        this.recordDrawerErrors['TOOL_NAME'] = 'Tool Name is required';
+                    }
+                } else if (!isPersonal) {
+                    if (!this.recordFormValues['TASK_NAME']) {
+                        this.recordDrawerErrors['TASK_NAME'] = 'Task Name is required';
+                    }
+                    if (!this.recordFormValues['DUE_DATE']) {
+                        this.recordDrawerErrors['DUE_DATE'] = 'Due Date is required';
+                    }
+                }
+
+                if (Object.keys(this.recordDrawerErrors).length > 0) {
+                    return;
+                }
+
+                this.isSubmittingRecord = true;
+                this.isLoading = true;
+
+                if (this.recordDrawerMode === 'CREATE') {
+                    if (this.selectedPidFilter && !this.recordFormValues['PID']) {
+                        this.recordFormValues['PID'] = this.selectedPidFilter;
+                    }
+
+                    fetch('/tables/api/rows/', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': '{{ csrf_token }}'
+                        },
+                        body: JSON.stringify({
+                            table: this.tableId,
+                            cells: this.recordFormValues
+                        })
+                    })
+                    .then(res => {
+                        if (res.ok) {
+                            this.closeRecordDrawer();
+                            this.fetchRows();
+                        } else {
+                            res.json().then(data => {
+                                alert(data.error || 'Failed to create record. Please check inputs.');
+                            }).catch(() => {
+                                alert('Error creating record.');
+                            });
+                        }
+                    })
+                    .catch(err => {
+                        alert('Network error: ' + err);
+                    })
+                    .finally(() => {
+                        this.isSubmittingRecord = false;
+                        this.isLoading = false;
+                    });
+                } else if (this.recordDrawerMode === 'EDIT') {
+                    if (!this.activeDrawerRow) return;
+                    const rowId = this.activeDrawerRow.id;
+
+                    fetch(`/tables/api/rows/${rowId}/edit-row/`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': '{{ csrf_token }}'
+                        },
+                        body: JSON.stringify({
+                            cells: this.recordFormValues
+                        })
+                    })
+                    .then(res => {
+                        if (res.ok) {
+                            this.closeRecordDrawer();
+                            this.fetchRows();
+                        } else {
+                            res.json().then(data => {
+                                alert(data.error || 'Failed to update record.');
+                            }).catch(() => {
+                                alert('Error updating record.');
+                            });
+                        }
+                    })
+                    .catch(err => {
+                        alert('Network error: ' + err);
+                    })
+                    .finally(() => {
+                        this.isSubmittingRecord = false;
+                        this.isLoading = false;
+                    });
+                }
+            },
         };
     }
 </script>
