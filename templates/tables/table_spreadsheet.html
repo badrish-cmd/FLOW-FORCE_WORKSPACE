@@ -727,10 +727,13 @@
                                 <input type="checkbox" :value="row.id" x-model="selectedRowIds" class="rounded-md border-slate-300 text-blue-600 focus:ring-blue-500 h-4 w-4">
                             </td>
                             {% for col in table.columns.all %}
-                             <td class="p-0 border-r border-slate-100/60 text-xs sm:text-sm align-middle relative group"
+                            <template x-if="isJobGroupFirst(row, rowIndex, '{{ col.name }}')">
+                             <td :rowspan="isJobColumn('{{ col.name }}') ? getJobGroupSpan(row, rowIndex, '{{ col.name }}') : 1"
+                                  class="p-0 border-r border-slate-100/60 text-xs sm:text-sm align-middle relative group"
                                   :class="[
                                       isCellDragged(row.id, {{ col.id }}) ? 'bg-blue-50 border-2 border-blue-400' : '',
-                                      isMultilineColumn('{{ col.name }}') ? 'min-w-[280px] whitespace-normal' : 'whitespace-nowrap'
+                                      isMultilineColumn('{{ col.name }}') ? 'min-w-[280px] whitespace-normal' : 'whitespace-nowrap',
+                                      isJobColumn('{{ col.name }}') && getJobGroupSpan(row, rowIndex, '{{ col.name }}') > 1 ? 'bg-white border-b border-slate-200/90 shadow-2xs' : ''
                                   ]"
                                   @dblclick="if (rowEditingRowId !== row.id) editCell(row.id, {{ col.id }}, getCellValue(row, '{{ col.name }}'), '{{ col.data_type }}')">
                                   
@@ -784,9 +787,14 @@
                                                <span class="font-bold text-slate-500 text-xs" x-text="getCellValue(row, '{{ col.name }}')"></span>
                                            </template>
 
-                                           <!-- PID / NEW_PID_NO (SKU-style sky pill badge) -->
-                                           <template x-if="'{{ col.name }}' === 'PID' || '{{ col.name }}' === 'NEW_PID_NO'">
-                                               <span class="inline-flex items-center px-2 py-0.5 rounded font-mono font-bold text-xs bg-sky-50 text-sky-700 border border-sky-200/80" x-text="getCellValue(row, '{{ col.name }}')"></span>
+                                           <!-- PID / NEW_PID_NO / JOB_NUMBER (SKU-style sky pill badge) -->
+                                           <template x-if="'{{ col.name }}' === 'PID' || '{{ col.name }}' === 'NEW_PID_NO' || isJobColumn('{{ col.name }}')">
+                                               <div class="w-full flex flex-col items-center justify-center py-2 px-3 text-center">
+                                                   <span class="inline-flex items-center px-2.5 py-1 rounded-md font-mono font-bold text-xs bg-sky-50 text-sky-700 border border-sky-200/80 shadow-2xs tracking-wide" x-text="getCellValue(row, '{{ col.name }}') || '-'"></span>
+                                                   <template x-if="getJobGroupSpan(row, rowIndex, '{{ col.name }}') > 1">
+                                                       <span class="text-[10px] text-slate-400 font-semibold mt-1" x-text="`${getJobGroupSpan(row, rowIndex, '{{ col.name }}')} items`"></span>
+                                                   </template>
+                                               </div>
                                            </template>
 
                                            <!-- Primary Text Columns: TASK_NAME, CUSTOMER_NAME, TOOL_NAME, COMPANY_NAME, ENQUIRY_NO -->
@@ -832,7 +840,7 @@
                                            </template>
 
                                            <!-- Generic / Checkbox Columns -->
-                                           <template x-if="'{{ col.name }}' !== 'S_NO' && '{{ col.name }}' !== 'PID' && '{{ col.name }}' !== 'NEW_PID_NO' && '{{ col.name }}' !== 'TASK_NAME' && '{{ col.name }}' !== 'CUSTOMER_NAME' && '{{ col.name }}' !== 'TOOL_NAME' && '{{ col.name }}' !== 'COMPANY_NAME' && '{{ col.name }}' !== 'ENQUIRY_NO/QUOTATION_NO' && '{{ col.name }}' !== 'DUE_DATE' && '{{ col.name }}' !== 'FOLLOW_UP_DATE' && '{{ col.name }}' !== 'RETURN_DATE' && '{{ col.name }}' !== 'DUE_DATE_CUSTOMER' && '{{ col.name }}' !== 'DUE_DATE_FLOW_FORCE' && '{{ col.name }}' !== 'STATUS' && '{{ col.name }}' !== 'PROJECT' && '{{ col.name }}' !== 'PROJECT/SUPPLY' && '{{ col.name }}' !== 'PROJECT_SUPPLY' && !isMultilineColumn('{{ col.name }}')">
+                                           <template x-if="'{{ col.name }}' !== 'S_NO' && '{{ col.name }}' !== 'PID' && '{{ col.name }}' !== 'NEW_PID_NO' && !isJobColumn('{{ col.name }}') && '{{ col.name }}' !== 'TASK_NAME' && '{{ col.name }}' !== 'CUSTOMER_NAME' && '{{ col.name }}' !== 'TOOL_NAME' && '{{ col.name }}' !== 'COMPANY_NAME' && '{{ col.name }}' !== 'ENQUIRY_NO/QUOTATION_NO' && '{{ col.name }}' !== 'DUE_DATE' && '{{ col.name }}' !== 'FOLLOW_UP_DATE' && '{{ col.name }}' !== 'RETURN_DATE' && '{{ col.name }}' !== 'DUE_DATE_CUSTOMER' && '{{ col.name }}' !== 'DUE_DATE_FLOW_FORCE' && '{{ col.name }}' !== 'STATUS' && '{{ col.name }}' !== 'PROJECT' && '{{ col.name }}' !== 'PROJECT/SUPPLY' && '{{ col.name }}' !== 'PROJECT_SUPPLY' && !isMultilineColumn('{{ col.name }}')">
                                                <div class="w-full">
                                                    <template x-if="'{{ col.data_type }}' === 'CHECKBOX'">
                                                        <input type="checkbox" 
@@ -892,6 +900,7 @@
                                       </div>
                                   </div>
                               </td>
+                            </template>
                               {% endfor %}
                               <td class="px-4 py-2 whitespace-nowrap text-xs text-slate-500 align-middle">
                                   <div class="flex items-center gap-1.5">
@@ -2713,6 +2722,77 @@ comments: [],
                 }
                 const cell = row.cells.find(c => c.column_name === columnName);
                 return cell ? cell.value : '';
+            },
+
+            getJobColumnName() {
+                const cols = (this.columns || []).map(c => c.name);
+                // 1. Explicit Job Number synonyms
+                const explicit = cols.find(name => {
+                    const u = name.trim().toUpperCase();
+                    return u === 'JOB_NUMBER' || u === 'JOB NUMBER' || u === 'JOB_NO' || u === 'JOB NO' || u === 'JOB' || u === 'JOB_ID';
+                });
+                if (explicit) return explicit;
+
+                // 2. Flow-Force standard field: PID (Project / Job Identifier in LIST_PID and ENGINEER tables)
+                const pid = cols.find(name => {
+                    const u = name.trim().toUpperCase();
+                    return u === 'PID' || u === 'NEW_PID_NO';
+                });
+                if (pid) return pid;
+
+                // 3. Fallback to ENQUIRY_NO / QUOTATION_NO
+                const enq = cols.find(name => {
+                    const u = name.trim().toUpperCase();
+                    return u === 'ENQUIRY_NO/QUOTATION_NO' || u === 'ENQUIRY_NO' || u === 'QUOTATION_NO';
+                });
+                if (enq) return enq;
+
+                return null;
+            },
+
+            isJobColumn(columnName) {
+                return this.getJobColumnName() === columnName;
+            },
+
+            getJobValue(row) {
+                const jobCol = this.getJobColumnName();
+                if (!jobCol || !row) return '';
+                const val = this.getCellValue(row, jobCol);
+                if (val === null || val === undefined) return '';
+                return String(val).trim();
+            },
+
+            isJobGroupFirst(row, rowIndex, columnName) {
+                if (!this.isJobColumn(columnName)) return true;
+                if (this.rowEditingRowId !== null) return true;
+                const currentVal = this.getJobValue(row);
+                // If empty or null or placeholder dash, do not group - each row gets its own cell
+                if (!currentVal || currentVal === '-') return true;
+
+                if (rowIndex === 0) return true;
+                const visibleRows = this.filteredRows();
+                const prevRow = visibleRows[rowIndex - 1];
+                if (!prevRow) return true;
+                return currentVal !== this.getJobValue(prevRow);
+            },
+
+            getJobGroupSpan(row, rowIndex, columnName) {
+                if (!this.isJobColumn(columnName)) return 1;
+                if (this.rowEditingRowId !== null) return 1;
+                const currentVal = this.getJobValue(row);
+                // If empty or null, single row
+                if (!currentVal || currentVal === '-') return 1;
+
+                const visibleRows = this.filteredRows();
+                let span = 0;
+                for (let i = rowIndex; i < visibleRows.length; i++) {
+                    if (this.getJobValue(visibleRows[i]) === currentVal) {
+                        span++;
+                    } else {
+                        break;
+                    }
+                }
+                return Math.max(1, span);
             },
 
              editCell(rowId, columnId, currentValue, columnType) {
