@@ -971,6 +971,11 @@ body {
     background: #94A3B8;
 }
 
+/* Spreadsheet Table Zoom */
+.ff-table-scroll > table {
+    transition: zoom 0.15s ease-out;
+}
+
 /* ============================================================================
    Bootstrap Modals & Glassmorphism Stacking
    ============================================================================ */
