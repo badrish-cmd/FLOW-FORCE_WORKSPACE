@@ -1857,6 +1857,94 @@ class LogsTableTestCase(TestCase):
         self.assertEqual(ws.max_row, 4) # Header + 3 data rows
 
 
+class SalesAndRowActionTests(TestCase):
+    def setUp(self):
+        from employee_management.models import Department
+        from auth_app.models import EmployeeUser
+        self.sales_dept, _ = Department.objects.get_or_create(name="Sales", defaults={"description": "Sales Department"})
+        self.sales_user, _ = EmployeeUser.objects.get_or_create(
+            email="sales-rep@flow-force.com",
+            defaults={
+                "password": "password123",
+                "role": "EMPLOYEE",
+                "full_name": "Sales Rep",
+                "department": self.sales_dept
+            }
+        )
+        self.admin, _ = EmployeeUser.objects.get_or_create(
+            email="admin-rep@flow-force.com",
+            defaults={
+                "password": "adminpassword123",
+                "role": "ADMIN",
+                "full_name": "System Admin"
+            }
+        )
+        self.sales_table = Table.objects.create(
+            name="Sales Leads",
+            job_type="SALES",
+            department=self.sales_dept,
+            created_by=self.admin
+        )
+        self.row = Row.objects.create(table=self.sales_table, created_by=self.sales_user)
+
+    def test_sales_department_user_has_edit_access(self):
+        from tables.permissions import has_table_access
+        self.assertTrue(has_table_access(self.sales_user, self.sales_table, "VIEW"))
+        self.assertTrue(has_table_access(self.sales_user, self.sales_table, "EDIT"))
+
+    def test_row_serializer_auto_creates_missing_task(self):
+        from tables.serializers import RowSerializer
+        serializer = RowSerializer(self.row)
+        data = serializer.data
+        self.assertIsNotNone(data["task_details"])
+        self.assertEqual(data["task_details"]["status"], "PENDING")
+
+    def test_toggle_status_row_action(self):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from tables.views import RowViewSet
+        factory = APIRequestFactory()
+        view = RowViewSet.as_view({'post': 'toggle_status'})
+
+        # Toggle to COMPLETED
+        req = factory.post(f'/tables/api/rows/{self.row.id}/toggle-status/', {'status': 'COMPLETED'}, format='json')
+        force_authenticate(req, user=self.sales_user)
+        res = view(req, pk=self.row.id)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["task_details"]["status"], "COMPLETED")
+
+        # Toggle to PENDING
+        req2 = factory.post(f'/tables/api/rows/{self.row.id}/toggle-status/', {}, format='json')
+        force_authenticate(req2, user=self.sales_user)
+        res2 = view(req2, pk=self.row.id)
+        self.assertEqual(res2.status_code, 200)
+        self.assertEqual(res2.data["task_details"]["status"], "PENDING")
+
+    def test_sales_follow_up_logging(self):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from tasks.views import TaskViewSet
+        from tables.serializers import RowSerializer
+
+        # Ensure task exists
+        RowSerializer(self.row).data
+        task = self.row.task
+
+        factory = APIRequestFactory()
+        view = TaskViewSet.as_view({'post': 'log_follow_up'})
+        req = factory.post(f'/tasks/api/tasks/{task.id}/log-follow-up/', {
+            'discussed_points': 'Customer agreed to demo next Tuesday',
+            'status': 'IN_PROGRESS',
+            'next_follow_up_date': '2026-10-15'
+        }, format='json')
+        force_authenticate(req, user=self.sales_user)
+        res = view(req, pk=task.id)
+        self.assertEqual(res.status_code, 200)
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'IN_PROGRESS')
+        self.assertEqual(str(task.due_date), '2026-10-15')
+        self.assertEqual(task.follow_ups.count(), 1)
+
+
+
 
 
 

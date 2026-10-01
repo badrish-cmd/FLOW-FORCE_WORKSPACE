@@ -2229,6 +2229,64 @@ class RowViewSet(viewsets.ModelViewSet):
 
         return Response(RowSerializer(row).data, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["post"], url_path="toggle-status")
+    @transaction.atomic
+    def toggle_status(self, request, pk=None):
+        row = get_object_or_404(Row, pk=pk)
+        table = row.table
+
+        # Check permissions: must have VIEW access to table
+        if not has_table_access(request.user, table, "VIEW"):
+            return Response({"error": "No access to this table"}, status=status.HTTP_403_FORBIDDEN)
+
+        from tasks.models import Task, ActivityLog
+        from django.utils import timezone
+        task = getattr(row, "task", None)
+        if not task:
+            from datetime import datetime
+            due_date = None
+            date_cell = row.cells.filter(column__name__in=["DUE_DATE", "FOLLOW_UP_DATE", "RETURN_DATE", "DUE_DATE_FLOW_FORCE"]).first()
+            if date_cell and date_cell.value:
+                try:
+                    due_date = datetime.strptime(str(date_cell.value).split("T")[0], "%Y-%m-%d").date()
+                except Exception:
+                    due_date = None
+            task = Task.objects.create(
+                row=row,
+                due_date=due_date,
+                priority="MEDIUM",
+                status="PENDING",
+                assigned_by=request.user
+            )
+
+        requested_status = request.data.get("status")
+        if requested_status in dict(Task.STATUS_CHOICES):
+            new_status = requested_status
+        else:
+            new_status = "PENDING" if (task.status in ["COMPLETED", "APPROVED"]) else "COMPLETED"
+
+        old_status = task.status
+        task.status = new_status
+        task.save(update_fields=["status"])
+
+        # Sync back to STATUS cell if such a column exists
+        status_col = Column.objects.filter(table=table, name__iexact="STATUS").first()
+        if status_col:
+            CellValue.objects.update_or_create(
+                row=row, column=status_col,
+                defaults={"value": new_status, "updated_by": request.user}
+            )
+
+        from tasks.models import ActivityLog
+        ActivityLog.objects.create(
+            task=task,
+            action=f"Changed status from {old_status} to {new_status}",
+            user=request.user,
+            details={"old_status": old_status, "new_status": new_status}
+        )
+
+        return Response(RowSerializer(row).data, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=["post"], url_path="edit-row")
     @transaction.atomic
     def edit_row(self, request, pk=None):
@@ -2397,10 +2455,16 @@ def table_spreadsheet_view(request, table_id):
         return redirect("/")
     has_edit = has_table_access(request.user, table, "EDIT")
     has_admin = has_table_access(request.user, table, "ADMIN")
+    has_follow_up = (
+        table.job_type in ["SALES", "LIST_PID"] or
+        (table.department and table.department.name.lower() == "sales") or
+        table.columns.filter(name__iexact="FOLLOW_UP_DATE").exists()
+    )
     return render(request, "tables/table_spreadsheet.html", {
         "table": table,
         "has_edit_access": has_edit,
-        "has_admin_access": has_admin
+        "has_admin_access": has_admin,
+        "has_follow_up": has_follow_up
     })
 
 @login_required

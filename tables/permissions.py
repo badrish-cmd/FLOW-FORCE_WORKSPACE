@@ -29,14 +29,19 @@ def get_accessible_tables(user):
             
         return qs.filter(q_filter).distinct()
 
-    # For EMPLOYEE, they only see tables explicitly shared with them or their department, or created by them
+    # For EMPLOYEE, they see tables shared with them/department, created by them, or in their department
     if user.role == "EMPLOYEE":
         shared_filters = Q(user=user)
         if user.department:
             shared_filters |= Q(department=user.department)
         
         shared_table_ids = TableAccess.objects.filter(shared_filters).values_list("table_id", flat=True)
-        return qs.filter(Q(id__in=shared_table_ids) | Q(created_by=user)).distinct()
+        q_filter = Q(id__in=shared_table_ids) | Q(created_by=user)
+        if user.department:
+            q_filter |= Q(department=user.department)
+            if user.department.name.upper() == "SALES":
+                q_filter |= Q(job_type="SALES")
+        return qs.filter(q_filter).distinct()
 
     # Fallback
     return Table.objects.none()
@@ -59,6 +64,16 @@ def has_table_access(user, table, required_level="VIEW"):
     # Dept Admin have admin level access in their department
     if user.role == "DEPARTMENT_ADMIN" and user.department and table.department == user.department:
         return True
+
+    # Employees in the department have VIEW and EDIT access to their department's tables
+    if user.department and table.department == user.department:
+        if required_level in ["VIEW", "EDIT"]:
+            return True
+
+    # Sales team members have VIEW and EDIT access to SALES job_type tables
+    if user.department and user.department.name.upper() == "SALES" and table.job_type == "SALES":
+        if required_level in ["VIEW", "EDIT"]:
+            return True
 
     # Check explicit access rules
     access_filters = Q(table=table)

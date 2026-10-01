@@ -44,9 +44,11 @@ class TaskViewSet(viewsets.ModelViewSet):
         if new_status not in dict(Task.STATUS_CHOICES):
             return Response({"error": "Invalid status value"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Permission check: must have edit access to the table OR be assigned to the task and updating status to COMPLETED
+        # Permission check: must have edit access to the table OR be assigned to the task OR be department member
         is_assigned = task.assigned_to.filter(id=request.user.id).exists()
-        if not (has_table_access(request.user, task.row.table, "EDIT") or (new_status == "COMPLETED" and is_assigned)):
+        dept_match = bool(request.user.department and task.row.table.department == request.user.department)
+        sales_match = bool(request.user.department and request.user.department.name.upper() == "SALES" and task.row.table.job_type == "SALES")
+        if not (has_table_access(request.user, task.row.table, "EDIT") or is_assigned or dept_match or sales_match or (new_status == "COMPLETED" and is_assigned)):
             return Response({"error": "No permission to update this task status"}, status=status.HTTP_403_FORBIDDEN)
 
         old_status = task.status
@@ -250,9 +252,13 @@ class TaskViewSet(viewsets.ModelViewSet):
     def log_follow_up(self, request, pk=None):
         task = get_object_or_404(Task, pk=pk)
         
-        # Verify table is SALES or LIST_PID
-        if task.row.table.job_type not in ["SALES", "LIST_PID"]:
-            return Response({"error": "This action is only supported for Sales or LIST_PID tasks."}, status=status.HTTP_400_BAD_REQUEST)
+        # Verify table has follow-up capability
+        table = task.row.table
+        is_sales_or_pid = table.job_type in ["SALES", "LIST_PID"]
+        is_sales_dept = bool(table.department and table.department.name.lower() == "sales")
+        has_follow_up_col = table.columns.filter(name__iexact="FOLLOW_UP_DATE").exists()
+        if not (is_sales_or_pid or is_sales_dept or has_follow_up_col):
+            return Response({"error": "This action is only supported for Sales, List PID, or tables with follow-ups."}, status=status.HTTP_400_BAD_REQUEST)
         
         discussed_points = request.data.get("discussed_points")
         new_status = request.data.get("status")
@@ -281,8 +287,9 @@ class TaskViewSet(viewsets.ModelViewSet):
                 return Response({"error": "Invalid date format for next follow-up date. Use YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
         
         # Save TaskFollowUp record
-        # Current follow-up date is task.due_date
-        current_follow_up_date = task.due_date
+        # Current follow-up date is task.due_date, fallback to today's date if not set
+        from django.utils import timezone
+        current_follow_up_date = task.due_date or timezone.localdate()
         
         from .models import TaskFollowUp
         follow_up = TaskFollowUp.objects.create(

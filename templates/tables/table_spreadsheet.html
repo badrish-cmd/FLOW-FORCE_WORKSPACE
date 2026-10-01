@@ -687,7 +687,7 @@
                             </div>
                         </th>
                         {% endfor %}
-                        <th scope="col" class="px-4 py-3 text-left text-[11px] font-bold text-slate-700 uppercase tracking-wider min-w-[100px] sticky top-0 bg-[#F8FAFC] z-20">Actions</th>
+                        <th scope="col" class="px-4 py-3 text-left text-[11px] font-bold text-slate-700 uppercase tracking-wider min-w-[160px] sticky top-0 bg-[#F8FAFC] z-20">Actions</th>
                     </tr>
                 </thead>
                 <tbody class="bg-white divide-y divide-slate-100">
@@ -904,35 +904,65 @@
                               {% endfor %}
                               <td class="px-4 py-2 whitespace-nowrap text-xs text-slate-500 align-middle">
                                   <div class="flex items-center gap-1.5">
+                                      <!-- Row Editing Active: Save/Cancel -->
                                       <template x-if="rowEditingRowId === row.id">
-                                          <button @click="saveRowEditing(row.id)" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors flex items-center gap-1">
-                                              <i class="fas fa-check text-[10px]"></i> Save
-                                          </button>
+                                          <div class="flex items-center gap-1">
+                                              <button @click="saveRowEditing(row.id)" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors flex items-center gap-1" title="Save Row Edit">
+                                                  <i class="fas fa-check text-[10px]"></i> Save
+                                              </button>
+                                              <button @click="rowEditingRowId = null" class="w-7 h-7 inline-flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg" title="Cancel">
+                                                  <i class="fas fa-times text-xs"></i>
+                                              </button>
+                                          </div>
                                       </template>
+
+                                      <!-- Standard Row Action Buttons -->
                                       <template x-if="rowEditingRowId !== row.id">
-                                          <button @click="startRowEditing(row)" class="w-7 h-7 inline-flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg border border-transparent hover:border-blue-200 transition-colors" title="Edit entire row">
-                                              <i class="fas fa-pencil-alt text-xs"></i>
-                                          </button>
+                                          <div class="flex items-center gap-1">
+                                              <!-- 1. Edit Record Modal -->
+                                              <button @click="openRecordModal('EDIT', row)" class="w-7 h-7 inline-flex items-center justify-center text-amber-500 hover:text-amber-700 hover:bg-amber-50 rounded-lg border border-transparent hover:border-amber-200 transition-colors" title="Edit Record">
+                                                  <i class="fas fa-edit text-xs"></i>
+                                              </button>
+
+                                              <!-- Inline Edit Row Quick Action -->
+                                              <button @click="startRowEditing(row)" class="w-7 h-7 inline-flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg border border-transparent hover:border-blue-200 transition-colors" title="Quick Inline Edit">
+                                                  <i class="fas fa-pencil-alt text-xs"></i>
+                                              </button>
+
+                                              <!-- 2. Follow-up Log Action (Sales / Follow-up enabled) -->
+                                              {% if has_follow_up or table.job_type == 'SALES' or table.job_type == 'LIST_PID' %}
+                                              <button @click="openFollowUpModal(row)" 
+                                                      class="w-7 h-7 inline-flex items-center justify-center text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg border border-transparent hover:border-emerald-200 transition-colors relative" 
+                                                      title="Log Follow-up / View History">
+                                                  <i class="fas fa-history text-xs"></i>
+                                                  <template x-if="row.task_details && row.task_details.follow_ups && row.task_details.follow_ups.length > 0">
+                                                      <span class="absolute -top-1 -right-1 bg-emerald-600 text-white rounded-full text-[9px] w-3.5 h-3.5 flex items-center justify-center font-bold shadow-sm" 
+                                                            x-text="row.task_details.follow_ups.length"></span>
+                                                  </template>
+                                              </button>
+                                              {% endif %}
+
+                                              <!-- 3. Completed Tick Action -->
+                                              <button @click="toggleTaskCompletion(row)" 
+                                                      class="w-7 h-7 inline-flex items-center justify-center rounded-lg border border-transparent transition-colors"
+                                                      :class="isRowCompleted(row) ? 'text-emerald-600 hover:bg-emerald-50' : 'text-slate-300 hover:text-emerald-600 hover:bg-slate-100'"
+                                                      :title="isRowCompleted(row) ? 'Completed - Click to Mark Pending' : 'Mark Completed (Tick)'">
+                                                  <i :class="isRowCompleted(row) ? 'fas fa-check-circle text-sm text-emerald-600' : 'far fa-check-circle text-sm text-slate-400 hover:text-emerald-600'"></i>
+                                              </button>
+
+                                              <!-- 4. Task Notes & Comments -->
+                                              <button @click="openTaskModal(row)" class="w-7 h-7 inline-flex items-center justify-center text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg border border-transparent hover:border-blue-200 transition-colors" title="Task & Comments">
+                                                  <i class="fas fa-comment-dots text-xs"></i>
+                                              </button>
+
+                                              <!-- 5. Delete Row (Admin / Editor) -->
+                                              {% if has_edit_access or has_admin_access %}
+                                              <button @click="deleteRow(row.id)" class="w-7 h-7 inline-flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg border border-transparent hover:border-rose-200 transition-colors" title="Delete Row">
+                                                  <i class="fas fa-trash-alt text-xs"></i>
+                                              </button>
+                                              {% endif %}
+                                          </div>
                                       </template>
-                                      <template x-if="getTask(row.id)">
-                                          <button @click="openTaskModal(row.id)" 
-                                                  class="h-7 px-2 inline-flex items-center gap-1.5 text-xs font-semibold rounded-lg border transition-all"
-                                                  :class="getTaskStatusClass(getTask(row.id).status)"
-                                                  title="Open Task Details & Discussion">
-                                              <i class="fas fa-tasks text-[10px]"></i>
-                                              <span x-text="getTask(row.id).status"></span>
-                                          </button>
-                                      </template>
-                                      <template x-if="!getTask(row.id) && userRole in ['SUPER_ADMIN', 'ADMIN']">
-                                          <button @click="openAssignModal(row.id)" class="w-7 h-7 inline-flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg border border-transparent hover:border-blue-200 transition-colors" title="Assign Task">
-                                              <i class="fas fa-user-plus text-xs"></i>
-                                          </button>
-                                      </template>
-                                      {% if has_edit_access %}
-                                      <button @click="deleteRow(row.id)" class="w-7 h-7 inline-flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg border border-transparent hover:border-rose-200 transition-colors" title="Delete Row">
-                                          <i class="fas fa-trash-alt text-xs"></i>
-                                      </button>
-                                      {% endif %}
                                   </div>
                               </td>
                           </tr>
@@ -1422,7 +1452,7 @@
                             </div>
 
                             <!-- Follow-up Timeline -->
-                            {% if table.job_type == 'SALES' or table.job_type == 'LIST_PID' %}
+                            {% if table.job_type == 'SALES' or table.job_type == 'LIST_PID' or has_follow_up %}
                             <div class="pt-1">
                                 <h4 class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-3">Logs & History</h4>
                                 
@@ -1481,11 +1511,15 @@
                         </div>
 
                         <!-- Record Today's Follow-up Form (Sticky Bottom Drawer Composer) -->
-                        {% if table.job_type == 'SALES' or table.job_type == 'LIST_PID' %}
-                        <div class="border-t border-gray-150 p-4 bg-white mt-auto flex-shrink-0 animate-fade-in" x-show="activeRow.task_details && activeRow.task_details.status !== 'COMPLETED' && activeRow.task_details.status !== 'APPROVED'">
+                        {% if table.job_type == 'SALES' or table.job_type == 'LIST_PID' or has_follow_up %}
+                        <div class="border-t border-gray-150 p-4 bg-white mt-auto flex-shrink-0 animate-fade-in" x-show="activeRow">
                             <div class="bg-emerald-50/40 border border-emerald-100 rounded-lg p-2.5 space-y-2.5">
                                 <div class="flex items-center justify-between text-[10px] font-bold text-emerald-800">
                                     <span class="flex items-center gap-1"><i class="fas fa-pen-nib"></i> Record New Log</span>
+                                </div>
+                                <div x-show="isRowCompleted(activeRow)" class="text-[10px] text-emerald-800 bg-emerald-50/90 p-1.5 rounded border border-emerald-200 flex items-center gap-1.5">
+                                    <i class="fas fa-info-circle text-emerald-600"></i>
+                                    <span>This record is currently marked as <strong>Completed</strong>. Saving a follow-up will update its status.</span>
                                 </div>
                                 
                                 <div class="space-y-2">
@@ -3719,23 +3753,49 @@ comments: [],
 
 
 
+            openFollowUpModal(row) {
+                this.activeRow = row;
+                const isSales = '{{ table.job_type }}' === 'SALES' || '{{ has_follow_up }}' === 'True';
+                const isListPid = '{{ table.job_type }}' === 'LIST_PID';
+                const isLogs = '{{ table.job_type }}' === 'LOGS';
+                this.activeTaskName = isSales ? (this.getCellValue(row, 'CUSTOMER_NAME') || this.getCellValue(row, 'TASK_NAME') || 'Sales Record') : (isListPid ? (this.getCellValue(row, 'ENQUIRY_NO') || this.getCellValue(row, 'PID') || 'Unnamed') : (isLogs ? (this.getCellValue(row, 'TOOL_NAME') || 'Unnamed Tool') : this.getCellValue(row, 'TASK_NAME')));
+                this.activeTaskDueDate = isSales ? (this.getCellValue(row, 'FOLLOW_UP_DATE') || this.getCellValue(row, 'DUE_DATE')) : (isListPid ? (this.getCellValue(row, 'DUE_DATE_FLOW_FORCE') || this.getCellValue(row, 'DUE_DATE_CUSTOMER')) : (isLogs ? (this.getCellValue(row, 'RETURN_DATE') || this.getCellValue(row, 'DUE_DATE')) : this.getCellValue(row, 'DUE_DATE')));
+                this.activeTaskPriority = row.task_details ? row.task_details.priority : 'MEDIUM';
+                this.activeTaskStatus = row.task_details ? row.task_details.status : (this.isRowCompleted(row) ? 'COMPLETED' : 'PENDING');
+                this.activeDrawerTab = 'properties'; // Focus directly on Follow-up timeline & form
+                this.isTaskModalOpen = true;
+                
+                this.salesDiscussedPoints = '';
+                this.salesNextFollowUpDate = '';
+                this.salesStatus = (this.activeTaskStatus === 'COMPLETED' || this.activeTaskStatus === 'APPROVED') ? 'IN_PROGRESS' : this.activeTaskStatus;
+                this.salesError = '';
+                
+                this.fetchComments();
+                this.$nextTick(() => {
+                    setTimeout(() => {
+                        const fuTextarea = document.querySelector('textarea[x-model="salesDiscussedPoints"]');
+                        if (fuTextarea) fuTextarea.focus();
+                    }, 250);
+                });
+            },
+
             // Task Details & Comment Drawer
             openTaskModal(row) {
                 this.activeRow = row;
-                const isSales = '{{ table.job_type }}' === 'SALES';
+                const isSales = '{{ table.job_type }}' === 'SALES' || '{{ has_follow_up }}' === 'True';
                 const isListPid = '{{ table.job_type }}' === 'LIST_PID';
                 const isLogs = '{{ table.job_type }}' === 'LOGS';
-                this.activeTaskName = isSales ? this.getCellValue(row, 'CUSTOMER_NAME') : (isListPid ? (this.getCellValue(row, 'ENQUIRY_NO') || this.getCellValue(row, 'PID') || 'Unnamed') : (isLogs ? (this.getCellValue(row, 'TOOL_NAME') || 'Unnamed Tool') : this.getCellValue(row, 'TASK_NAME')));
-                this.activeTaskDueDate = isSales ? this.getCellValue(row, 'FOLLOW_UP_DATE') : (isListPid ? (this.getCellValue(row, 'DUE_DATE_FLOW_FORCE') || this.getCellValue(row, 'DUE_DATE_CUSTOMER')) : (isLogs ? (this.getCellValue(row, 'RETURN_DATE') || this.getCellValue(row, 'DUE_DATE')) : this.getCellValue(row, 'DUE_DATE')));
+                this.activeTaskName = isSales ? (this.getCellValue(row, 'CUSTOMER_NAME') || this.getCellValue(row, 'TASK_NAME') || 'Sales Record') : (isListPid ? (this.getCellValue(row, 'ENQUIRY_NO') || this.getCellValue(row, 'PID') || 'Unnamed') : (isLogs ? (this.getCellValue(row, 'TOOL_NAME') || 'Unnamed Tool') : this.getCellValue(row, 'TASK_NAME')));
+                this.activeTaskDueDate = isSales ? (this.getCellValue(row, 'FOLLOW_UP_DATE') || this.getCellValue(row, 'DUE_DATE')) : (isListPid ? (this.getCellValue(row, 'DUE_DATE_FLOW_FORCE') || this.getCellValue(row, 'DUE_DATE_CUSTOMER')) : (isLogs ? (this.getCellValue(row, 'RETURN_DATE') || this.getCellValue(row, 'DUE_DATE')) : this.getCellValue(row, 'DUE_DATE')));
                 this.activeTaskPriority = row.task_details ? row.task_details.priority : 'MEDIUM';
-                this.activeTaskStatus = row.task_details ? row.task_details.status : 'PENDING';
-                this.activeDrawerTab = 'chat';
+                this.activeTaskStatus = row.task_details ? row.task_details.status : (this.isRowCompleted(row) ? 'COMPLETED' : 'PENDING');
+                this.activeDrawerTab = isSales ? 'properties' : 'chat';
                 this.isTaskModalOpen = true;
                 
                 if (isSales || isListPid) {
                     this.salesDiscussedPoints = '';
                     this.salesNextFollowUpDate = '';
-                    this.salesStatus = this.activeTaskStatus;
+                    this.salesStatus = (this.activeTaskStatus === 'COMPLETED' || this.activeTaskStatus === 'APPROVED') ? 'IN_PROGRESS' : this.activeTaskStatus;
                     this.salesError = '';
                 }
                 
@@ -3818,6 +3878,7 @@ comments: [],
             },
 
             submitSalesFollowUp() {
+                if (!this.activeRow) return;
                 if (!this.salesDiscussedPoints || !this.salesDiscussedPoints.trim()) {
                     this.salesError = "Discussed points are required.";
                     return;
@@ -3828,40 +3889,74 @@ comments: [],
                 }
                 
                 this.salesError = "";
-                fetch(`/tasks/api/tasks/${this.activeRow.task_details.id}/log-follow-up/`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': '{{ csrf_token }}'
-                    },
-                    body: JSON.stringify({
-                        discussed_points: this.salesDiscussedPoints,
-                        status: this.salesStatus,
-                        next_follow_up_date: this.salesNextFollowUpDate
+                const executeFollowUpPost = (effectiveTaskId) => {
+                    fetch(`/tasks/api/tasks/${effectiveTaskId}/log-follow-up/`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': '{{ csrf_token }}'
+                        },
+                        body: JSON.stringify({
+                            discussed_points: this.salesDiscussedPoints,
+                            status: this.salesStatus,
+                            next_follow_up_date: this.salesNextFollowUpDate
+                        })
                     })
-                })
-                .then(res => {
-                    if (res.ok) {
-                        this.salesDiscussedPoints = '';
-                        this.salesNextFollowUpDate = '';
-                        this.salesStatus = 'IN_PROGRESS';
-                        this.fetchRows();
-                        res.json().then(updatedTask => {
-                            this.activeRow.task_details = updatedTask;
-                            this.activeTaskStatus = updatedTask.status;
-                            this.activeTaskDueDate = updatedTask.due_date;
-                            this.comments = updatedTask.comments || [];
-                        });
-                    } else {
-                        res.json().then(data => {
-                            this.salesError = data.error || "Failed to save follow-up.";
-                        });
-                    }
-                });
+                    .then(res => {
+                        if (res.ok) {
+                            this.salesDiscussedPoints = '';
+                            this.salesNextFollowUpDate = '';
+                            this.salesStatus = 'IN_PROGRESS';
+                            this.fetchRows();
+                            res.json().then(updatedTask => {
+                                this.activeRow.task_details = updatedTask;
+                                this.activeTaskStatus = updatedTask.status;
+                                this.activeTaskDueDate = updatedTask.due_date;
+                                this.comments = updatedTask.comments || [];
+                            });
+                        } else {
+                            res.json().then(data => {
+                                this.salesError = data.error || "Failed to save follow-up.";
+                            }).catch(() => {
+                                this.salesError = "Failed to save follow-up.";
+                            });
+                        }
+                    })
+                    .catch(err => {
+                        this.salesError = "Network error: " + err;
+                    });
+                };
+
+                const currentTaskId = (this.activeRow.task_details && this.activeRow.task_details.id) ? this.activeRow.task_details.id : null;
+                if (!currentTaskId) {
+                    // Auto-sync row to initialize Task
+                    fetch(`/tables/api/rows/${this.activeRow.id}/toggle-status/`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': '{{ csrf_token }}'
+                        },
+                        body: JSON.stringify({ status: this.salesStatus })
+                    })
+                    .then(res => res.json())
+                    .then(updatedRow => {
+                        this.activeRow = updatedRow;
+                        if (updatedRow.task_details && updatedRow.task_details.id) {
+                            executeFollowUpPost(updatedRow.task_details.id);
+                        } else {
+                            this.salesError = "Unable to initialize follow-up task.";
+                        }
+                    })
+                    .catch(() => {
+                        this.salesError = "Error initializing task for follow-up.";
+                    });
+                } else {
+                    executeFollowUpPost(currentTaskId);
+                }
             },
 
             updateTaskStatus() {
-                if (!this.activeRow.task_details) return;
+                if (!this.activeRow || !this.activeRow.task_details) return;
                 fetch(`/tasks/api/tasks/${this.activeRow.task_details.id}/update-status/`, {
                     method: 'POST',
                     headers: {
@@ -3879,26 +3974,61 @@ comments: [],
                 });
             },
 
-             toggleTaskCompletion(taskId, currentStatus) {
-                 const newStatus = (currentStatus === 'COMPLETED' || currentStatus === 'APPROVED') ? 'PENDING' : 'COMPLETED';
-                 fetch(`/tasks/api/tasks/${taskId}/update-status/`, {
-                     method: 'POST',
-                     headers: {
-                         'Content-Type': 'application/json',
-                         'X-CSRFToken': '{{ csrf_token }}'
-                     },
-                     body: JSON.stringify({
-                         status: newStatus
-                     })
-                 })
-                 .then(res => {
-                     if (res.ok) {
-                         this.fetchRows();
-                     } else {
-                         alert("Failed to update task completion.");
-                     }
-                 });
-             },
+            toggleTaskCompletion(row) {
+                if (!row) return;
+                const currentStatus = (row.task_details ? row.task_details.status : '') || (this.isRowCompleted(row) ? 'COMPLETED' : 'PENDING');
+                const newStatus = (currentStatus === 'COMPLETED' || currentStatus === 'APPROVED') ? 'PENDING' : 'COMPLETED';
+
+                fetch(`/tables/api/rows/${row.id}/toggle-status/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({
+                        status: newStatus
+                    })
+                })
+                .then(res => {
+                    if (res.ok) {
+                        return res.json().then(updatedRow => {
+                            const idx = this.rows.findIndex(r => r.id === row.id);
+                            if (idx !== -1) {
+                                this.rows[idx] = updatedRow;
+                            }
+                            if (this.activeRow && this.activeRow.id === row.id) {
+                                this.activeRow = updatedRow;
+                                this.activeTaskStatus = updatedRow.task_details ? updatedRow.task_details.status : newStatus;
+                            }
+                            this.fetchRows();
+                        });
+                    } else {
+                        // Fallback to task update-status if available
+                        if (row.task_details && row.task_details.id) {
+                            fetch(`/tasks/api/tasks/${row.task_details.id}/update-status/`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'X-CSRFToken': '{{ csrf_token }}'
+                                },
+                                body: JSON.stringify({ status: newStatus })
+                            }).then(r => {
+                                if (r.ok) {
+                                    this.fetchRows();
+                                } else {
+                                    alert("Failed to update completion status.");
+                                }
+                            });
+                        } else {
+                            alert("Failed to update completion status.");
+                        }
+                    }
+                })
+                .catch(err => {
+                    console.error("Error toggling completion:", err);
+                    alert("Network error updating completion status.");
+                });
+            },
 
             moveColumnLeft(columnId) {
                 const index = this.columns.findIndex(c => c.id === columnId);

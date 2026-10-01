@@ -75,9 +75,33 @@ class RowSerializer(serializers.ModelSerializer):
         fields = ["id", "table", "created_by", "is_archived", "created_at", "updated_at", "cells", "task_details"]
 
     def get_task_details(self, obj):
-        if hasattr(obj, "task"):
+        task = getattr(obj, "task", None)
+        if not task:
+            try:
+                from tasks.models import Task
+                from datetime import datetime
+                due_date = None
+                date_cell = obj.cells.filter(column__name__in=["DUE_DATE", "FOLLOW_UP_DATE", "RETURN_DATE", "DUE_DATE_FLOW_FORCE"]).first()
+                if date_cell and date_cell.value:
+                    try:
+                        due_date = datetime.strptime(str(date_cell.value).split("T")[0], "%Y-%m-%d").date()
+                    except Exception:
+                        due_date = None
+                task, _ = Task.objects.get_or_create(
+                    row=obj,
+                    defaults={
+                        "due_date": due_date,
+                        "priority": "MEDIUM",
+                        "status": "PENDING",
+                        "assigned_by": obj.created_by
+                    }
+                )
+            except Exception:
+                task = getattr(obj, "task", None)
+
+        if task:
             from tasks.serializers import TaskMinSerializer
-            return TaskMinSerializer(obj.task).data
+            return TaskMinSerializer(task).data
         return None
 
 class TableSerializer(serializers.ModelSerializer):
