@@ -23,11 +23,23 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-your-secret-key-change-in-
 
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
-allowed_hosts_env = os.getenv('ALLOWED_HOSTS', '*')
-if allowed_hosts_env == '*':
+allowed_hosts_env = os.getenv('ALLOWED_HOSTS')
+if allowed_hosts_env:
+    ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_env.split(',') if host.strip()]
+elif DEBUG:
     ALLOWED_HOSTS = ['*']
 else:
-    ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_env.split(',') if host]
+    ALLOWED_HOSTS = ['flowforceworkspace.cloud', 'www.flowforceworkspace.cloud', 'localhost', '127.0.0.1']
+
+# Python 3.14 compatibility shim for Django 4.2 BaseContext.__copy__
+import sys
+if sys.version_info >= (3, 14):
+    from django.template.context import BaseContext
+    def _compat_base_context_copy(self):
+        duplicate = object.__new__(self.__class__)
+        duplicate.dicts = self.dicts[:]
+        return duplicate
+    BaseContext.__copy__ = _compat_base_context_copy
 
 # --------------------------------------------------
 # APPLICATIONS
@@ -252,24 +264,38 @@ LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = '/login/'
 
 # SESSION SETTINGS
-# Keep sessions active for 10 years (forever until logged out)
-SESSION_COOKIE_AGE = 10 * 365 * 24 * 60 * 60  # 315360000 seconds
+# Keep sessions active for 10 years (forever until logged out) by default, or configurable via env
+SESSION_COOKIE_AGE = int(os.getenv('SESSION_COOKIE_AGE', 10 * 365 * 24 * 60 * 60))
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = False
 
+# Cookie & Transport Security
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+else:
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False
 
 # EMAIL CONFIGURATION
 
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.smtp.EmailBackend')
 
-EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_PORT = 587
+EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
 
-EMAIL_USE_TLS = True
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
 
-EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', 'operations.flowforce@gmail.com')
-EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', 'dnqq hseq ubdh zear')
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
 
-DEFAULT_FROM_EMAIL = f'Flow-Force Workspace <{EMAIL_HOST_USER}>'
+DEFAULT_FROM_EMAIL = os.getenv(
+    'DEFAULT_FROM_EMAIL',
+    f'Flow-Force Workspace <{EMAIL_HOST_USER}>' if EMAIL_HOST_USER else 'Flow-Force Workspace <noreply@flowforce.local>'
+)
 
 # CELERY SETTINGS
 from celery.schedules import crontab

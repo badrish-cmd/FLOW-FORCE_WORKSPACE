@@ -4,7 +4,7 @@ from django.utils import timezone
 from datetime import timedelta
 from unittest.mock import patch
 from employee_management.models import Department
-from tables.models import Table, Column, Row, CellValue
+from tables.models import Table, Column, Row, CellValue, TableAccess
 from tasks.models import Task, EmailLog, Notification, TaskComment
 from tasks.tasks import (
     check_overdue_escalations, send_daily_alert_mails, send_email_log_task,
@@ -426,3 +426,154 @@ class TasksTestCase(TestCase):
         self.assertEqual(task.task_name, "Cyberdyne Inc")
         self.assertEqual(task.due_date.isoformat(), "2026-07-05")
         self.assertEqual(task.priority, "HIGH")
+
+
+class TableAccessTaskAssignmentRegressionTestCase(TestCase):
+    """
+    Regression tests proving that TableAccess modifications (create, update, delete)
+    NEVER overwrite or alter existing individual task.assigned_to relationships.
+    """
+    def setUp(self):
+        self.dept = Department.objects.create(name="Access QA Dept", slug="access-qa-dept")
+        self.admin = User.objects.create_user(
+            email="admin_access@flow-force.com",
+            password="testpassword",
+            full_name="Access Admin",
+            role="ADMIN",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.employee1 = User.objects.create_user(
+            email="emp1_access@flow-force.com",
+            password="testpassword",
+            full_name="Employee One",
+            role="EMPLOYEE",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.employee2 = User.objects.create_user(
+            email="emp2_access@flow-force.com",
+            password="testpassword",
+            full_name="Employee Two",
+            role="EMPLOYEE",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.viewer = User.objects.create_user(
+            email="viewer_access@flow-force.com",
+            password="testpassword",
+            full_name="Viewer User",
+            role="EMPLOYEE",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.table = Table.objects.create(name="Table Access QA", created_by=self.admin, department=self.dept)
+        self.row1 = Row.objects.create(table=self.table, created_by=self.admin)
+        self.task1 = Task.objects.create(
+            row=self.row1,
+            priority="HIGH",
+            status="PENDING",
+            assigned_by=self.admin
+        )
+        self.task1.assigned_to.set([self.employee1])
+
+    @patch("tasks.tasks.send_initial_mail.delay")
+    def test_existing_task_assignees_unchanged_when_table_access_created(self, mock_mail):
+        """Proving existing task assignees remain unchanged when TableAccess is created."""
+        initial_assignees = list(self.task1.assigned_to.all())
+        self.assertEqual(initial_assignees, [self.employee1])
+
+        # Create TableAccess for another user
+        access = TableAccess.objects.create(
+            table=self.table,
+            user=self.viewer,
+            access_level="VIEW"
+        )
+
+        self.task1.refresh_from_db()
+        current_assignees = list(self.task1.assigned_to.all())
+        self.assertEqual(current_assignees, [self.employee1])
+        self.assertEqual(current_assignees, initial_assignees)
+
+    @patch("tasks.tasks.send_initial_mail.delay")
+    def test_existing_task_assignees_unchanged_when_table_access_modified(self, mock_mail):
+        """Proving existing task assignees remain unchanged when TableAccess is modified."""
+        access = TableAccess.objects.create(
+            table=self.table,
+            user=self.viewer,
+            access_level="VIEW"
+        )
+        self.task1.refresh_from_db()
+        self.assertEqual(list(self.task1.assigned_to.all()), [self.employee1])
+
+        # Modify TableAccess access_level
+        access.access_level = "EDIT"
+        access.save()
+
+        self.task1.refresh_from_db()
+        self.assertEqual(list(self.task1.assigned_to.all()), [self.employee1])
+
+        # Upgrade to ADMIN
+        access.access_level = "ADMIN"
+        access.save()
+
+        self.task1.refresh_from_db()
+        self.assertEqual(list(self.task1.assigned_to.all()), [self.employee1])
+
+    @patch("tasks.tasks.send_initial_mail.delay")
+    def test_existing_task_assignees_unchanged_when_table_access_deleted(self, mock_mail):
+        """Proving existing task assignees remain unchanged when TableAccess is deleted."""
+        access = TableAccess.objects.create(
+            table=self.table,
+            user=self.viewer,
+            access_level="EDIT"
+        )
+        self.task1.refresh_from_db()
+        self.assertEqual(list(self.task1.assigned_to.all()), [self.employee1])
+
+        # Delete TableAccess
+        access.delete()
+
+        self.task1.refresh_from_db()
+        self.assertEqual(list(self.task1.assigned_to.all()), [self.employee1])
+
+    @patch("tasks.tasks.send_initial_mail.delay")
+    def test_multiple_tasks_with_distinct_assignees_preserved(self, mock_mail):
+        """Proving distinct task assignees across multiple rows are all preserved through TableAccess lifecycle."""
+        row2 = Row.objects.create(table=self.table, created_by=self.admin)
+        task2 = Task.objects.create(
+            row=row2,
+            priority="LOW",
+            status="PENDING",
+            assigned_by=self.admin
+        )
+        task2.assigned_to.set([self.employee2])
+
+        # Create TableAccess with department
+        dept_access = TableAccess.objects.create(
+            table=self.table,
+            department=self.dept,
+            access_level="EDIT"
+        )
+
+        self.task1.refresh_from_db()
+        task2.refresh_from_db()
+        self.assertEqual(list(self.task1.assigned_to.all()), [self.employee1])
+        self.assertEqual(list(task2.assigned_to.all()), [self.employee2])
+
+        # Modify department access
+        dept_access.access_level = "VIEW"
+        dept_access.save()
+
+        self.task1.refresh_from_db()
+        task2.refresh_from_db()
+        self.assertEqual(list(self.task1.assigned_to.all()), [self.employee1])
+        self.assertEqual(list(task2.assigned_to.all()), [self.employee2])
+
+        # Delete department access
+        dept_access.delete()
+
+        self.task1.refresh_from_db()
+        task2.refresh_from_db()
+        self.assertEqual(list(self.task1.assigned_to.all()), [self.employee1])
+        self.assertEqual(list(task2.assigned_to.all()), [self.employee2])

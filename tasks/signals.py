@@ -68,11 +68,17 @@ from tables.models import TableAccess
 
 @receiver(post_save, sender=TableAccess)
 def handle_table_access_save(sender, instance, **kwargs):
-    for task in Task.objects.filter(row__table=instance.table):
-        sync_task_assignments(task)
+    """
+    Changing table access permissions must NEVER overwrite existing
+    individual task.assigned_to relationships.
+    """
+    pass
 
 @receiver(post_delete, sender=TableAccess)
 def handle_table_access_delete(sender, instance, **kwargs):
-    for task in Task.objects.filter(row__table=instance.table):
-        sync_task_assignments(task)
+    """
+    Revoking table access permissions must NEVER overwrite existing
+    individual task.assigned_to relationships.
+    """
+    pass
 

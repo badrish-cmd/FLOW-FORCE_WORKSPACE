@@ -4,7 +4,10 @@ from rest_framework.decorators import action
 from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.utils import timezone
+import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from .models import Table, Column, Row, CellValue, TableAccess, ColumnAccess
 from .serializers import (
@@ -1147,10 +1150,9 @@ class TableViewSet(viewsets.ModelViewSet):
 
             return Response({"message": f"Successfully imported {len(created_rows)} rows"}, status=status.HTTP_201_CREATED)
         except Exception as e:
-            import traceback
+            logger.exception("Internal Server Error during CSV import: %s", str(e))
             return Response({
-                "error": f"Internal Server Error during CSV import: {str(e)}",
-                "traceback": traceback.format_exc()
+                "error": "Failed to import CSV. An internal server error occurred."
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=True, methods=["post"], url_path="import-google-sheet")
@@ -1204,10 +1206,9 @@ class TableViewSet(viewsets.ModelViewSet):
 
             return Response({"message": f"Successfully imported {len(created_rows)} rows from Google Sheets"}, status=status.HTTP_201_CREATED)
         except Exception as e:
-            import traceback
+            logger.exception("Internal Server Error during Google Sheet import: %s", str(e))
             return Response({
-                "error": f"Internal Server Error during Google Sheet import: {str(e)}",
-                "traceback": traceback.format_exc()
+                "error": "Failed to import Google Sheet. An internal server error occurred."
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=True, methods=["post"], url_path="bulk-update")
