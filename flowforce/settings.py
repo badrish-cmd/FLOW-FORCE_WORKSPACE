@@ -155,12 +155,43 @@ else:
 # CACHES
 # --------------------------------------------------
 
-CACHES = {
-    'default': {
-        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        'LOCATION': 'flowforce-cache',
+def get_cache_config(cache_url=None, debug=True, is_testing=False):
+    """
+    Returns the cache configuration dictionary.
+    - Production (or explicit CACHE_URL): Uses shared RedisCache backend (DB 1 by default).
+    - Local / Testing (when CACHE_URL is not set): Falls back to LocMemCache so that
+      developers on local machines (e.g. Windows) and test suites do not require a live Redis instance.
+    """
+    if cache_url:
+        return {
+            'default': {
+                'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+                'LOCATION': cache_url,
+                'KEY_PREFIX': 'flowforce',
+                'TIMEOUT': 86400,
+            }
+        }
+    if not debug and not is_testing:
+        return {
+            'default': {
+                'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+                'LOCATION': 'redis://127.0.0.1:6379/1',
+                'KEY_PREFIX': 'flowforce',
+                'TIMEOUT': 86400,
+            }
+        }
+    return {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'flowforce-cache',
+            'TIMEOUT': 86400,
+        }
     }
-}
+
+
+CACHE_URL = os.getenv('CACHE_URL')
+IS_TESTING = 'test' in sys.argv
+CACHES = get_cache_config(cache_url=CACHE_URL, debug=DEBUG, is_testing=IS_TESTING)
 
 # --------------------------------------------------
 # CUSTOM USER MODEL

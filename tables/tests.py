@@ -2734,3 +2734,101 @@ class TableStatisticsOptimizationRegressionTestCase(TestCase):
         self.assertEqual(res.status_code, 200)
         # Should be tightly bounded (Table+department, columns prefetch, access check, + context processor)
         self.assertLessEqual(len(ctx), 8)
+
+
+class RedisCacheConfigurationRegressionTestCase(TestCase):
+    """
+    Phase 2D Regression Tests:
+    Verifies Redis cache configuration, fallback to LocMemCache, cache lifecycle,
+    and preservation of table statistics cache keys and Celery broker isolation.
+    """
+
+    def test_production_style_redis_cache_config_with_cache_url(self):
+        """Production-style Redis cache configuration resolves correctly when CACHE_URL is configured."""
+        from flowforce.settings import get_cache_config
+        config = get_cache_config(cache_url="redis://127.0.0.1:6379/1", debug=False, is_testing=False)
+        self.assertEqual(config['default']['BACKEND'], 'django.core.cache.backends.redis.RedisCache')
+        self.assertEqual(config['default']['LOCATION'], 'redis://127.0.0.1:6379/1')
+        self.assertEqual(config['default']['KEY_PREFIX'], 'flowforce')
+        self.assertEqual(config['default']['TIMEOUT'], 86400)
+
+    def test_production_default_cache_config_without_cache_url(self):
+        """Production default resolves to RedisCache DB 1 when CACHE_URL is not set."""
+        from flowforce.settings import get_cache_config
+        config = get_cache_config(cache_url=None, debug=False, is_testing=False)
+        self.assertEqual(config['default']['BACKEND'], 'django.core.cache.backends.redis.RedisCache')
+        self.assertEqual(config['default']['LOCATION'], 'redis://127.0.0.1:6379/1')
+        self.assertEqual(config['default']['KEY_PREFIX'], 'flowforce')
+        self.assertEqual(config['default']['TIMEOUT'], 86400)
+
+    def test_local_dev_resolves_to_locmem_cache(self):
+        """Local/default configuration resolves to LocMemCache when Redis is not configured."""
+        from flowforce.settings import get_cache_config
+        config = get_cache_config(cache_url=None, debug=True, is_testing=False)
+        self.assertEqual(config['default']['BACKEND'], 'django.core.cache.backends.locmem.LocMemCache')
+        self.assertEqual(config['default']['LOCATION'], 'flowforce-cache')
+        self.assertEqual(config['default']['TIMEOUT'], 86400)
+
+    def test_test_environment_resolves_to_locmem_cache(self):
+        """Test environment safely defaults to LocMemCache so tests do not require a live Redis instance."""
+        from flowforce.settings import get_cache_config
+        config = get_cache_config(cache_url=None, debug=False, is_testing=True)
+        self.assertEqual(config['default']['BACKEND'], 'django.core.cache.backends.locmem.LocMemCache')
+        self.assertEqual(config['default']['LOCATION'], 'flowforce-cache')
+
+    def test_cache_set_get_delete_lifecycle(self):
+        """cache.set() followed by cache.get() returns expected value, and cache.delete() removes it."""
+        from django.core.cache import cache
+        test_key = "test_phase2d_cache_lifecycle_key"
+        test_val = {"status": "ok", "count": 42}
+
+        # Ensure clean state
+        cache.delete(test_key)
+        self.assertIsNone(cache.get(test_key))
+
+        # Set and get
+        cache.set(test_key, test_val, 86400)
+        retrieved = cache.get(test_key)
+        self.assertEqual(retrieved, test_val)
+
+        # Delete and verify removal
+        cache.delete(test_key)
+        self.assertIsNone(cache.get(test_key))
+
+    def test_table_statistics_cache_key_preservation(self):
+        """Existing table statistics cache keys (table_stats_{table_id}_{date}) still work as expected."""
+        from datetime import date
+        from django.core.cache import cache
+        table_id = 9999
+        today_str = date.today().isoformat()
+        expected_key = f"table_stats_{table_id}_{today_str}"
+
+        stats_payload = {
+            "completion_stats": {"total": 50, "completed": 25, "percent": 50},
+            "due_today_count": 5,
+            "overdue_count": 2,
+            "total_qty": 1250.0,
+        }
+
+        cache.delete(expected_key)
+        self.assertIsNone(cache.get(expected_key))
+
+        cache.set(expected_key, stats_payload, 86400)
+        self.assertEqual(cache.get(expected_key), stats_payload)
+
+        cache.delete(expected_key)
+        self.assertIsNone(cache.get(expected_key))
+
+    def test_redis_cache_backend_instantiation(self):
+        """Verifies RedisCache backend class can be instantiated with production parameters."""
+        from django.core.cache.backends.redis import RedisCache
+        backend = RedisCache('redis://127.0.0.1:6379/1', {'KEY_PREFIX': 'flowforce', 'TIMEOUT': 86400})
+        self.assertEqual(backend._servers, ['redis://127.0.0.1:6379/1'])
+        self.assertEqual(backend.key_prefix, 'flowforce')
+        self.assertEqual(backend.default_timeout, 86400)
+
+    def test_celery_broker_configuration_preserved(self):
+        """CELERY_BROKER_URL and CELERY_RESULT_BACKEND remain unchanged on Redis DB 0."""
+        from django.conf import settings
+        self.assertEqual(settings.CELERY_BROKER_URL, 'redis://localhost:6379/0')
+        self.assertEqual(settings.CELERY_RESULT_BACKEND, 'redis://localhost:6379/0')
