@@ -361,100 +361,112 @@ class TableViewSet(viewsets.ModelViewSet):
         return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=["post"], url_path="duplicate")
-    @transaction.atomic
     def duplicate_table(self, request, pk=None):
         table = self.get_object_or_404(pk)
         if not has_table_access(request.user, table, "ADMIN"):
             return Response({"error": "Only admins can duplicate this table"}, status=status.HTTP_403_FORBIDDEN)
 
-        # Clone table metadata
-        new_table = Table.objects.create(
-            name=f"Copy of {table.name}",
-            description=table.description,
-            created_by=request.user,
-            department=table.department,
-            job_type=table.job_type
-        )
-
-        column_mapping = {}
-
-        # Match system columns by name and copy options, position, is_mandatory, etc.
-        for old_col in table.columns.filter(is_system_column=True):
-            new_col = new_table.columns.filter(name=old_col.name).first()
-            if new_col:
-                new_col.options = old_col.options
-                new_col.position = old_col.position
-                new_col.is_mandatory = old_col.is_mandatory
-                new_col.save()
-                column_mapping[old_col.id] = new_col
-
-        # Clone custom columns (excluding system columns as they are auto-created in save())
-        for old_col in table.columns.filter(is_system_column=False):
-            existing_col = new_table.columns.filter(name=old_col.name).first()
-            if existing_col:
-                existing_col.options = old_col.options
-                existing_col.position = old_col.position
-                existing_col.is_mandatory = old_col.is_mandatory
-                existing_col.save()
-                column_mapping[old_col.id] = existing_col
-            else:
-                new_col = Column.objects.create(
-                    table=new_table,
-                    name=old_col.name,
-                    data_type=old_col.data_type,
-                    is_mandatory=old_col.is_mandatory,
-                    is_system_column=False,
-                    position=old_col.position,
-                    options=old_col.options
+        try:
+            with transaction.atomic():
+                # Clone table metadata
+                new_table = Table.objects.create(
+                    name=f"Copy of {table.name}",
+                    description=table.description,
+                    created_by=request.user,
+                    department=table.department,
+                    job_type=table.job_type
                 )
-                column_mapping[old_col.id] = new_col
 
-        # Clone TableAccess
-        for access in table.access_rules.all():
-            TableAccess.objects.create(
-                table=new_table,
-                user=access.user,
-                department=access.department,
-                access_level=access.access_level
-            )
+                column_mapping = {}
 
-        # Clone Rows, CellValues and Tasks
-        for old_row in table.rows.all():
-            new_row = Row.objects.create(
-                table=new_table,
-                created_by=request.user,
-                is_archived=old_row.is_archived
-            )
-            
-            # Copy cells
-            for old_cell in old_row.cells.all():
-                new_col = column_mapping.get(old_cell.column_id)
-                if new_col:
-                    CellValue.objects.create(
-                        row=new_row,
-                        column=new_col,
-                        value=old_cell.value,
-                        updated_by=request.user
+                # Match system columns by name and copy options, position, is_mandatory, etc.
+                for old_col in table.columns.filter(is_system_column=True):
+                    new_col = new_table.columns.filter(name=old_col.name).first()
+                    if new_col:
+                        new_col.options = old_col.options
+                        new_col.position = old_col.position
+                        new_col.is_mandatory = old_col.is_mandatory
+                        new_col.save()
+                        column_mapping[old_col.id] = new_col
+
+                # Clone custom columns (excluding system columns as they are auto-created in save())
+                for old_col in table.columns.filter(is_system_column=False):
+                    existing_col = new_table.columns.filter(name=old_col.name).first()
+                    if existing_col:
+                        existing_col.options = old_col.options
+                        existing_col.position = old_col.position
+                        existing_col.is_mandatory = old_col.is_mandatory
+                        existing_col.save()
+                        column_mapping[old_col.id] = existing_col
+                    else:
+                        new_col = Column.objects.create(
+                            table=new_table,
+                            name=old_col.name,
+                            data_type=old_col.data_type,
+                            is_mandatory=old_col.is_mandatory,
+                            is_system_column=False,
+                            position=old_col.position,
+                            options=old_col.options
+                        )
+                        column_mapping[old_col.id] = new_col
+
+                # Clone TableAccess
+                for access in table.access_rules.all():
+                    TableAccess.objects.create(
+                        table=new_table,
+                        user=access.user,
+                        department=access.department,
+                        access_level=access.access_level
                     )
-            
-            # Copy Task if it exists
-            if hasattr(old_row, "task"):
-                old_task = old_row.task
-                new_task = Task.objects.create(
-                    row=new_row,
-                    assigned_by=old_task.assigned_by,
-                    status=old_task.status,
-                    due_date=old_task.due_date,
-                    priority=old_task.priority,
-                    initial_mail_sent=old_task.initial_mail_sent,
-                    alert_mail_sent=old_task.alert_mail_sent,
-                    last_escalation_level=old_task.last_escalation_level,
-                    last_escalation_at=old_task.last_escalation_at
-                )
-                if old_task.assigned_to.exists():
-                    new_task.assigned_to.set(old_task.assigned_to.all())
 
-        return Response(TableSerializer(new_table).data, status=status.HTTP_201_CREATED)
+                # Clone Rows, CellValues and Tasks
+                for old_row in table.rows.all():
+                    new_row = Row.objects.create(
+                        table=new_table,
+                        created_by=request.user,
+                        is_archived=old_row.is_archived
+                    )
+
+                    # Copy cells
+                    for old_cell in old_row.cells.all():
+                        new_col = column_mapping.get(old_cell.column_id)
+                        if new_col:
+                            CellValue.objects.create(
+                                row=new_row,
+                                column=new_col,
+                                value=old_cell.value,
+                                updated_by=request.user
+                            )
+
+                    # Copy Task if it exists
+                    if hasattr(old_row, "task"):
+                        old_task = old_row.task
+                        new_task = Task(
+                            row=new_row,
+                            assigned_by=old_task.assigned_by,
+                            status=old_task.status,
+                            due_date=old_task.due_date,
+                            priority=old_task.priority,
+                            initial_mail_sent=old_task.initial_mail_sent,
+                            alert_mail_sent=old_task.alert_mail_sent,
+                            last_escalation_level=old_task.last_escalation_level,
+                            last_escalation_at=old_task.last_escalation_at
+                        )
+                        new_task._skip_sync_signals = True
+                        new_task._skip_assignment_signal = True
+                        new_task.save()
+
+                        if old_task.assigned_to.exists():
+                            new_task._skip_assignment_signal = True
+                            new_task.assigned_to.set(old_task.assigned_to.all())
+
+                return Response(TableSerializer(new_table).data, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            logger.exception("Internal Server Error during table duplication: %s", str(e))
+            return Response(
+                {"error": "Failed to duplicate table. An internal server error occurred."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @action(detail=True, methods=["post"], url_path="bulk-delete-rows")
     @transaction.atomic
@@ -1886,7 +1898,7 @@ class RowViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def create(self, request, *args, **kwargs):
         table_id = request.data.get("table")
-        table = get_object_or_404(Table, id=table_id)
+        table = get_object_or_404(Table.objects.select_for_update(), id=table_id)
         
         if not has_table_access(request.user, table, "EDIT"):
             return Response({"error": "No edit access to this table"}, status=status.HTTP_403_FORBIDDEN)
@@ -1942,13 +1954,16 @@ class RowViewSet(viewsets.ModelViewSet):
         # Get system columns
         cols = {col.name: col for col in table.columns.all()}
 
-        # 2. Compute S_NO
+        # 2. Compute S_NO with concurrency protection
         latest_s_no = 0
         s_no_col = cols.get("S_NO")
         if s_no_col:
-            latest_cell = CellValue.objects.filter(column=s_no_col).order_by("-id").first()
-            if latest_cell and isinstance(latest_cell.value, int):
-                latest_s_no = latest_cell.value
+            latest_cell = CellValue.objects.select_for_update().filter(column=s_no_col).order_by("-id").first()
+            if latest_cell and latest_cell.value is not None:
+                try:
+                    latest_s_no = int(latest_cell.value)
+                except (ValueError, TypeError):
+                    latest_s_no = 0
         s_no = latest_s_no + 1
 
         # Save CellValues
@@ -2656,6 +2671,62 @@ def pid_dashboard_view(request):
     else:
         pid_tables = get_accessible_tables(request.user).filter(job_type="LIST_PID").select_related('department').prefetch_related('columns')
 
+    pid_tables = list(pid_tables)
+
+    from collections import defaultdict
+
+    # 1. Batch fetch all rows across all PID tables in a single query
+    all_rows = Row.objects.filter(
+        table__in=pid_tables,
+        is_archived=False
+    ).select_related('created_by', 'task')
+
+    rows_by_table = defaultdict(list)
+    all_row_ids = []
+    for r in all_rows:
+        rows_by_table[r.table_id].append(r)
+        all_row_ids.append(r.id)
+
+    # 2. Identify relevant column IDs needed for the PID dashboard
+    PID_RELEVANT_COLUMNS = {
+        "PID", "NEW_PID_NO", "NEW PID NO",
+        "ENQUIRY_NO/QUOTATION_NO", "QUOTATION_NO", "ENQUIRY_NO", "QUOTATION NO",
+        "PO", "PO_NO", "PURCHASE ORDER",
+        "SALES_ORDER", "SO", "SALES ORDER",
+        "COMPANY_NAME", "CUSTOMER_NAME", "CUSTOMER",
+        "DUE_DATE_CUSTOMER", "DUE_DATE_CUST",
+        "DUE_DATE_FLOW_FORCE", "DUE_DATE_FF", "DUE_DATE",
+        "DATE",
+        "STATUS", "CURRENT_STATUS",
+        "DESCRIPTION",
+        "QTY",
+        "PROJECT"
+    }
+
+    col_name_map = {}
+    relevant_col_ids = []
+    for table in pid_tables:
+        for col in table.columns.all():
+            upper_name = col.name.upper()
+            if upper_name in PID_RELEVANT_COLUMNS:
+                col_name_map[col.id] = upper_name
+                relevant_col_ids.append(col.id)
+
+    # 3. Batch fetch only relevant cell values in a single lightweight query
+    cells_by_row = defaultdict(dict)
+    if all_row_ids and relevant_col_ids:
+        cell_values = CellValue.objects.filter(
+            row_id__in=all_row_ids,
+            column_id__in=relevant_col_ids
+        ).values('row_id', 'column_id', 'value')
+
+        for cv in cell_values:
+            val = cv['value']
+            if val is not None:
+                col_name = col_name_map.get(cv['column_id'])
+                if col_name:
+                    cells_by_row[cv['row_id']][col_name] = val
+
     tables_pid_data = []
     quick_pid_summary = []
     available_years = set()
@@ -2674,9 +2745,7 @@ def pid_dashboard_view(request):
         return str(fallback_year)
 
     for table in pid_tables:
-        columns = list(table.columns.all())
-
-        rows = Row.objects.filter(table=table, is_archived=False).select_related('created_by', 'task').prefetch_related('cells__column')
+        rows = rows_by_table.get(table.id, [])
 
         pids = []
         tbl_total = 0
@@ -2686,7 +2755,7 @@ def pid_dashboard_view(request):
         tbl_due_today = 0
 
         for r in rows:
-            cells = {c.column.name.upper(): (c.value if c.value is not None else "") for c in r.cells.all()}
+            cells = cells_by_row.get(r.id, {})
 
             pid_val = str(cells.get("PID") or cells.get("NEW_PID_NO") or cells.get("NEW PID NO") or f"PID-{r.id}").strip()
             new_pid_val = str(cells.get("NEW_PID_NO") or cells.get("NEW PID NO") or "").strip()

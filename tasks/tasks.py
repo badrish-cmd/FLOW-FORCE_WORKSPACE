@@ -345,7 +345,7 @@ def send_daily_alert_mails():
                 except ValueError:
                     pass
         else:
-            if task.due_date and task.due_date <= today:
+            if task.due_date and task.due_date == today:
                 is_due = True
                 due_reasons.append("Due Date")
 
@@ -837,10 +837,12 @@ def check_overdue_escalations():
 
     for task in all_overdue:
         days_overdue = (today - task.due_date).days
-        if days_overdue == 6:
-            overdue_6d_tasks.append(task)
-        elif days_overdue == 1 and task.row.table.job_type == "LIST_PID":
-            overdue_1d_tasks.append(task)
+        if days_overdue >= 6:
+            if task.last_escalation_level < 6:
+                overdue_6d_tasks.append(task)
+        elif days_overdue >= 1 and task.row.table.job_type == "LIST_PID":
+            if task.last_escalation_level < 1:
+                overdue_1d_tasks.append(task)
 
     # 1. Process 6-day overdue tasks
     if overdue_6d_tasks:

@@ -48,6 +48,8 @@ def handle_task_save(sender, instance, created, **kwargs):
     Initialize row columns on creation or update cell values when mail state changes.
     Also triggers review request/approval status emails when status changes.
     """
+    if getattr(instance, "_skip_sync_signals", False):
+        return
     if created:
         update_task_row_mail_columns(instance)
         sync_task_assignments(instance)
@@ -60,6 +62,8 @@ def handle_task_assignment(sender, instance, action, **kwargs):
     """
     Trigger INITIAL_MAIL when task is assigned/updated.
     """
+    if getattr(instance, "_skip_assignment_signal", False):
+        return
     if action == "post_add":
         send_initial_mail.delay(instance.id)
 

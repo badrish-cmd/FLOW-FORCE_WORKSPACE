@@ -1,7 +1,7 @@
 from django.test import TestCase
 from django.urls import reverse
 from auth_app.models import EmployeeUser
-from employee_management.models import Department
+from employee_management.models import Department, EmployeeApprovalQueue
 from employee_management.forms import EmployeeForm
 
 class EmployeeManagementTests(TestCase):
@@ -197,3 +197,129 @@ class EmployeeManagementTests(TestCase):
         not_done_pairs = [(item["table_name"], item["holder_name"]) for item in not_done]
         self.assertNotIn(("Table 1", self.employee.full_name), not_done_pairs)
         self.assertIn(("Table 2", self.employee.full_name), not_done_pairs)
+
+
+class EmployeeApprovalQueueRegressionTests(TestCase):
+    """
+    BUG-02 Regression tests for EmployeeApprovalQueue workflow and status transitions.
+    """
+    def setUp(self):
+        self.dept, _ = Department.objects.get_or_create(name="QA Department")
+
+    def test_pending_to_approved_transition(self):
+        """Verify that transitioning employee status from PENDING to APPROVED marks queue as approved."""
+        emp = EmployeeUser.objects.create_user(
+            email="pending.appr@flow-force.com",
+            password="testpassword123",
+            full_name="Pending Appr",
+            role="EMPLOYEE",
+            status="PENDING",
+            department=self.dept
+        )
+        queue = EmployeeApprovalQueue.objects.create(
+            employee=emp,
+            is_approved=False
+        )
+        self.assertFalse(queue.is_approved)
+        self.assertIsNone(queue.reviewed_at)
+
+        # Transition to APPROVED
+        emp.status = "APPROVED"
+        emp.save()
+
+        queue.refresh_from_db()
+        self.assertTrue(queue.is_approved)
+        self.assertIsNotNone(queue.reviewed_at)
+        self.assertEqual(EmployeeApprovalQueue.objects.filter(employee=emp).count(), 1)
+
+    def test_pending_to_rejected_transition(self):
+        """Verify that transitioning employee status from PENDING to REJECTED marks queue as rejected."""
+        emp = EmployeeUser.objects.create_user(
+            email="pending.rej@flow-force.com",
+            password="testpassword123",
+            full_name="Pending Rej",
+            role="EMPLOYEE",
+            status="PENDING",
+            department=self.dept
+        )
+        queue = EmployeeApprovalQueue.objects.create(
+            employee=emp,
+            is_approved=True
+        )
+
+        # Transition to REJECTED
+        emp.status = "REJECTED"
+        emp.save()
+
+        queue.refresh_from_db()
+        self.assertFalse(queue.is_approved)
+        self.assertIsNotNone(queue.reviewed_at)
+        self.assertEqual(EmployeeApprovalQueue.objects.filter(employee=emp).count(), 1)
+
+    def test_unchanged_status_does_not_modify_or_duplicate_queue(self):
+        """Verify that saving employee with unchanged status does not alter queue or duplicate records."""
+        emp = EmployeeUser.objects.create_user(
+            email="pending.same@flow-force.com",
+            password="testpassword123",
+            full_name="Pending Same",
+            role="EMPLOYEE",
+            status="PENDING",
+            department=self.dept
+        )
+        queue = EmployeeApprovalQueue.objects.create(
+            employee=emp,
+            is_approved=False,
+            notes="Initial submission"
+        )
+
+        # Save without status change
+        emp.full_name = "Pending Updated Name"
+        emp.save()
+
+        queue.refresh_from_db()
+        self.assertFalse(queue.is_approved)
+        self.assertEqual(queue.notes, "Initial submission")
+        self.assertEqual(EmployeeApprovalQueue.objects.filter(employee=emp).count(), 1)
+
+    def test_new_employee_creation_does_not_create_duplicate_queue(self):
+        """Verify that creating a new employee does not duplicate approval queue entries."""
+        emp = EmployeeUser.objects.create_user(
+            email="brand.new@flow-force.com",
+            password="testpassword123",
+            full_name="Brand New",
+            role="EMPLOYEE",
+            status="PENDING",
+            department=self.dept
+        )
+        self.assertEqual(EmployeeApprovalQueue.objects.filter(employee=emp).count(), 0)
+
+    def test_repeated_save_is_idempotent(self):
+        """Verify that saving the same employee repeatedly preserves queue state idempotently."""
+        emp = EmployeeUser.objects.create_user(
+            email="repeat.save@flow-force.com",
+            password="testpassword123",
+            full_name="Repeat Save",
+            role="EMPLOYEE",
+            status="PENDING",
+            department=self.dept
+        )
+        queue = EmployeeApprovalQueue.objects.create(
+            employee=emp,
+            is_approved=False
+        )
+
+        # Transition to APPROVED
+        emp.status = "APPROVED"
+        emp.save()
+        queue.refresh_from_db()
+        self.assertTrue(queue.is_approved)
+        reviewed_at = queue.reviewed_at
+
+        # Repeated saves
+        emp.save()
+        emp.save()
+
+        queue.refresh_from_db()
+        self.assertTrue(queue.is_approved)
+        self.assertEqual(queue.reviewed_at, reviewed_at)
+        self.assertEqual(EmployeeApprovalQueue.objects.filter(employee=emp).count(), 1)

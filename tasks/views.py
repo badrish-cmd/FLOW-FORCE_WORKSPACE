@@ -543,7 +543,11 @@ def reports_view(request):
     if date_to:
         tasks = tasks.filter(due_date__lte=date_to)
 
-    tasks = tasks.distinct().order_by("-due_date")
+    tasks = tasks.distinct().order_by("-due_date").select_related(
+        "row__table", "row__table__department", "assigned_by"
+    ).prefetch_related(
+        "assigned_to", "row__cells__column"
+    )
 
     export_format = request.GET.get("format")
     table_stats = {}
@@ -570,10 +574,10 @@ def reports_view(request):
             "completed": 0,
             "overdue": 0,
             "pending": 0,
+            "rate": "0.0%"
         })
 
-        # Pre-evaluate and optimize querysets to prevent redundant queries
-        tasks_for_stats = tasks.select_related("row__table", "row__table__department", "assigned_by").prefetch_related("assigned_to", "row__cells__column")
+        tasks_for_stats = tasks
 
         for t in tasks_for_stats:
             tbl = t.row.table
@@ -811,9 +815,8 @@ def reports_view(request):
         doc.build(story)
         return response
 
-    # For HTML view, pre-evaluate and paginate the queryset
+    # For HTML view, paginate the queryset
     if not export_format:
-        tasks = tasks.select_related("row__table", "row__table__department", "assigned_by").prefetch_related("assigned_to", "row__cells__column")
         from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
         page = request.GET.get('page', 1)
         paginator = Paginator(tasks, 50)

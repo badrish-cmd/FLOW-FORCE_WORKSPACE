@@ -999,3 +999,174 @@ class GlobalContextNotificationOptimizationRegressionTestCase(TestCase):
 
         self.assertEqual(len(ctx_queries), 0)
         self.assertEqual(context, {})
+
+
+class TasksReportsExportOptimizationRegressionTestCase(TestCase):
+    """
+    Regression test suite for Phase 2B Reports Export Optimization.
+    Validates that CSV, Excel, and PDF exports execute with constant-bound query complexity
+    and do not generate N+1 queries regardless of task or assignee count.
+    """
+
+    def setUp(self):
+        from django.test.client import RequestFactory
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        self.factory = RequestFactory()
+        self.connection = connection
+        self.CaptureQueriesContext = CaptureQueriesContext
+
+        self.dept = Department.objects.create(name="Analytics Dept", slug="analytics-dept")
+        self.admin = User.objects.create_user(
+            email="exportadmin@flow-force.com",
+            password="testpassword",
+            full_name="Export Admin",
+            role="ADMIN",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.employee1 = User.objects.create_user(
+            email="emp1@flow-force.com",
+            password="testpassword",
+            full_name="Alice Smith",
+            role="EMPLOYEE",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.employee2 = User.objects.create_user(
+            email="emp2@flow-force.com",
+            password="testpassword",
+            full_name="Bob Jones",
+            role="EMPLOYEE",
+            department=self.dept,
+            status="APPROVED"
+        )
+
+        self.table = Table.objects.create(
+            name="Operations Log",
+            created_by=self.admin,
+            department=self.dept
+        )
+
+        self.col_task = Column.objects.create(
+            table=self.table,
+            name="TASK_NAME",
+            data_type="TEXT"
+        )
+        self.col_due = Column.objects.create(
+            table=self.table,
+            name="DUE_DATE",
+            data_type="DATE"
+        )
+
+    def _create_sample_tasks(self, count=10):
+        from datetime import date, timedelta
+        today = date.today()
+        tasks = []
+        for i in range(count):
+            row = Row.objects.create(table=self.table, created_by=self.admin)
+            CellValue.objects.create(row=row, column=self.col_task, value=f"Export Task #{i+1}")
+            CellValue.objects.create(row=row, column=self.col_due, value=(today + timedelta(days=i)).isoformat())
+
+            status = "COMPLETED" if i % 2 == 0 else "PENDING"
+            due_date = today - timedelta(days=2) if i == 1 else today + timedelta(days=i)
+            task = Task.objects.create(
+                row=row,
+                due_date=due_date,
+                priority="HIGH" if i % 2 == 0 else "MEDIUM",
+                status=status,
+                assigned_by=self.admin
+            )
+            task.assigned_to.set([self.employee1, self.employee2])
+            tasks.append(task)
+        return tasks
+
+    def test_csv_export_query_count_and_fidelity(self):
+        """CSV export executes with constant queries (<= 6) and exports expected columns & values."""
+        from tasks.views import reports_view
+        self._create_sample_tasks(count=10)
+
+        request = self.factory.get("/tasks/reports/?format=csv")
+        request.user = self.admin
+
+        with self.CaptureQueriesContext(self.connection) as ctx_queries:
+            response = reports_view(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv")
+        self.assertIn('attachment; filename="tasks_report.csv"', response["Content-Disposition"])
+        # Query count must remain tightly bounded (no N+1 for tasks, assignees, or rows)
+        self.assertLessEqual(len(ctx_queries), 6)
+
+        csv_content = response.content.decode("utf-8")
+        self.assertIn("=== TABLE ANALYTICS ===", csv_content)
+        self.assertIn("=== EMPLOYEE ANALYTICS ===", csv_content)
+        self.assertIn("=== DETAILED TASK REPORT ===", csv_content)
+        self.assertIn("S_NO,Task Name,Table Name,Due Date,Priority,Status,Assigned To,Assigned By,Department", csv_content)
+        self.assertIn("Export Task #1", csv_content)
+        self.assertIn("Operations Log", csv_content)
+        self.assertIn("Analytics Dept", csv_content)
+        self.assertIn("Alice Smith, Bob Jones", csv_content)
+
+    def test_excel_export_query_count_and_fidelity(self):
+        """Excel export executes with constant queries (<= 6) and returns valid xlsx format."""
+        from tasks.views import reports_view
+        self._create_sample_tasks(count=10)
+
+        request = self.factory.get("/tasks/reports/?format=excel")
+        request.user = self.admin
+
+        with self.CaptureQueriesContext(self.connection) as ctx_queries:
+            response = reports_view(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        self.assertIn('attachment; filename="tasks_report.xlsx"', response["Content-Disposition"])
+        self.assertLessEqual(len(ctx_queries), 6)
+        self.assertGreater(len(response.content), 1000)
+
+    def test_pdf_export_query_count_and_fidelity(self):
+        """PDF export executes with constant queries (<= 6) and returns valid PDF document."""
+        from tasks.views import reports_view
+        self._create_sample_tasks(count=10)
+
+        request = self.factory.get("/tasks/reports/?format=pdf")
+        request.user = self.admin
+
+        with self.CaptureQueriesContext(self.connection) as ctx_queries:
+            response = reports_view(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn('attachment; filename="tasks_report.pdf"', response["Content-Disposition"])
+        self.assertLessEqual(len(ctx_queries), 6)
+        self.assertTrue(response.content.startswith(b"%PDF"))
+
+    def test_export_query_count_does_not_grow_linearly(self):
+        """Proves query count is O(1) regardless of whether exporting 5 tasks or 25 tasks."""
+        from tasks.views import reports_view
+
+        # Baseline: 5 tasks
+        self._create_sample_tasks(count=5)
+        request5 = self.factory.get("/tasks/reports/?format=csv")
+        request5.user = self.admin
+        with self.CaptureQueriesContext(self.connection) as ctx5:
+            res5 = reports_view(request5)
+        self.assertEqual(res5.status_code, 200)
+        query_count_5 = len(ctx5)
+
+        # Scale up: Add 20 more tasks (total 25 tasks)
+        self._create_sample_tasks(count=20)
+        request25 = self.factory.get("/tasks/reports/?format=csv")
+        request25.user = self.admin
+        with self.CaptureQueriesContext(self.connection) as ctx25:
+            res25 = reports_view(request25)
+        self.assertEqual(res25.status_code, 200)
+        query_count_25 = len(ctx25)
+
+        # Query counts must be identical, proving zero linear N+1 query growth
+        self.assertEqual(query_count_5, query_count_25)
+        self.assertLessEqual(query_count_25, 6)

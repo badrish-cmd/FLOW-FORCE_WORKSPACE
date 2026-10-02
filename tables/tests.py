@@ -1944,11 +1944,495 @@ class SalesAndRowActionTests(TestCase):
         self.assertEqual(task.follow_ups.count(), 1)
 
 
+class ConcurrentSNoGenerationRegressionTestCase(TestCase):
+    """
+    BUG-06 Regression tests for safe, concurrent S_NO generation.
+    """
+    def setUp(self):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        self.factory = APIRequestFactory()
+        self.dept = Department.objects.create(name="S_NO QA Dept", slug="s-no-qa-dept")
+        self.admin = User.objects.create_user(
+            email="snoadmin@flow-force.com",
+            password="testpassword",
+            full_name="SNO Admin",
+            role="ADMIN",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.table = Table.objects.create(
+            name="S_NO Test Table",
+            created_by=self.admin,
+            department=self.dept,
+            job_type="STANDARD"
+        )
+
+    def test_consecutive_row_creations_generate_unique_s_no(self):
+        """Verifies that consecutive row creations increment S_NO distinctly without collisions."""
+        from rest_framework.test import force_authenticate
+        from tables.views import RowViewSet
+        view = RowViewSet.as_view({'post': 'create'})
+
+        # First row creation
+        req1 = self.factory.post('/tables/api/rows/', {
+            'table': self.table.id,
+            'cells': {
+                'TASK_NAME': 'First Task',
+                'DUE_DATE': '2026-10-20'
+            }
+        }, format='json')
+        force_authenticate(req1, user=self.admin)
+        res1 = view(req1)
+        self.assertEqual(res1.status_code, 201)
+        row1_id = res1.data['id']
+
+        # Second row creation
+        req2 = self.factory.post('/tables/api/rows/', {
+            'table': self.table.id,
+            'cells': {
+                'TASK_NAME': 'Second Task',
+                'DUE_DATE': '2026-10-21'
+            }
+        }, format='json')
+        force_authenticate(req2, user=self.admin)
+        res2 = view(req2)
+        self.assertEqual(res2.status_code, 201)
+        row2_id = res2.data['id']
+
+        # Check S_NO in cell values
+        s_no_col = self.table.columns.get(name="S_NO")
+        cell1 = CellValue.objects.get(row_id=row1_id, column=s_no_col)
+        cell2 = CellValue.objects.get(row_id=row2_id, column=s_no_col)
+        self.assertEqual(int(cell1.value), 1)
+        self.assertEqual(int(cell2.value), 2)
+        self.assertNotEqual(cell1.value, cell2.value)
+
+    def test_s_no_handles_string_values_and_increments(self):
+        """Verifies that S_NO calculation safely parses string numeric values and increments correctly."""
+        from rest_framework.test import force_authenticate
+        from tables.views import RowViewSet
+
+        # Manually create a row with string S_NO
+        s_no_col = self.table.columns.get(name="S_NO")
+        existing_row = Row.objects.create(table=self.table, created_by=self.admin)
+        CellValue.objects.create(row=existing_row, column=s_no_col, value="42")
+
+        view = RowViewSet.as_view({'post': 'create'})
+        req = self.factory.post('/tables/api/rows/', {
+            'table': self.table.id,
+            'cells': {
+                'TASK_NAME': 'Incremented Task',
+                'DUE_DATE': '2026-10-25'
+            }
+        }, format='json')
+        force_authenticate(req, user=self.admin)
+        res = view(req)
+        self.assertEqual(res.status_code, 201)
+
+        new_row_id = res.data['id']
+        new_cell = CellValue.objects.get(row_id=new_row_id, column=s_no_col)
+        self.assertEqual(int(new_cell.value), 43)
+
+    def test_concurrent_row_creations_cannot_receive_same_s_no(self):
+        """Demonstrates that row creations acquire locks and produce unique S_NOs."""
+        from rest_framework.test import force_authenticate
+        from tables.views import RowViewSet
+        from unittest.mock import patch
+
+        view = RowViewSet.as_view({'post': 'create'})
+
+        # Verify that select_for_update is invoked on Table and CellValue to enforce concurrency locking
+        with patch.object(Table.objects, 'select_for_update', wraps=Table.objects.select_for_update) as mock_table_sfu, \
+             patch.object(CellValue.objects, 'select_for_update', wraps=CellValue.objects.select_for_update) as mock_cell_sfu:
+            req1 = self.factory.post('/tables/api/rows/', {
+                'table': self.table.id,
+                'cells': {
+                    'TASK_NAME': 'Concurrent Task 1',
+                    'DUE_DATE': '2026-10-22'
+                }
+            }, format='json')
+            force_authenticate(req1, user=self.admin)
+            res1 = view(req1)
+            self.assertEqual(res1.status_code, 201)
+            self.assertTrue(mock_table_sfu.called)
+            self.assertTrue(mock_cell_sfu.called)
+
+        # Create second row
+        req2 = self.factory.post('/tables/api/rows/', {
+            'table': self.table.id,
+            'cells': {
+                'TASK_NAME': 'Concurrent Task 2',
+                'DUE_DATE': '2026-10-23'
+            }
+        }, format='json')
+        force_authenticate(req2, user=self.admin)
+        res2 = view(req2)
+        self.assertEqual(res2.status_code, 201)
+
+        s_no_col = self.table.columns.get(name="S_NO")
+        s_no1 = int(CellValue.objects.get(row_id=res1.data['id'], column=s_no_col).value)
+        s_no2 = int(CellValue.objects.get(row_id=res2.data['id'], column=s_no_col).value)
+        self.assertNotEqual(s_no1, s_no2)
+        self.assertEqual(s_no2, s_no1 + 1)
 
 
+class TableDuplicationRegressionTestCase(TestCase):
+    """
+    BUG-07 Regression tests for Table duplication:
+    - Atomicity & rollback protection
+    - Task assignee preservation
+    - Suppression of mass assignment email side effects
+    """
+    def setUp(self):
+        from rest_framework.test import APIRequestFactory
+        self.factory = APIRequestFactory()
+        self.dept = Department.objects.create(name="Duplication QA Dept", slug="dup-qa-dept")
+        self.admin = User.objects.create_user(
+            email="dupadmin@flow-force.com",
+            password="testpassword",
+            full_name="Dup Admin",
+            role="ADMIN",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.employee = User.objects.create_user(
+            email="dupemp@flow-force.com",
+            password="testpassword",
+            full_name="Dup Employee",
+            role="EMPLOYEE",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.viewer = User.objects.create_user(
+            email="dupviewer@flow-force.com",
+            password="testpassword",
+            full_name="Dup Viewer",
+            role="EMPLOYEE",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.table = Table.objects.create(
+            name="Original Source Table",
+            description="Testing duplication integrity",
+            created_by=self.admin,
+            department=self.dept,
+            job_type="STANDARD"
+        )
+
+        # Custom column
+        self.custom_col = Column.objects.create(
+            table=self.table,
+            name="PROJECT_CODE",
+            data_type="TEXT",
+            is_system_column=False
+        )
+
+        # Table Access
+        TableAccess.objects.create(
+            table=self.table,
+            user=self.viewer,
+            access_level="VIEW"
+        )
+
+        # Row, cells, task
+        self.row = Row.objects.create(table=self.table, created_by=self.admin)
+        CellValue.objects.create(row=self.row, column=self.custom_col, value="PRJ-1001")
+        task_name_col = self.table.columns.get(name="TASK_NAME")
+        due_date_col = self.table.columns.get(name="DUE_DATE")
+        CellValue.objects.create(row=self.row, column=task_name_col, value="Assembly Task")
+        CellValue.objects.create(row=self.row, column=due_date_col, value="2026-10-30")
+
+        self.task = Task.objects.create(
+            row=self.row,
+            priority="HIGH",
+            status="PENDING",
+            due_date=datetime.date(2026, 10, 30),
+            assigned_by=self.admin
+        )
+        self.task.assigned_to.set([self.employee])
+
+    def test_successful_duplication_preserves_all_data_and_assignees(self):
+        """Verifies that duplicating a table clones metadata, columns, rows, cells, and preserves task assignees."""
+        from rest_framework.test import force_authenticate
+        from tables.views import TableViewSet
+        from unittest.mock import patch
+
+        view = TableViewSet.as_view({'post': 'duplicate_table'})
+        req = self.factory.post(f'/tables/api/tables/{self.table.id}/duplicate/')
+        force_authenticate(req, user=self.admin)
+
+        with patch("tasks.tasks.send_initial_mail.delay") as mock_mail:
+            res = view(req, pk=self.table.id)
+            self.assertEqual(res.status_code, 201)
+            # Verify no assignment emails were queued during duplication
+            self.assertFalse(mock_mail.called)
+
+        new_table_id = res.data['id']
+        new_table = Table.objects.get(id=new_table_id)
+        self.assertEqual(new_table.name, f"Copy of {self.table.name}")
+        self.assertEqual(new_table.department, self.dept)
+        self.assertEqual(new_table.job_type, "STANDARD")
+
+        # Verify custom column copied
+        self.assertTrue(new_table.columns.filter(name="PROJECT_CODE").exists())
+
+        # Verify TableAccess copied
+        self.assertTrue(new_table.access_rules.filter(user=self.viewer, access_level="VIEW").exists())
+
+        # Verify row and cells copied
+        new_row = new_table.rows.first()
+        self.assertIsNotNone(new_row)
+        new_custom_col = new_table.columns.get(name="PROJECT_CODE")
+        cell_val = CellValue.objects.get(row=new_row, column=new_custom_col).value
+        self.assertEqual(cell_val, "PRJ-1001")
+
+        # Verify task and assignees copied
+        new_task = new_row.task
+        self.assertIsNotNone(new_task)
+        self.assertEqual(new_task.priority, "HIGH")
+        self.assertEqual(new_task.status, "PENDING")
+        self.assertEqual(list(new_task.assigned_to.all()), [self.employee])
+
+    def test_duplication_failure_rolls_back_cleanly(self):
+        """Verifies that any error during duplication triggers a rollback, leaving no partial tables or orphan rows."""
+        from rest_framework.test import force_authenticate
+        from tables.views import TableViewSet
+        from unittest.mock import patch
+
+        view = TableViewSet.as_view({'post': 'duplicate_table'})
+        req = self.factory.post(f'/tables/api/tables/{self.table.id}/duplicate/')
+        force_authenticate(req, user=self.admin)
+
+        # Inject failure during CellValue creation
+        with patch("tables.views.CellValue.objects.create", side_effect=RuntimeError("Simulated DB Crash")):
+            res = view(req, pk=self.table.id)
+            self.assertEqual(res.status_code, 500)
+            self.assertIn("Failed to duplicate table", res.data["error"])
+
+        # Verify atomic rollback: no copy table exists
+        self.assertFalse(Table.objects.filter(name=f"Copy of {self.table.name}").exists())
+        # Verify no orphan rows exist for a copy table
+        self.assertEqual(Row.objects.filter(table__name=f"Copy of {self.table.name}").count(), 0)
+
+    def test_duplication_does_not_send_mass_assignment_emails(self):
+        """Verifies that duplicating a table with tasks never triggers mass assignment emails."""
+        from rest_framework.test import force_authenticate
+        from tables.views import TableViewSet
+        from unittest.mock import patch
+
+        view = TableViewSet.as_view({'post': 'duplicate_table'})
+        req = self.factory.post(f'/tables/api/tables/{self.table.id}/duplicate/')
+        force_authenticate(req, user=self.admin)
+
+        with patch("tasks.tasks.send_initial_mail.delay") as mock_mail:
+            res = view(req, pk=self.table.id)
+            self.assertEqual(res.status_code, 201)
+            mock_mail.assert_not_called()
 
 
+class PidDashboardOptimizationRegressionTestCase(TestCase):
+    """
+    Regression test suite for Phase 2B PID Dashboard Optimization.
+    Validates that pid_dashboard_view executes with constant-bound query complexity (<= 8 total queries including context processors),
+    correctly calculates all KPI metrics, handles dirty legacy dates gracefully,
+    and isolates LIST_PID tables per user access permissions.
+    """
 
+    def setUp(self):
+        from django.test.client import RequestFactory
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        self.factory = RequestFactory()
+        self.connection = connection
+        self.CaptureQueriesContext = CaptureQueriesContext
 
+        self.dept = Department.objects.create(name="PID Engineering", slug="pid-engineering")
+        self.dept2 = Department.objects.create(name="Other Department", slug="other-dept")
+        self.admin = User.objects.create_user(
+            email="pidadmin@flow-force.com",
+            password="testpassword",
+            full_name="PID Admin",
+            role="ADMIN",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.employee = User.objects.create_user(
+            email="pidemp@flow-force.com",
+            password="testpassword",
+            full_name="PID Employee",
+            role="EMPLOYEE",
+            department=self.dept,
+            status="APPROVED"
+        )
 
+        # Create two LIST_PID tables
+        self.table1 = Table.objects.create(
+            name="PID Table Alpha",
+            job_type="LIST_PID",
+            created_by=self.admin,
+            department=self.dept
+        )
+        self.table2 = Table.objects.create(
+            name="PID Table Beta",
+            job_type="LIST_PID",
+            created_by=self.admin,
+            department=self.dept2
+        )
+        # Create one non-PID table
+        self.non_pid_table = Table.objects.create(
+            name="Standard Tasks",
+            job_type="STANDARD",
+            created_by=self.admin,
+            department=self.dept
+        )
 
+        # Create relevant columns for Table 1
+        self.cols1 = {}
+        for cname in ["PID", "CUSTOMER_NAME", "STATUS", "DUE_DATE_FLOW_FORCE", "DATE"]:
+            self.cols1[cname] = Column.objects.create(table=self.table1, name=cname, data_type="TEXT")
+
+        # Create relevant columns for Table 2
+        self.cols2 = {}
+        for cname in ["PID", "CUSTOMER_NAME", "STATUS", "DUE_DATE_FLOW_FORCE", "DATE"]:
+            self.cols2[cname] = Column.objects.create(table=self.table2, name=cname, data_type="TEXT")
+
+    def test_pid_dashboard_query_count_and_fidelity(self):
+        """PID dashboard executes with <= 8 total queries (<= 4 for view) and computes KPIs accurately."""
+        from datetime import date, timedelta
+        from tables.views import pid_dashboard_view
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+        future = today + timedelta(days=30)
+
+        # Row 1: Table 1, Completed
+        r1 = Row.objects.create(table=self.table1, created_by=self.admin)
+        CellValue.objects.create(row=r1, column=self.cols1["PID"], value="PID-001")
+        CellValue.objects.create(row=r1, column=self.cols1["STATUS"], value="COMPLETED")
+        CellValue.objects.create(row=r1, column=self.cols1["DUE_DATE_FLOW_FORCE"], value=yesterday.strftime("%Y-%m-%d"))
+        CellValue.objects.create(row=r1, column=self.cols1["DATE"], value="2025-04-10")
+
+        # Row 2: Table 1, Due today (In Progress)
+        r2 = Row.objects.create(table=self.table1, created_by=self.admin)
+        CellValue.objects.create(row=r2, column=self.cols1["PID"], value="PID-002")
+        CellValue.objects.create(row=r2, column=self.cols1["STATUS"], value="IN_PROGRESS")
+        CellValue.objects.create(row=r2, column=self.cols1["DUE_DATE_FLOW_FORCE"], value=today.strftime("%Y-%m-%d"))
+
+        # Row 3: Table 1, Overdue (Pending with past target date)
+        r3 = Row.objects.create(table=self.table1, created_by=self.admin)
+        CellValue.objects.create(row=r3, column=self.cols1["PID"], value="PID-003")
+        CellValue.objects.create(row=r3, column=self.cols1["STATUS"], value="PENDING")
+        CellValue.objects.create(row=r3, column=self.cols1["DUE_DATE_FLOW_FORCE"], value=yesterday.strftime("%Y-%m-%d"))
+
+        # Row 4: Table 2, Future In Progress
+        r4 = Row.objects.create(table=self.table2, created_by=self.admin)
+        CellValue.objects.create(row=r4, column=self.cols2["PID"], value="PID-004")
+        CellValue.objects.create(row=r4, column=self.cols2["STATUS"], value="WAITING_FOR_REVIEW")
+        CellValue.objects.create(row=r4, column=self.cols2["DUE_DATE_FLOW_FORCE"], value=future.strftime("%Y-%m-%d"))
+
+        # Row 5: Table 2, Completed
+        r5 = Row.objects.create(table=self.table2, created_by=self.admin)
+        CellValue.objects.create(row=r5, column=self.cols2["PID"], value="PID-005")
+        CellValue.objects.create(row=r5, column=self.cols2["STATUS"], value="APPROVED")
+        CellValue.objects.create(row=r5, column=self.cols2["DUE_DATE_FLOW_FORCE"], value=today.strftime("%Y-%m-%d"))
+
+        request = self.factory.get("/tables/pid-dashboard/")
+        request.user = self.admin
+
+        with self.CaptureQueriesContext(self.connection) as ctx_queries:
+            response = pid_dashboard_view(request)
+
+        self.assertEqual(response.status_code, 200)
+        # Query count must remain tightly bounded (<= 8 queries total including global context processors)
+        self.assertLessEqual(len(ctx_queries), 8)
+
+        # Verify rendered content
+        self.assertIn(b"PID-001", response.content)
+        self.assertIn(b"PID-002", response.content)
+        self.assertIn(b"PID-003", response.content)
+        self.assertIn(b"PID-004", response.content)
+        self.assertIn(b"PID-005", response.content)
+        self.assertIn(b"PID Table Alpha", response.content)
+        self.assertIn(b"PID Table Beta", response.content)
+        # Ensure non-PID table is excluded
+        self.assertNotIn(b"Standard Tasks", response.content)
+
+    def test_pid_dashboard_query_count_does_not_grow_linearly(self):
+        """Proves query count is O(1) whether there are 4 rows or 40 rows across PID tables."""
+        from tables.views import pid_dashboard_view
+
+        # Setup 4 rows initially
+        for i in range(4):
+            r = Row.objects.create(table=self.table1, created_by=self.admin)
+            CellValue.objects.create(row=r, column=self.cols1["PID"], value=f"PID-10{i}")
+            CellValue.objects.create(row=r, column=self.cols1["STATUS"], value="IN_PROGRESS")
+
+        req1 = self.factory.get("/tables/pid-dashboard/")
+        req1.user = self.admin
+        with self.CaptureQueriesContext(self.connection) as ctx1:
+            res1 = pid_dashboard_view(req1)
+        self.assertEqual(res1.status_code, 200)
+        q_count_initial = len(ctx1)
+
+        # Scale up: Add 36 more rows (total 40 rows across both tables)
+        for i in range(36):
+            target_table = self.table1 if i % 2 == 0 else self.table2
+            cols = self.cols1 if i % 2 == 0 else self.cols2
+            r = Row.objects.create(table=target_table, created_by=self.admin)
+            CellValue.objects.create(row=r, column=cols["PID"], value=f"PID-SCALE-{i}")
+            CellValue.objects.create(row=r, column=cols["STATUS"], value="COMPLETED" if i % 3 == 0 else "PENDING")
+
+        req2 = self.factory.get("/tables/pid-dashboard/")
+        req2.user = self.admin
+        with self.CaptureQueriesContext(self.connection) as ctx2:
+            res2 = pid_dashboard_view(req2)
+        self.assertEqual(res2.status_code, 200)
+        q_count_scaled = len(ctx2)
+
+        # Assert zero linear N+1 query growth
+        self.assertEqual(q_count_initial, q_count_scaled)
+        self.assertLessEqual(q_count_scaled, 8)
+
+    def test_pid_dashboard_handles_dirty_legacy_dates(self):
+        """Verifies malformed date strings in legacy data do not crash PID dashboard view."""
+        from tables.views import pid_dashboard_view
+
+        dirty_dates = [
+            "invalid-date-format",
+            "99/99/9999",
+            "",
+            "-",
+            "None",
+            "2026-02-31",
+            "15-08-2024",
+        ]
+        for idx, dirty in enumerate(dirty_dates):
+            r = Row.objects.create(table=self.table1, created_by=self.admin)
+            CellValue.objects.create(row=r, column=self.cols1["PID"], value=f"PID-DIRTY-{idx}")
+            CellValue.objects.create(row=r, column=self.cols1["DUE_DATE_FLOW_FORCE"], value=dirty)
+            CellValue.objects.create(row=r, column=self.cols1["DATE"], value=dirty)
+            CellValue.objects.create(row=r, column=self.cols1["STATUS"], value="IN_PROGRESS")
+
+        req = self.factory.get("/tables/pid-dashboard/")
+        req.user = self.admin
+        response = pid_dashboard_view(req)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"PID-DIRTY-0", response.content)
+
+    def test_pid_dashboard_permissions_isolation(self):
+        """Verifies non-admin users only see LIST_PID tables they have access to."""
+        from tables.views import pid_dashboard_view
+
+        r1 = Row.objects.create(table=self.table1, created_by=self.admin)
+        CellValue.objects.create(row=r1, column=self.cols1["PID"], value="PID-ALPHA-ONLY")
+
+        r2 = Row.objects.create(table=self.table2, created_by=self.admin)
+        CellValue.objects.create(row=r2, column=self.cols2["PID"], value="PID-BETA-HIDDEN")
+
+        req = self.factory.get("/tables/pid-dashboard/")
+        req.user = self.employee
+        response = pid_dashboard_view(req)
+
+        self.assertEqual(response.status_code, 200)
+        # Employee belongs to self.dept so sees Table 1, but NOT Table 2 (in dept2)
+        self.assertIn(b"PID Table Alpha", response.content)
+        self.assertNotIn(b"PID Table Beta", response.content)

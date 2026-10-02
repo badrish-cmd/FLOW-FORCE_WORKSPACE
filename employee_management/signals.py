@@ -25,33 +25,49 @@ def handle_employee_approval_workflow(sender, instance, created, **kwargs):
     """
     Handle automatic workflow when employee status changes.
     """
-    
     if created:
         # New employee created - will be handled in service layer
-        pass
-    else:
-        # Check if status changed to APPROVED
+        return
+
+    previous_status = getattr(instance, "_previous_status", None)
+    current_status = instance.status
+
+    # Update approval queue only when an actual status transition occurs
+    if previous_status is None or previous_status == current_status:
+        return
+
+    if current_status == "APPROVED":
+        # Automatically update or create approval queue entry
         try:
-            old_instance = EmployeeUser.objects.get(pk=instance.pk)
-        except EmployeeUser.DoesNotExist:
-            return
-        
-        # If status just changed to APPROVED
-        if old_instance.status != instance.status and instance.status == "APPROVED":
-            # Automatically create/update approval queue
-            try:
-                approval = EmployeeApprovalQueue.objects.get(employee=instance)
-                if not approval.is_approved:
-                    approval.is_approved = True
+            approval = EmployeeApprovalQueue.objects.get(employee=instance)
+            if not approval.is_approved:
+                approval.is_approved = True
+                if not approval.reviewed_at:
                     approval.reviewed_at = timezone.now()
-                    approval.save()
-            except EmployeeApprovalQueue.DoesNotExist:
-                # Create new queue entry if it doesn't exist
-                EmployeeApprovalQueue.objects.create(
-                    employee=instance,
-                    is_approved=True,
-                    reviewed_at=timezone.now()
-                )
+                approval.save()
+        except EmployeeApprovalQueue.DoesNotExist:
+            EmployeeApprovalQueue.objects.create(
+                employee=instance,
+                is_approved=True,
+                reviewed_at=timezone.now()
+            )
+    elif current_status == "REJECTED":
+        # Automatically update or create approval queue entry
+        try:
+            approval = EmployeeApprovalQueue.objects.get(employee=instance)
+            if approval.is_approved:
+                approval.is_approved = False
+                if not approval.reviewed_at:
+                    approval.reviewed_at = timezone.now()
+                approval.save()
+        except EmployeeApprovalQueue.DoesNotExist:
+            EmployeeApprovalQueue.objects.create(
+                employee=instance,
+                is_approved=False,
+                reviewed_at=timezone.now()
+            )
+
+    instance._previous_status = current_status
 
 
 @receiver(post_save, sender=EmployeeProfilePicture)
@@ -150,5 +166,7 @@ def prepare_activity_log_for_changes(sender, instance, **kwargs):
     try:
         old_instance = EmployeeUser.objects.get(pk=instance.pk)
         instance._old_instance = old_instance
+        instance._previous_status = old_instance.status
     except EmployeeUser.DoesNotExist:
         instance._old_instance = None
+        instance._previous_status = None
