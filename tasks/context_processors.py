@@ -1,6 +1,13 @@
+from django.db.models import Prefetch
 from tasks.models import Notification as TasksNotification
+from tables.models import CellValue
 from tables.permissions import get_accessible_tables
-from django.utils import timezone
+
+TASK_NAME_COLUMNS = [
+    "CUSTOMER_NAME", "TASK_NAME", "TASK NAME", "NAME", "TITLE", "SUBJECT", "TASK",
+    "ENQUIRY_NO", "ENQUIRY_NO/QUOTATION_NO", "ENQUIRY_NO_QUOTATION_NO", "ENQUIRY NUMBER", "ENQUIRY NO", "ENQUIRY_NO / QUOTATION_NO", "PID",
+    "TOOL_NAME", "TOOL NAME", "TOOL"
+]
 
 def global_context(request):
     if not request.user.is_authenticated:
@@ -9,9 +16,28 @@ def global_context(request):
     # Fast count queries for badges
     unread_count = TasksNotification.objects.filter(user=request.user, is_read=False).count()
 
+    # Targeted prefetch for column cell values needed for task names
+    cells_prefetch = Prefetch(
+        'task__row__cells',
+        queryset=CellValue.objects.filter(column__name__in=TASK_NAME_COLUMNS).select_related('column')
+    )
+
     # Limit lists to 15 items in database query to prevent loading entire history into memory
-    tasks_unread = TasksNotification.objects.filter(user=request.user, is_read=False).select_related('task').order_by('-created_at')[:15]
-    tasks_read = TasksNotification.objects.filter(user=request.user, is_read=True).select_related('task').order_by('-created_at')[:15]
+    tasks_unread = TasksNotification.objects.filter(
+        user=request.user, is_read=False
+    ).select_related(
+        'task__row__table'
+    ).prefetch_related(
+        cells_prefetch
+    ).order_by('-created_at')[:15]
+
+    tasks_read = TasksNotification.objects.filter(
+        user=request.user, is_read=True
+    ).select_related(
+        'task__row__table'
+    ).prefetch_related(
+        cells_prefetch
+    ).order_by('-created_at')[:15]
 
     unread_list = []
     for n in tasks_unread:

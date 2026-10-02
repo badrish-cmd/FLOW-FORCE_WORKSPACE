@@ -99,7 +99,43 @@ class Task(models.Model):
 
     @property
     def task_name(self):
-        job_type = self.row.table.job_type
+        try:
+            job_type = self.row.table.job_type
+        except Exception:
+            return "Unnamed Task"
+
+        # If cells are already prefetched on row, inspect in-memory to prevent N+1 queries
+        if hasattr(self.row, '_prefetched_objects_cache') and 'cells' in self.row._prefetched_objects_cache:
+            cells = list(self.row.cells.all())
+
+            def find_cell(names, by_type=False):
+                if by_type:
+                    for c in cells:
+                        if getattr(c.column, 'data_type', None) == "TEXT":
+                            return c
+                for target in names:
+                    for c in cells:
+                        col_name = getattr(c.column, 'name', '')
+                        if col_name and col_name.upper() == target.upper():
+                            return c
+                return None
+
+            if job_type == "SALES":
+                cell = find_cell(["CUSTOMER_NAME"]) or find_cell(["TASK_NAME"])
+                return cell.value if (cell and cell.value) else "Unnamed Task"
+            elif job_type == "LIST_PID":
+                cell = find_cell(["ENQUIRY_NO", "ENQUIRY_NO/QUOTATION_NO", "ENQUIRY_NO_QUOTATION_NO", "ENQUIRY NUMBER", "ENQUIRY NO", "ENQUIRY_NO / QUOTATION_NO"]) or find_cell(["PID"])
+                return cell.value if (cell and cell.value) else "Unnamed Task"
+            elif job_type == "LOGS":
+                cell = find_cell(["TOOL_NAME", "TOOL NAME", "TOOL"]) or find_cell(["TASK_NAME"])
+                return cell.value if (cell and cell.value) else "Unnamed Tool"
+            elif job_type == "PERSONAL":
+                cell = find_cell(["TASK_NAME", "TASK NAME", "NAME", "TITLE", "SUBJECT", "TASK"]) or find_cell([], by_type=True)
+                return cell.value if (cell and cell.value) else f"Personal Row {self.row.id}"
+            else:
+                cell = find_cell(["TASK_NAME"])
+                return cell.value if (cell and cell.value) else "Unnamed Task"
+
         if job_type == "SALES":
             name_cell = self.row.cells.filter(column__name="CUSTOMER_NAME").first()
             if not name_cell:

@@ -152,13 +152,14 @@ class TasksTestCase(TestCase):
         )
         task_6d.assigned_to.add(self.employee)
 
-        # Scenario C: 7 Days Overdue -> no escalation
+        # Scenario C: 7 Days Overdue (already escalated) -> no re-escalation
         task_7d = Task.objects.create(
             row=Row.objects.create(table=self.table),
             due_date=timezone.localdate() - timedelta(days=7),
             priority="HIGH",
             status="PENDING",
-            assigned_by=self.admin
+            assigned_by=self.admin,
+            last_escalation_level=6
         )
         task_7d.assigned_to.add(self.employee)
         
@@ -577,3 +578,424 @@ class TableAccessTaskAssignmentRegressionTestCase(TestCase):
         task2.refresh_from_db()
         self.assertEqual(list(self.task1.assigned_to.all()), [self.employee1])
         self.assertEqual(list(task2.assigned_to.all()), [self.employee2])
+
+
+class OverdueEscalationMissedDayRegressionTestCase(TestCase):
+    """
+    BUG-03 Regression tests for check_overdue_escalations handling missed-day runs.
+    """
+    def setUp(self):
+        self.dept = Department.objects.create(name="Escalation QA Dept", slug="esc-qa-dept")
+        self.admin = User.objects.create_user(
+            email="escadmin@flow-force.com",
+            password="testpassword",
+            full_name="Esc Admin",
+            role="ADMIN",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.employee = User.objects.create_user(
+            email="escemp@flow-force.com",
+            password="testpassword",
+            full_name="Esc Employee",
+            role="EMPLOYEE",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.table = Table.objects.create(name="Standard Table", created_by=self.admin, department=self.dept, job_type="STANDARD")
+        self.list_pid_table = Table.objects.create(name="PID Table", created_by=self.admin, department=self.dept, job_type="LIST_PID")
+
+    @patch("tasks.tasks.send_email_log_task.delay")
+    def test_escalation_triggers_on_exact_threshold_day(self, mock_email_task):
+        """Task 6 days overdue escalates to level 6 on exact threshold day."""
+        today = timezone.localdate()
+        row = Row.objects.create(table=self.table, created_by=self.admin)
+        task = Task.objects.create(
+            row=row,
+            due_date=today - timedelta(days=6),
+            priority="HIGH",
+            status="PENDING",
+            assigned_by=self.admin,
+            last_escalation_level=0
+        )
+        task.assigned_to.set([self.employee])
+
+        mock_email_task.reset_mock()
+        check_overdue_escalations()
+
+        task.refresh_from_db()
+        self.assertEqual(task.last_escalation_level, 6)
+        self.assertIsNotNone(task.last_escalation_at)
+        self.assertTrue(mock_email_task.called)
+
+    @patch("tasks.tasks.send_email_log_task.delay")
+    def test_escalation_triggers_on_threshold_plus_one_day(self, mock_email_task):
+        """Task 7 days overdue (missed day 6) escalates to level 6."""
+        today = timezone.localdate()
+        row = Row.objects.create(table=self.table, created_by=self.admin)
+        task = Task.objects.create(
+            row=row,
+            due_date=today - timedelta(days=7),
+            priority="HIGH",
+            status="PENDING",
+            assigned_by=self.admin,
+            last_escalation_level=0
+        )
+        task.assigned_to.set([self.employee])
+
+        mock_email_task.reset_mock()
+        check_overdue_escalations()
+
+        task.refresh_from_db()
+        self.assertEqual(task.last_escalation_level, 6)
+        self.assertIsNotNone(task.last_escalation_at)
+        self.assertTrue(mock_email_task.called)
+
+    @patch("tasks.tasks.send_email_log_task.delay")
+    def test_escalation_triggers_on_threshold_plus_multiple_days(self, mock_email_task):
+        """Task 10 days overdue (missed multiple runs) escalates to level 6."""
+        today = timezone.localdate()
+        row = Row.objects.create(table=self.table, created_by=self.admin)
+        task = Task.objects.create(
+            row=row,
+            due_date=today - timedelta(days=10),
+            priority="HIGH",
+            status="PENDING",
+            assigned_by=self.admin,
+            last_escalation_level=0
+        )
+        task.assigned_to.set([self.employee])
+
+        mock_email_task.reset_mock()
+        check_overdue_escalations()
+
+        task.refresh_from_db()
+        self.assertEqual(task.last_escalation_level, 6)
+        self.assertTrue(mock_email_task.called)
+
+    @patch("tasks.tasks.send_email_log_task.delay")
+    def test_already_escalated_task_is_not_re_escalated(self, mock_email_task):
+        """Task with last_escalation_level=6 is not re-escalated on subsequent days."""
+        today = timezone.localdate()
+        row = Row.objects.create(table=self.table, created_by=self.admin)
+        task = Task.objects.create(
+            row=row,
+            due_date=today - timedelta(days=8),
+            priority="HIGH",
+            status="PENDING",
+            assigned_by=self.admin,
+            last_escalation_level=6
+        )
+        task.assigned_to.set([self.employee])
+
+        mock_email_task.reset_mock()
+        check_overdue_escalations()
+
+        task.refresh_from_db()
+        self.assertEqual(task.last_escalation_level, 6)
+        self.assertFalse(mock_email_task.called)
+
+    @patch("tasks.tasks.send_email_log_task.delay")
+    def test_list_pid_missed_day_one_escalates_on_day_two(self, mock_email_task):
+        """LIST_PID task 2 days overdue (missed day 1) escalates to level 1."""
+        today = timezone.localdate()
+        row = Row.objects.create(table=self.list_pid_table, created_by=self.admin)
+        task = Task.objects.create(
+            row=row,
+            due_date=today - timedelta(days=2),
+            priority="HIGH",
+            status="PENDING",
+            assigned_by=self.admin,
+            last_escalation_level=0
+        )
+        task.assigned_to.set([self.employee])
+
+        mock_email_task.reset_mock()
+        check_overdue_escalations()
+
+        task.refresh_from_db()
+        self.assertEqual(task.last_escalation_level, 1)
+        self.assertTrue(mock_email_task.called)
+
+
+class DailyAlertDueTodayRegressionTestCase(TestCase):
+    """
+    BUG-04 Regression tests for send_daily_alert_mails:
+    Verifies that 'Due Today' strictly alerts tasks where due_date == today,
+    and excludes overdue or future tasks.
+    """
+    def setUp(self):
+        self.dept = Department.objects.create(name="Daily Alert QA Dept", slug="alert-qa-dept")
+        self.admin = User.objects.create_user(
+            email="alertadmin@flow-force.com",
+            password="testpassword",
+            full_name="Alert Admin",
+            role="ADMIN",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.employee = User.objects.create_user(
+            email="alertemp@flow-force.com",
+            password="testpassword",
+            full_name="Alert Employee",
+            role="EMPLOYEE",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.table = Table.objects.create(name="Alert Table", created_by=self.admin, department=self.dept, job_type="STANDARD")
+
+    @patch("tasks.tasks.send_email_log_task.delay")
+    def test_task_due_today_is_included(self, mock_email_task):
+        """Task with due_date == today is alerted."""
+        today = timezone.localdate()
+        row = Row.objects.create(table=self.table, created_by=self.admin)
+        task = Task.objects.create(
+            row=row,
+            due_date=today,
+            priority="HIGH",
+            status="PENDING",
+            assigned_by=self.admin
+        )
+        task.assigned_to.set([self.employee])
+
+        send_daily_alert_mails()
+
+        task.refresh_from_db()
+        self.assertTrue(task.alert_mail_sent)
+        self.assertTrue(EmailLog.objects.filter(recipient_email=self.employee.email, email_type="ALERT_MAIL").exists())
+
+    @patch("tasks.tasks.send_email_log_task.delay")
+    def test_task_overdue_yesterday_is_excluded(self, mock_email_task):
+        """Task overdue yesterday (due_date == today - 1) is NOT included in Due Today alert."""
+        today = timezone.localdate()
+        row = Row.objects.create(table=self.table, created_by=self.admin)
+        task = Task.objects.create(
+            row=row,
+            due_date=today - timedelta(days=1),
+            priority="HIGH",
+            status="PENDING",
+            assigned_by=self.admin
+        )
+        task.assigned_to.set([self.employee])
+
+        send_daily_alert_mails()
+
+        task.refresh_from_db()
+        self.assertFalse(task.alert_mail_sent)
+        self.assertFalse(EmailLog.objects.filter(recipient_email=self.employee.email, email_type="ALERT_MAIL").exists())
+
+    @patch("tasks.tasks.send_email_log_task.delay")
+    def test_task_overdue_30_days_is_excluded(self, mock_email_task):
+        """Task overdue 30 days ago is NOT included in Due Today alert."""
+        today = timezone.localdate()
+        row = Row.objects.create(table=self.table, created_by=self.admin)
+        task = Task.objects.create(
+            row=row,
+            due_date=today - timedelta(days=30),
+            priority="HIGH",
+            status="PENDING",
+            assigned_by=self.admin
+        )
+        task.assigned_to.set([self.employee])
+
+        send_daily_alert_mails()
+
+        task.refresh_from_db()
+        self.assertFalse(task.alert_mail_sent)
+        self.assertFalse(EmailLog.objects.filter(recipient_email=self.employee.email, email_type="ALERT_MAIL").exists())
+
+    @patch("tasks.tasks.send_email_log_task.delay")
+    def test_future_task_is_excluded(self, mock_email_task):
+        """Task due in the future (due_date == today + 5) is NOT included in Due Today alert."""
+        today = timezone.localdate()
+        row = Row.objects.create(table=self.table, created_by=self.admin)
+        task = Task.objects.create(
+            row=row,
+            due_date=today + timedelta(days=5),
+            priority="HIGH",
+            status="PENDING",
+            assigned_by=self.admin
+        )
+        task.assigned_to.set([self.employee])
+
+        send_daily_alert_mails()
+
+        task.refresh_from_db()
+        self.assertFalse(task.alert_mail_sent)
+        self.assertFalse(EmailLog.objects.filter(recipient_email=self.employee.email, email_type="ALERT_MAIL").exists())
+
+
+class GlobalContextNotificationOptimizationRegressionTestCase(TestCase):
+    """
+    Regression test suite for Phase 2A: Notification & Global Context Performance Optimization.
+    Validates query count reduction and behavioral fidelity of tasks/context_processors.py.
+    """
+
+    def setUp(self):
+        from django.test import RequestFactory
+        from tasks.context_processors import global_context
+        from django.test.utils import CaptureQueriesContext
+        from django.db import connection
+
+        self.factory = RequestFactory()
+        self.global_context = global_context
+        self.CaptureQueriesContext = CaptureQueriesContext
+        self.connection = connection
+
+        self.dept = Department.objects.create(name="Notification Perf Dept", slug="notif-perf-dept")
+        self.user = User.objects.create_user(
+            email="notif_perf_user@flow-force.com",
+            password="testpassword",
+            full_name="Notification Perf User",
+            role="EMPLOYEE",
+            department=self.dept,
+            status="APPROVED"
+        )
+
+        self.table_gen = Table.objects.create(name="General Project Table", job_type="GENERAL", department=self.dept)
+        self.col_gen_task = Column.objects.create(table=self.table_gen, name="TASK_NAME", data_type="TEXT")
+
+        self.table_sales = Table.objects.create(name="Sales Client Table", job_type="SALES", department=self.dept)
+        self.col_sales_cust = Column.objects.create(table=self.table_sales, name="CUSTOMER_NAME", data_type="TEXT")
+
+        self.table_pid = Table.objects.create(name="PID Engineering Table", job_type="LIST_PID", department=self.dept)
+        self.col_pid_enq = Column.objects.create(table=self.table_pid, name="ENQUIRY_NO/QUOTATION_NO", data_type="TEXT")
+
+    def test_case_a_zero_notifications(self):
+        """Case A: Authenticated user with 0 notifications executes <= 3 queries."""
+        request = self.factory.get("/")
+        request.user = self.user
+
+        with self.CaptureQueriesContext(self.connection) as ctx_queries:
+            context = self.global_context(request)
+
+        self.assertLessEqual(len(ctx_queries), 3)
+        self.assertEqual(context["task_notifications_unread"], 0)
+        self.assertEqual(context["unread_notifications"], [])
+        self.assertEqual(context["read_notifications"], [])
+
+    def test_case_b_one_notification(self):
+        """Case B: Authenticated user with 1 notification executes <= 4 queries and preserves UI contract."""
+        row = Row.objects.create(table=self.table_gen, created_by=self.user)
+        CellValue.objects.create(row=row, column=self.col_gen_task, value="Urgent Pump Fix")
+        task = Task.objects.create(row=row)
+        Notification.objects.create(
+            user=self.user,
+            task=task,
+            title="Single Notification",
+            description="Fix pump promptly",
+            is_read=False
+        )
+
+        request = self.factory.get("/")
+        request.user = self.user
+
+        with self.CaptureQueriesContext(self.connection) as ctx_queries:
+            context = self.global_context(request)
+
+        # Baseline was 6 queries; optimized is <= 4
+        self.assertLessEqual(len(ctx_queries), 4)
+        self.assertEqual(context["task_notifications_unread"], 1)
+        self.assertEqual(len(context["unread_notifications"]), 1)
+        notif_item = context["unread_notifications"][0]
+        self.assertEqual(notif_item["title"], "Single Notification")
+        self.assertEqual(notif_item["task"]["table_name"], "General Project Table")
+        self.assertEqual(notif_item["task"]["task_name"], "Urgent Pump Fix")
+
+    def test_case_c_fifteen_notifications_no_linear_growth(self):
+        """Case C: 15 notifications across mixed table types does NOT grow linearly (<= 5 queries)."""
+        tables = [
+            (self.table_gen, self.col_gen_task, "Task General"),
+            (self.table_sales, self.col_sales_cust, "Acme Industrial"),
+            (self.table_pid, self.col_pid_enq, "ENQ-2026-99")
+        ]
+
+        for i in range(15):
+            tbl, col, base_name = tables[i % len(tables)]
+            r = Row.objects.create(table=tbl, created_by=self.user)
+            CellValue.objects.create(row=r, column=col, value=f"{base_name} #{i+1}")
+            t = Task.objects.create(row=r)
+            Notification.objects.create(
+                user=self.user,
+                task=t,
+                title=f"Notification #{i+1}",
+                description=f"Description #{i+1}",
+                is_read=False
+            )
+
+        request = self.factory.get("/")
+        request.user = self.user
+
+        with self.CaptureQueriesContext(self.connection) as ctx_queries:
+            context = self.global_context(request)
+
+        # Before optimization: 48 queries. After optimization: <= 5 queries.
+        self.assertLessEqual(len(ctx_queries), 5)
+        self.assertEqual(context["task_notifications_unread"], 15)
+        self.assertEqual(len(context["unread_notifications"]), 15)
+
+        # Check notification content fidelity across different job types
+        for item in context["unread_notifications"]:
+            self.assertTrue(item["task"]["table_name"])
+            self.assertTrue(item["task"]["task_name"])
+            self.assertNotEqual(item["task"]["task_name"], "Unnamed Task")
+
+    def test_case_d_multiple_read_and_unread_notifications(self):
+        """Case D: 15 unread + 15 read notifications (30 total) remains bounded at <= 6 queries."""
+        for i in range(15):
+            r = Row.objects.create(table=self.table_gen, created_by=self.user)
+            CellValue.objects.create(row=r, column=self.col_gen_task, value=f"Unread Item {i+1}")
+            t = Task.objects.create(row=r)
+            Notification.objects.create(
+                user=self.user,
+                task=t,
+                title=f"Unread {i+1}",
+                description=f"Desc unread {i+1}",
+                is_read=False
+            )
+
+        for i in range(15):
+            r = Row.objects.create(table=self.table_sales, created_by=self.user)
+            CellValue.objects.create(row=r, column=self.col_sales_cust, value=f"Client Lead {i+1}")
+            t = Task.objects.create(row=r)
+            Notification.objects.create(
+                user=self.user,
+                task=t,
+                title=f"Read {i+1}",
+                description=f"Desc read {i+1}",
+                is_read=True
+            )
+
+        request = self.factory.get("/")
+        request.user = self.user
+
+        with self.CaptureQueriesContext(self.connection) as ctx_queries:
+            context = self.global_context(request)
+
+        # Before optimization: 93 queries. After optimization: <= 6 queries.
+        self.assertLessEqual(len(ctx_queries), 6)
+        self.assertEqual(context["task_notifications_unread"], 15)
+        self.assertEqual(len(context["unread_notifications"]), 15)
+        self.assertEqual(len(context["read_notifications"]), 15)
+
+    def test_task_name_without_prefetch_fallback(self):
+        """Ensure task.task_name falls back cleanly when prefetch cache is not present."""
+        row = Row.objects.create(table=self.table_gen, created_by=self.user)
+        CellValue.objects.create(row=row, column=self.col_gen_task, value="Direct Task")
+        task = Task.objects.create(row=row)
+
+        # Calling directly on fresh task without prefetched cells
+        fresh_task = Task.objects.get(id=task.id)
+        self.assertEqual(fresh_task.task_name, "Direct Task")
+
+    def test_anonymous_user_returns_empty_context(self):
+        """Unauthenticated requests return empty context without querying notifications."""
+        from django.contrib.auth.models import AnonymousUser
+        request = self.factory.get("/")
+        request.user = AnonymousUser()
+
+        with self.CaptureQueriesContext(self.connection) as ctx_queries:
+            context = self.global_context(request)
+
+        self.assertEqual(len(ctx_queries), 0)
+        self.assertEqual(context, {})
