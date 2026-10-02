@@ -2436,3 +2436,301 @@ class PidDashboardOptimizationRegressionTestCase(TestCase):
         # Employee belongs to self.dept so sees Table 1, but NOT Table 2 (in dept2)
         self.assertIn(b"PID Table Alpha", response.content)
         self.assertNotIn(b"PID Table Beta", response.content)
+
+class TableStatisticsOptimizationRegressionTestCase(TestCase):
+    """
+    Regression test suite for Phase 2C Table Statistics & Query Consolidation.
+    Validates that:
+    1. Duplicate table lookups are eliminated across get_queryset and get_paginated_response.
+    2. Multiple task count queries are consolidated into single aggregate queries.
+    3. Filterable column values are fetched in a single batched query instead of per-column queries.
+    4. Table statistics cache-hit and cache-miss behave with reduced, constant-bound query counts.
+    5. Empty tables and malformed legacy data are handled safely without exceptions.
+    6. All statistics values, permissions, and spreadsheet behaviors remain 100% identical.
+    """
+
+    def setUp(self):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        from django.core.cache import cache
+
+        self.factory = APIRequestFactory()
+        self.force_authenticate = force_authenticate
+        self.connection = connection
+        self.CaptureQueriesContext = CaptureQueriesContext
+        self.cache = cache
+
+        self.dept = Department.objects.create(name="Phase 2C Ops", slug="phase-2c-ops")
+        self.dept2 = Department.objects.create(name="Phase 2C Isolated", slug="phase-2c-isolated")
+        self.admin = User.objects.create_user(
+            email="p2cadmin_test@flow-force.com",
+            password="testpassword",
+            full_name="P2C Admin Test",
+            role="ADMIN",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.employee = User.objects.create_user(
+            email="p2cemp_test@flow-force.com",
+            password="testpassword",
+            full_name="P2C Emp Test",
+            role="EMPLOYEE",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.other_employee = User.objects.create_user(
+            email="p2cother_test@flow-force.com",
+            password="testpassword",
+            full_name="P2C Other Test",
+            role="EMPLOYEE",
+            department=self.dept2,
+            status="APPROVED"
+        )
+
+        self.table = Table.objects.create(
+            name="Sales Operations Table",
+            job_type="SALES",
+            created_by=self.admin,
+            department=self.dept
+        )
+        TableAccess.objects.create(table=self.table, user=self.admin, access_level="ADMIN")
+        TableAccess.objects.create(table=self.table, user=self.employee, access_level="VIEW")
+
+        # System and custom columns
+        self.col_pid = Column.objects.create(table=self.table, name="PID", data_type="TEXT")
+        self.col_project = Column.objects.create(table=self.table, name="PROJECT", data_type="TEXT", is_filterable=True)
+        self.col_client = Column.objects.create(table=self.table, name="CLIENT", data_type="TEXT", is_filterable=True)
+        self.col_stage = Column.objects.create(table=self.table, name="STAGE", data_type="DROPDOWN", options="Lead,Proposal,Negotiation", is_filterable=True)
+        self.col_qty = Column.objects.create(table=self.table, name="QTY", data_type="NUMBER")
+        self.col_fup = Column.objects.create(table=self.table, name="FOLLOW-UP DATE", data_type="DATE")
+        self.col_act = Column.objects.create(table=self.table, name="ACTIVITY_TYPE", data_type="TEXT")
+        self.col_status = Column.objects.create(table=self.table, name="STATUS", data_type="TEXT")
+
+    def _create_sample_data(self, row_count=20):
+        from datetime import date, timedelta
+        today = date.today()
+        cells = []
+        for i in range(row_count):
+            r = Row.objects.create(table=self.table, created_by=self.admin)
+            st = "COMPLETED" if i % 4 == 0 else "IN_PROGRESS"
+            pr = "HIGH" if i % 3 == 0 else ("LOW" if i % 3 == 1 else "MEDIUM")
+            if i % 5 == 0:
+                dd = today
+            elif i % 5 == 1:
+                dd = today - timedelta(days=3)
+            else:
+                dd = today + timedelta(days=7)
+
+            t = Task.objects.create(
+                row=r,
+                due_date=dd,
+                priority=pr,
+                status=st,
+                assigned_by=self.admin
+            )
+
+            cells.append(CellValue(row=r, column=self.col_pid, value=f"PID-{i+1:03d}"))
+            cells.append(CellValue(row=r, column=self.col_project, value=f"Project {i % 3}"))
+            cells.append(CellValue(row=r, column=self.col_client, value=f"Client {i % 4}"))
+            cells.append(CellValue(row=r, column=self.col_qty, value=str(10.5 * (i + 1)) if i % 4 != 3 else "invalid"))
+            cells.append(CellValue(row=r, column=self.col_fup, value=today.isoformat()))
+            cells.append(CellValue(row=r, column=self.col_act, value="Call" if i % 2 == 0 else "Site Visit"))
+            cells.append(CellValue(row=r, column=self.col_status, value=st))
+
+        CellValue.objects.bulk_create(cells)
+
+    def test_statistics_cache_miss_query_count_and_fidelity(self):
+        """Verifies Cache Miss calculates all statistics accurately with <= 16 queries."""
+        from datetime import date
+        from tables.views import RowViewSet
+        self._create_sample_data(row_count=20)
+
+        today_str = date.today().isoformat()
+        self.cache.delete(f"table_stats_{self.table.id}_{today_str}")
+
+        view = RowViewSet.as_view({'get': 'list'})
+        req = self.factory.get(f"/tables/api/rows/?table={self.table.id}&include_stats=true")
+        self.force_authenticate(req, user=self.admin)
+
+        with self.CaptureQueriesContext(self.connection) as ctx_miss:
+            res = view(req)
+
+        self.assertEqual(res.status_code, 200)
+        # Reduced from 21 queries down to <= 16 queries on cache miss
+        self.assertLessEqual(len(ctx_miss), 16)
+
+        stats = res.data.get("stats")
+        self.assertIsNotNone(stats)
+        self.assertEqual(stats["completion_stats"]["total"], 20)
+        self.assertEqual(stats["completion_stats"]["completed"], 5)
+        self.assertEqual(stats["completion_stats"]["percent"], 25)
+        self.assertEqual(stats["due_today_count"], 4)
+        self.assertEqual(stats["overdue_count"], 3)
+        self.assertEqual(stats["total_qty"], 1575.0)
+        self.assertEqual(stats["status_counts"]["COMPLETED"], 5)
+        self.assertEqual(stats["status_counts"]["IN_PROGRESS"], 15)
+        self.assertEqual(stats["priority_counts"]["High"], 7)
+        self.assertEqual(stats["priority_counts"]["Low"], 7)
+        self.assertEqual(stats["priority_counts"]["Med"], 6)
+        self.assertEqual(stats["project_counts"]["Project 0"], 7)
+        self.assertEqual(stats["project_counts"]["Project 1"], 7)
+        self.assertEqual(stats["project_counts"]["Project 2"], 6)
+
+    def test_statistics_cache_hit_query_count_and_fidelity(self):
+        """Verifies Cache Hit returns exact statistics in <= 5 queries."""
+        from datetime import date
+        from tables.views import RowViewSet
+        self._create_sample_data(row_count=20)
+
+        view = RowViewSet.as_view({'get': 'list'})
+        req_prime = self.factory.get(f"/tables/api/rows/?table={self.table.id}&include_stats=true")
+        self.force_authenticate(req_prime, user=self.admin)
+        res_prime = view(req_prime)
+        self.assertEqual(res_prime.status_code, 200)
+
+        # Cache Hit request
+        req_hit = self.factory.get(f"/tables/api/rows/?table={self.table.id}&include_stats=true")
+        self.force_authenticate(req_hit, user=self.admin)
+
+        with self.CaptureQueriesContext(self.connection) as ctx_hit:
+            res_hit = view(req_hit)
+
+        self.assertEqual(res_hit.status_code, 200)
+        # Reduced from 6 queries down to <= 5 queries on cache hit
+        self.assertLessEqual(len(ctx_hit), 5)
+        self.assertEqual(res_hit.data.get("stats"), res_prime.data.get("stats"))
+
+    def test_duplicate_table_lookup_eliminated(self):
+        """Verifies that Table.objects.get is called only once per request."""
+        from tables.views import RowViewSet
+        self._create_sample_data(row_count=5)
+
+        view = RowViewSet.as_view({'get': 'list'})
+        req = self.factory.get(f"/tables/api/rows/?table={self.table.id}&include_stats=true")
+        self.force_authenticate(req, user=self.admin)
+
+        with self.CaptureQueriesContext(self.connection) as ctx:
+            res = view(req)
+
+        self.assertEqual(res.status_code, 200)
+        table_queries = [
+            q['sql'] for q in ctx.captured_queries
+            if 'FROM "tables_table"' in q['sql'] or 'FROM tables_table' in q['sql']
+        ]
+        # Exactly 1 query for Table
+        self.assertEqual(len(table_queries), 1)
+
+    def test_statistics_query_count_does_not_grow_with_rows(self):
+        """Verifies that statistics query count is O(1) independent of row count."""
+        from datetime import date
+        from tables.views import RowViewSet
+
+        # 5 rows
+        self._create_sample_data(row_count=5)
+        today_str = date.today().isoformat()
+        self.cache.delete(f"table_stats_{self.table.id}_{today_str}")
+
+        view = RowViewSet.as_view({'get': 'list'})
+        req5 = self.factory.get(f"/tables/api/rows/?table={self.table.id}&include_stats=true")
+        self.force_authenticate(req5, user=self.admin)
+        with self.CaptureQueriesContext(self.connection) as ctx5:
+            res5 = view(req5)
+        q_count_5 = len(ctx5)
+
+        # 25 rows
+        self._create_sample_data(row_count=20)
+        self.cache.delete(f"table_stats_{self.table.id}_{today_str}")
+
+        req25 = self.factory.get(f"/tables/api/rows/?table={self.table.id}&include_stats=true")
+        self.force_authenticate(req25, user=self.admin)
+        with self.CaptureQueriesContext(self.connection) as ctx25:
+            res25 = view(req25)
+        q_count_25 = len(ctx25)
+
+        self.assertEqual(q_count_5, q_count_25)
+        self.assertLessEqual(q_count_25, 16)
+
+    def test_empty_table_statistics(self):
+        """Verifies that an empty table returns clean zero/empty statistics without errors."""
+        from datetime import date
+        from tables.views import RowViewSet
+
+        empty_table = Table.objects.create(
+            name="Empty Table",
+            job_type="GENERAL",
+            created_by=self.admin,
+            department=self.dept
+        )
+        TableAccess.objects.create(table=empty_table, user=self.admin, access_level="ADMIN")
+
+        view = RowViewSet.as_view({'get': 'list'})
+        req = self.factory.get(f"/tables/api/rows/?table={empty_table.id}&include_stats=true")
+        self.force_authenticate(req, user=self.admin)
+
+        res = view(req)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["count"], 0)
+        stats = res.data.get("stats")
+        self.assertIsNotNone(stats)
+        self.assertEqual(stats["completion_stats"]["total"], 0)
+        self.assertEqual(stats["completion_stats"]["completed"], 0)
+        self.assertEqual(stats["completion_stats"]["percent"], 0)
+        self.assertEqual(stats["due_today_count"], 0)
+        self.assertEqual(stats["overdue_count"], 0)
+        self.assertEqual(stats["total_qty"], 0.0)
+
+    def test_malformed_and_blank_qty_values(self):
+        """Verifies that malformed and blank QTY cell values are safely handled in Python summation."""
+        from datetime import date
+        from tables.views import RowViewSet
+
+        today_str = date.today().isoformat()
+        self.cache.delete(f"table_stats_{self.table.id}_{today_str}")
+
+        dirty_values = ["-", "N/A", "", " ", "None", "15.5", "24.5", "invalid_string"]
+        cells = []
+        for idx, val in enumerate(dirty_values):
+            r = Row.objects.create(table=self.table, created_by=self.admin)
+            Task.objects.create(row=r, status="PENDING", assigned_by=self.admin)
+            cells.append(CellValue(row=r, column=self.col_qty, value=val))
+        CellValue.objects.bulk_create(cells)
+
+        view = RowViewSet.as_view({'get': 'list'})
+        req = self.factory.get(f"/tables/api/rows/?table={self.table.id}&include_stats=true")
+        self.force_authenticate(req, user=self.admin)
+
+        res = view(req)
+        self.assertEqual(res.status_code, 200)
+        # 15.5 + 24.5 = 40.0
+        self.assertEqual(res.data["stats"]["total_qty"], 40.0)
+
+    def test_permissions_isolation_for_table_statistics(self):
+        """Verifies unauthorized users cannot access table rows or statistics."""
+        from tables.views import RowViewSet
+
+        view = RowViewSet.as_view({'get': 'list'})
+        req = self.factory.get(f"/tables/api/rows/?table={self.table.id}&include_stats=true")
+        # other_employee has NO access to self.table (in different department and no TableAccess)
+        self.force_authenticate(req, user=self.other_employee)
+
+        res = view(req)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["count"], 0)
+        self.assertEqual(res.data["results"], [])
+
+    def test_table_spreadsheet_view_query_optimization(self):
+        """Verifies table_spreadsheet_view uses prefetched columns and relations efficiently."""
+        from tables.views import table_spreadsheet_view
+        from django.test.client import RequestFactory
+        factory = RequestFactory()
+
+        req = factory.get(f"/tables/{self.table.id}/")
+        req.user = self.admin
+
+        with self.CaptureQueriesContext(self.connection) as ctx:
+            res = table_spreadsheet_view(req, table_id=self.table.id)
+
+        self.assertEqual(res.status_code, 200)
+        # Should be tightly bounded (Table+department, columns prefetch, access check, + context processor)
+        self.assertLessEqual(len(ctx), 8)
