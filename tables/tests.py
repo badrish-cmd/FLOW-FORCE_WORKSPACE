@@ -3292,3 +3292,319 @@ class SpreadsheetFrontendPerformanceRegressionTestCase(TestCase):
         self.assertEqual(len(data["results"]), 2)
         self.assertEqual(data["count"], 4)
 
+
+class TableStatisticsServiceTestCase(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        from django.utils import timezone
+        from tables.services import TableStatisticsService
+        self.cache = cache
+        self.dept = Department.objects.create(name="Phase 3A Dept", slug="phase-3a-dept")
+        self.admin = User.objects.create_user(
+            email="phase3aadmin@flow-force.com",
+            password="testpassword",
+            full_name="Phase 3A Admin",
+            role="ADMIN",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.table = Table.objects.create(
+            name="Service Test Table",
+            job_type="PERSONAL",
+            created_by=self.admin
+        )
+        TableAccess.objects.create(table=self.table, user=self.admin, access_level="ADMIN")
+
+        self.col_pid = Column.objects.create(table=self.table, name="PID", data_type="TEXT", position=1)
+        self.col_project = Column.objects.create(table=self.table, name="PROJECT", data_type="TEXT", position=2)
+        self.col_qty = Column.objects.create(table=self.table, name="QTY", data_type="NUMBER", position=3)
+        self.col_filter = Column.objects.create(table=self.table, name="CATEGORY", data_type="TEXT", is_filterable=True, position=4)
+        self.col_dropdown = Column.objects.create(
+            table=self.table,
+            name="STATUS_OPT",
+            data_type="DROPDOWN",
+            is_filterable=True,
+            options="Active, Inactive, Archived",
+            position=5
+        )
+
+        today = timezone.localdate()
+        self.today_str = today.isoformat()
+        TableStatisticsService.invalidate_cache(self.table.id, self.today_str)
+
+    def test_service_empty_table(self):
+        """Verifies empty table returns clean default statistics without error."""
+        from tables.services import TableStatisticsService
+        stats = TableStatisticsService.get_table_statistics(self.table, use_cache=False)
+        self.assertEqual(stats["completion_stats"]["total"], 0)
+        self.assertEqual(stats["completion_stats"]["completed"], 0)
+        self.assertEqual(stats["completion_stats"]["percent"], 0)
+        self.assertEqual(stats["due_today_count"], 0)
+        self.assertEqual(stats["overdue_count"], 0)
+        self.assertEqual(stats["total_qty"], 0.0)
+        self.assertEqual(stats["unique_pids"], [])
+        self.assertEqual(stats["unique_years"], [])
+        self.assertEqual(stats["unique_column_values"][self.col_dropdown.id], ["Active", "Inactive", "Archived"])
+
+    def test_service_aggregates_and_calculations(self):
+        """Verifies accurate calculation of completion, overdue, due today, qty, and unique values."""
+        from django.utils import timezone
+        from tables.services import TableStatisticsService
+        today = timezone.localdate()
+        yesterday = today - datetime.timedelta(days=1)
+
+        # Row 1: completed, yesterday
+        r1 = Row.objects.create(table=self.table, created_by=self.admin)
+        Task.objects.create(row=r1, status="COMPLETED", priority="HIGH", due_date=yesterday, assigned_by=self.admin)
+        CellValue.objects.create(row=r1, column=self.col_pid, value="PID-001", updated_by=self.admin)
+        CellValue.objects.create(row=r1, column=self.col_project, value="Apollo", updated_by=self.admin)
+        CellValue.objects.create(row=r1, column=self.col_qty, value="10.5", updated_by=self.admin)
+        CellValue.objects.create(row=r1, column=self.col_filter, value="CatA", updated_by=self.admin)
+
+        # Row 2: overdue (pending with past due date)
+        r2 = Row.objects.create(table=self.table, created_by=self.admin)
+        Task.objects.create(row=r2, status="PENDING", priority="URGENT", due_date=yesterday, assigned_by=self.admin)
+        CellValue.objects.create(row=r2, column=self.col_pid, value="PID-002", updated_by=self.admin)
+        CellValue.objects.create(row=r2, column=self.col_project, value="Apollo", updated_by=self.admin)
+        CellValue.objects.create(row=r2, column=self.col_qty, value="20.0", updated_by=self.admin)
+        CellValue.objects.create(row=r2, column=self.col_filter, value="CatB", updated_by=self.admin)
+
+        # Row 3: due today
+        r3 = Row.objects.create(table=self.table, created_by=self.admin)
+        Task.objects.create(row=r3, status="IN_PROGRESS", priority="MED", due_date=today, assigned_by=self.admin)
+        CellValue.objects.create(row=r3, column=self.col_pid, value="PID-001", updated_by=self.admin)
+        CellValue.objects.create(row=r3, column=self.col_project, value="Gemini", updated_by=self.admin)
+        CellValue.objects.create(row=r3, column=self.col_qty, value="invalid_qty", updated_by=self.admin)
+        CellValue.objects.create(row=r3, column=self.col_filter, value="CatA", updated_by=self.admin)
+
+        # Row 4: approved (past due date but approved -> NOT overdue)
+        r4 = Row.objects.create(table=self.table, created_by=self.admin)
+        Task.objects.create(row=r4, status="APPROVED", priority="LOW", due_date=yesterday, assigned_by=self.admin)
+        CellValue.objects.create(row=r4, column=self.col_qty, value=None, updated_by=self.admin)
+
+        # Row 5: archived row (must be ignored)
+        r5 = Row.objects.create(table=self.table, created_by=self.admin, is_archived=True)
+        Task.objects.create(row=r5, status="PENDING", priority="URGENT", due_date=yesterday, assigned_by=self.admin)
+        CellValue.objects.create(row=r5, column=self.col_qty, value="100.0", updated_by=self.admin)
+
+        stats = TableStatisticsService.get_table_statistics(self.table, use_cache=False)
+
+        self.assertEqual(stats["completion_stats"]["total"], 4)
+        self.assertEqual(stats["completion_stats"]["completed"], 1)
+        self.assertEqual(stats["completion_stats"]["percent"], 25)
+        self.assertEqual(stats["due_today_count"], 1)
+        self.assertEqual(stats["overdue_count"], 1)
+        self.assertEqual(stats["total_qty"], 30.5)
+
+        self.assertEqual(stats["unique_pids"], ["PID-001", "PID-002"])
+        self.assertEqual(stats["unique_column_values"][self.col_filter.id], ["CatA", "CatB"])
+        self.assertEqual(stats["priority_counts"]["High"], 1)
+        self.assertEqual(stats["priority_counts"]["Urgent"], 1)
+        self.assertEqual(stats["priority_counts"]["Med"], 1)
+        self.assertEqual(stats["priority_counts"]["Low"], 1)
+        self.assertEqual(stats["project_counts"]["Apollo"], 2)
+        self.assertEqual(stats["project_counts"]["Gemini"], 1)
+
+    def test_service_cache_hit_and_invalidation(self):
+        """Verifies Redis caching and invalidation works as expected."""
+        from tables.services import TableStatisticsService
+        # 1. First call calculates and sets cache
+        TableStatisticsService.invalidate_cache(self.table.id, self.today_str)
+        cache_key = TableStatisticsService.get_cache_key(self.table.id, self.today_str)
+        self.assertIsNone(self.cache.get(cache_key))
+
+        stats1 = TableStatisticsService.get_table_statistics(self.table, use_cache=True)
+        self.assertIsNotNone(self.cache.get(cache_key))
+
+        # 2. Second call returns from cache
+        stats2 = TableStatisticsService.get_table_statistics(self.table, use_cache=True)
+        self.assertEqual(stats1, stats2)
+
+        # 3. Invalidation clears cache
+        TableStatisticsService.invalidate_cache(self.table.id, self.today_str)
+        self.assertIsNone(self.cache.get(cache_key))
+
+    def test_views_compatibility_wrapper(self):
+        """Verifies get_table_statistics in tables.views delegates directly to the service."""
+        from tables.views import get_table_statistics
+        from tables.services import TableStatisticsService
+        stats_from_view = get_table_statistics(self.table, use_cache=False)
+        stats_from_service = TableStatisticsService.get_table_statistics(self.table, use_cache=False)
+        self.assertEqual(stats_from_view, stats_from_service)
+
+
+class RowServiceTestCase(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        self.cache = cache
+        self.dept = Department.objects.create(name="Phase 3B Dept", slug="phase-3b-dept")
+        self.admin = User.objects.create_user(
+            email="phase3badmin@flow-force.com",
+            password="testpassword",
+            full_name="Phase 3B Admin",
+            role="ADMIN",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.employee = User.objects.create_user(
+            email="phase3bemp@flow-force.com",
+            password="testpassword",
+            full_name="Phase 3B Employee",
+            role="EMPLOYEE",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.table = Table.objects.create(
+            name="Row Service Table",
+            job_type="GENERAL",
+            created_by=self.admin
+        )
+        TableAccess.objects.create(table=self.table, user=self.admin, access_level="ADMIN")
+
+    def test_service_normal_row_creation(self):
+        """Verifies normal row, task, and cell value creation via RowService."""
+        from tables.services import RowService
+        row = RowService.create_row(
+            table=self.table,
+            user=self.admin,
+            cells_data={
+                "TASK_NAME": "Deploy Service",
+                "DUE_DATE": "2026-11-15",
+                "priority": "HIGH"
+            }
+        )
+        self.assertIsNotNone(row)
+        self.assertEqual(row.created_by, self.admin)
+        self.assertEqual(row.table, self.table)
+
+        # Verify task creation
+        task = Task.objects.get(row=row)
+        self.assertEqual(task.status, "PENDING")
+        self.assertEqual(task.priority, "HIGH")
+        self.assertEqual(task.due_date.strftime("%Y-%m-%d"), "2026-11-15")
+        self.assertEqual(task.assigned_by, self.admin)
+
+        # Verify cell values
+        s_no_col = self.table.columns.get(name="S_NO")
+        task_name_col = self.table.columns.get(name="TASK_NAME")
+        self.assertEqual(int(CellValue.objects.get(row=row, column=s_no_col).value), 1)
+        self.assertEqual(CellValue.objects.get(row=row, column=task_name_col).value, "Deploy Service")
+
+    def test_service_validation_errors(self):
+        """Verifies RowCreationValidationError on missing mandatory fields or invalid dates."""
+        from tables.services import RowService, RowCreationValidationError
+
+        # Missing DUE_DATE
+        with self.assertRaises(RowCreationValidationError) as ctx:
+            RowService.create_row(table=self.table, user=self.admin, cells_data={"TASK_NAME": "Incomplete"})
+        self.assertIn("DUE_DATE is mandatory", str(ctx.exception))
+
+        # Invalid DUE_DATE format
+        with self.assertRaises(RowCreationValidationError) as ctx2:
+            RowService.create_row(table=self.table, user=self.admin, cells_data={"TASK_NAME": "Bad Date", "DUE_DATE": "15-11-2026"})
+        self.assertIn("Invalid DUE_DATE format", str(ctx2.exception))
+
+    def test_service_s_no_sequential_increment_and_corrupt_handling(self):
+        """Verifies S_NO increments cleanly and recovers from corrupt string values."""
+        from tables.services import RowService
+        s_no_col = self.table.columns.get(name="S_NO")
+
+        # Create row 1 -> S_NO=1
+        r1 = RowService.create_row(table=self.table, user=self.admin, cells_data={"TASK_NAME": "T1", "DUE_DATE": "2026-11-01"})
+        self.assertEqual(int(CellValue.objects.get(row=r1, column=s_no_col).value), 1)
+
+        # Create row 2 -> S_NO=2
+        r2 = RowService.create_row(table=self.table, user=self.admin, cells_data={"TASK_NAME": "T2", "DUE_DATE": "2026-11-02"})
+        self.assertEqual(int(CellValue.objects.get(row=r2, column=s_no_col).value), 2)
+
+        # Corrupt the latest S_NO value
+        cell2 = CellValue.objects.get(row=r2, column=s_no_col)
+        cell2.value = "corrupted_val"
+        cell2.save()
+
+        # Create row 3 -> should fallback to 0 and produce S_NO=1 safely without crashing
+        r3 = RowService.create_row(table=self.table, user=self.admin, cells_data={"TASK_NAME": "T3", "DUE_DATE": "2026-11-03"})
+        self.assertEqual(int(CellValue.objects.get(row=r3, column=s_no_col).value), 1)
+
+    def test_service_different_job_types(self):
+        """Verifies row creation across SALES, LIST_PID, PERSONAL, and LOGS tables."""
+        from tables.services import RowService
+
+        # 1. SALES
+        sales_table = Table.objects.create(name="Sales Table", job_type="SALES", created_by=self.admin)
+        sales_row = RowService.create_row(
+            table=sales_table,
+            user=self.admin,
+            cells_data={"CUSTOMER_NAME": "Acme Corp", "FOLLOW_UP_DATE": "2026-12-01"}
+        )
+        self.assertEqual(Task.objects.get(row=sales_row).due_date.strftime("%Y-%m-%d"), "2026-12-01")
+
+        # 2. LIST_PID (dates optional)
+        pid_table = Table.objects.create(name="PID Table", job_type="LIST_PID", created_by=self.admin)
+        pid_row = RowService.create_row(
+            table=pid_table,
+            user=self.admin,
+            cells_data={"ENQUIRY_NO/QUOTATION_NO": "ENQ-999"}
+        )
+        self.assertEqual(pid_row.table, pid_table)
+
+        # 3. PERSONAL (dates optional)
+        personal_table = Table.objects.create(name="Personal Table", job_type="PERSONAL", created_by=self.admin)
+        personal_row = RowService.create_row(
+            table=personal_table,
+            user=self.admin,
+            cells_data={}
+        )
+        self.assertEqual(personal_row.table, personal_table)
+
+        # 4. LOGS
+        logs_table = Table.objects.create(name="Logs Table", job_type="LOGS", created_by=self.admin)
+        logs_row = RowService.create_row(
+            table=logs_table,
+            user=self.admin,
+            cells_data={"TOOL_NAME": "Wrench Set", "RETURN_DATE": "2026-11-10"}
+        )
+        self.assertEqual(Task.objects.get(row=logs_row).due_date.strftime("%Y-%m-%d"), "2026-11-10")
+
+    def test_service_assigned_to_handling(self):
+        """Verifies task assignees are populated via assigned_to_ids or USER column."""
+        from tables.services import RowService
+        row = RowService.create_row(
+            table=self.table,
+            user=self.admin,
+            cells_data={"TASK_NAME": "Assigned Task", "DUE_DATE": "2026-11-20"},
+            assigned_to_ids=[self.employee.id]
+        )
+        task = Task.objects.get(row=row)
+        self.assertIn(self.employee, task.assigned_to.all())
+
+    def test_service_transaction_rollback_on_failure(self):
+        """Verifies atomic rollback: no Row or CellValue records persist if an error occurs."""
+        from tables.services import RowService
+        from unittest.mock import patch
+
+        initial_row_count = Row.objects.filter(table=self.table).count()
+        initial_cell_count = CellValue.objects.filter(row__table=self.table).count()
+
+        with patch("tasks.models.Task.objects.create", side_effect=RuntimeError("Simulated DB Crash")):
+            with self.assertRaises(RuntimeError):
+                RowService.create_row(
+                    table=self.table,
+                    user=self.admin,
+                    cells_data={"TASK_NAME": "Will Roll Back", "DUE_DATE": "2026-11-25"}
+                )
+
+        # Assert no orphaned records were persisted
+        self.assertEqual(Row.objects.filter(table=self.table).count(), initial_row_count)
+        self.assertEqual(CellValue.objects.filter(row__table=self.table).count(), initial_cell_count)
+
+    def test_views_create_table_row_wrapper(self):
+        """Verifies create_table_row in tables.views delegates directly to RowService."""
+        from tables.views import create_table_row
+        row = create_table_row(
+            table=self.table,
+            user=self.admin,
+            cells_data={"TASK_NAME": "Wrapper Task", "DUE_DATE": "2026-11-30"}
+        )
+        self.assertIsNotNone(row)
+        self.assertEqual(row.created_by, self.admin)

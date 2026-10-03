@@ -17,6 +17,23 @@ from .serializers import (
 from .permissions import get_accessible_tables, has_table_access, get_column_access_level
 from tasks.models import Task, ActivityLog
 from auth_app.models import EmployeeUser
+from .services.statistics_service import TableStatisticsService
+from .services.row_service import RowService, RowCreationValidationError
+
+def get_table_statistics(table, today_date=None, use_cache=True):
+    """
+    Backward-compatibility wrapper for table statistics calculation.
+    Delegates directly to TableStatisticsService.get_table_statistics.
+    """
+    return TableStatisticsService.get_table_statistics(table, today_date=today_date, use_cache=use_cache)
+
+def create_table_row(table, user, cells_data=None, assigned_to_ids=None):
+    """
+    Backward-compatibility wrapper for row creation.
+    Delegates directly to RowService.create_row.
+    """
+    return RowService.create_row(table=table, user=user, cells_data=cells_data, assigned_to_ids=assigned_to_ids)
+
 
 def sync_logs_row_overdue(row, request_user=None):
     """
@@ -1612,293 +1629,32 @@ class RowPagination(PageNumberPagination):
         if not table or str(table.id) != str(table_id):
             table = get_object_or_404(Table, id=table_id)
         include_stats = self.request.query_params.get("include_stats") == "true"
-        
-        unique_pids = []
-        unique_column_values = {}
-        unique_years = []
-        status_counts = {}
-        priority_counts = {'Urgent': 0, 'High': 0, 'Med': 0, 'Low': 0}
-        project_counts = {}
-        due_today_count = 0
-        overdue_count = 0
-        total_qty = 0.0
-        completion_stats = {'completed': 0, 'total': 0, 'percent': 0}
-        week_actuals = {'calls': 0, 'visits': 0, 'enquiries': 0, 'quotes': 0, 'orders': 0, 'achievementPercent': 0.0}
 
         if include_stats:
-            from django.core.cache import cache
-            from django.utils import timezone
-            today_str = timezone.localdate().isoformat()
-            cache_key = f"table_stats_{table.id}_{today_str}"
-            
-            cached_data = cache.get(cache_key)
-            if cached_data:
-                unique_pids = cached_data.get('unique_pids', [])
-                unique_column_values = cached_data.get('unique_column_values', {})
-                unique_years = cached_data.get('unique_years', [])
-                status_counts = cached_data.get('status_counts', {})
-                priority_counts = cached_data.get('priority_counts', {'Urgent': 0, 'High': 0, 'Med': 0, 'Low': 0})
-                project_counts = cached_data.get('project_counts', {})
-                due_today_count = cached_data.get('due_today_count', 0)
-                overdue_count = cached_data.get('overdue_count', 0)
-                total_qty = cached_data.get('total_qty', 0.0)
-                completion_stats = cached_data.get('completion_stats', {'completed': 0, 'total': 0, 'percent': 0})
-                week_actuals = cached_data.get('week_actuals', {'calls': 0, 'visits': 0, 'enquiries': 0, 'quotes': 0, 'orders': 0, 'achievementPercent': 0.0})
-            else:
-                # 1. Fetch all columns once to eliminate repeated schema lookups
-                all_columns = list(table.columns.all())
-                pid_col = next((c for c in all_columns if c.name.upper() == 'PID'), None)
-                project_col = next((c for c in all_columns if c.name.upper() == 'PROJECT'), None)
-                qty_col = next((c for c in all_columns if c.name.upper() == 'QTY'), None)
-                filterable_cols = [c for c in all_columns if c.is_filterable]
-                date_cols = [c for c in all_columns if c.name in ['FOLLOW - UP DATE', 'FOLLOW-UP DATE', 'DATE']]
+            stats_data = TableStatisticsService.get_table_statistics(table)
+        else:
+            stats_data = TableStatisticsService.get_default_statistics()
 
-                # 2. Unique PIDs
-                if pid_col:
-                    unique_pids = list(CellValue.objects.filter(
-                        column_id=pid_col.id,
-                        row__table=table,
-                        row__is_archived=False
-                    ).exclude(value=None).values_list('value', flat=True).distinct().order_by('value'))
-                else:
-                    unique_pids = []
-
-                # 3. Unique Column values for all filterable columns (Consolidated single batch query)
-                non_dropdown_cols = [c for c in filterable_cols if c.data_type != 'DROPDOWN']
-                for col in filterable_cols:
-                    if col.data_type == 'DROPDOWN':
-                        opts = [o.strip() for o in (col.options or '').split(',') if o.strip()]
-                        unique_column_values[col.id] = opts
-                    else:
-                        unique_column_values[col.id] = []
-
-                if non_dropdown_cols:
-                    col_ids = [c.id for c in non_dropdown_cols]
-                    cell_vals = CellValue.objects.filter(
-                        column_id__in=col_ids,
-                        row__table=table,
-                        row__is_archived=False
-                    ).exclude(
-                        value__isnull=True
-                    ).exclude(
-                        value=""
-                    ).values('column_id', 'value').distinct()
-
-                    col_val_sets = {c_id: set() for c_id in col_ids}
-                    for item in cell_vals:
-                        v = item['value']
-                        if v is not None and str(v).strip():
-                            col_val_sets[item['column_id']].add(str(v).strip())
-
-                    for c_id, v_set in col_val_sets.items():
-                        unique_column_values[c_id] = sorted(list(v_set))
-                
-                # 4. Unique Years
-                from django.db.models.functions import ExtractYear
-                from tasks.models import Task
-                years_qs = Task.objects.filter(
-                    row__table=table,
-                    row__is_archived=False
-                ).annotate(year=ExtractYear('due_date')).values_list('year', flat=True).distinct().order_by('-year')
-                unique_years = [str(y) for y in years_qs if y]
-                
-                # 5. Status counts
-                s_counts = Task.objects.filter(
-                    row__table=table,
-                    row__is_archived=False
-                ).values('status').annotate(count=Count('id'))
-                for item in s_counts:
-                    val = item['status'] or 'PENDING'
-                    status_counts[val] = item['count']
-                    
-                # 6. Priority counts
-                p_counts = Task.objects.filter(
-                    row__table=table,
-                    row__is_archived=False
-                ).values('priority').annotate(count=Count('id'))
-                for item in p_counts:
-                    priority = item['priority']
-                    pl = str(priority).lower()
-                    if pl.startswith('med'):
-                        priority_counts['Med'] += item['count']
-                    elif pl.startswith('urg'):
-                        priority_counts['Urgent'] += item['count']
-                    elif pl.startswith('hi'):
-                        priority_counts['High'] += item['count']
-                    elif pl.startswith('lo'):
-                        priority_counts['Low'] += item['count']
-                        
-                # 7. Project counts (for List PID)
-                if project_col:
-                    pr_counts = CellValue.objects.filter(
-                        column_id=project_col.id,
-                        row__table=table,
-                        row__is_archived=False
-                    ).values('value').annotate(count=Count('id'))
-                    for item in pr_counts:
-                        val = item['value'] or 'No Project'
-                        project_counts[val] = item['count']
-                    
-                # 8. Consolidated Task Aggregates (due_today, overdue, total, completed)
-                from django.utils import timezone
-                from django.db.models import Q
-                today_date = timezone.localdate()
-                task_aggs = Task.objects.filter(
-                    row__table=table,
-                    row__is_archived=False
-                ).aggregate(
-                    total=Count('id'),
-                    completed=Count('id', filter=Q(status__in=['COMPLETED', 'COMPLETE'])),
-                    due_today=Count('id', filter=Q(due_date=today_date)),
-                    overdue=Count('id', filter=Q(due_date__lt=today_date) & ~Q(status__in=['COMPLETED', 'APPROVED', 'COMPLETE']))
-                )
-                total_tasks = task_aggs['total'] or 0
-                completed_tasks = task_aggs['completed'] or 0
-                due_today_count = task_aggs['due_today'] or 0
-                overdue_count = task_aggs['overdue'] or 0
-                
-                # 9. Total QTY (computed in Python to prevent database-specific JSONB casting crashes in PostgreSQL)
-                total_qty = 0.0
-                if qty_col:
-                    qty_cells = CellValue.objects.filter(
-                        column_id=qty_col.id,
-                        row__table=table,
-                        row__is_archived=False
-                    ).exclude(value=None).values_list('value', flat=True)
-
-                    for val in qty_cells:
-                        try:
-                            if val is not None and str(val).strip():
-                                total_qty += float(str(val).strip())
-                        except ValueError:
-                            pass
-                        
-                # 10. Completion stats
-                completion_percent = round((completed_tasks / total_tasks) * 100) if total_tasks > 0 else 0
-                completion_stats = {
-                    'completed': completed_tasks,
-                    'total': total_tasks,
-                    'percent': completion_percent
-                }
-                
-                # 11. Week actuals for SALES followups
-                import datetime
-                monday = today_date - datetime.timedelta(days=today_date.weekday())
-                sunday = monday + datetime.timedelta(days=6)
-                
-                # Filter row IDs first to avoid loading all cell values
-                if date_cols:
-                    date_col_ids = [c.id for c in date_cols]
-                    row_ids_in_week = list(CellValue.objects.filter(
-                        column_id__in=date_col_ids,
-                        row__table=table,
-                        row__is_archived=False,
-                        value__range=[monday.isoformat(), sunday.isoformat()]
-                    ).values_list('row_id', flat=True).distinct())
-                else:
-                    row_ids_in_week = []
-                
-                calls = 0
-                visits = 0
-                enquiries = 0
-                quotes = 0
-                orders = 0
-
-                if row_ids_in_week:
-                    activity_col_ids = [c.id for c in all_columns if c.name in ['FOLLOW - UP DATE', 'FOLLOW-UP DATE', 'DATE', 'ACTIVITY TYPE', 'ACTIVITY_TYPE', 'STATUS']]
-                    cells_qs = CellValue.objects.filter(
-                        row_id__in=row_ids_in_week,
-                        row__is_archived=False,
-                        column_id__in=activity_col_ids
-                    ).select_related('column')
-                    
-                    from collections import defaultdict
-                    row_cells = defaultdict(dict)
-                    for cell in cells_qs:
-                        row_cells[cell.row_id][cell.column.name] = cell.value
-
-                    for r_id, c_dict in row_cells.items():
-                        date_val = c_dict.get('FOLLOW - UP DATE') or c_dict.get('FOLLOW-UP DATE') or c_dict.get('DATE')
-                        if not date_val:
-                            continue
-                        try:
-                            if isinstance(date_val, str):
-                                d = datetime.datetime.strptime(date_val.split('T')[0], "%Y-%m-%d").date()
-                            else:
-                                continue
-                        except Exception:
-                            continue
-
-                        if monday <= d <= sunday:
-                            act_type = str(c_dict.get('ACTIVITY TYPE') or c_dict.get('ACTIVITY_TYPE') or '').lower().strip()
-                            status = str(c_dict.get('STATUS') or '').lower().strip()
-
-                            if 'call' in act_type or 'whatsapp' in act_type or 'linkedin' in act_type:
-                                calls += 1
-                            if 'site visit' in act_type or 'customer visit' in act_type or act_type == 'visit':
-                                visits += 1
-                            if 'enquiry' in status or 'enquiries' in status:
-                                enquiries += 1
-                            if 'quotation' in status or 'quote' in status:
-                                quotes += 1
-                            if 'order received' in status or 'order' in status:
-                                orders += 1
-
-                target_calls = 20
-                target_visits = 10
-                target_enquiries = 10
-                target_orders = 2
-
-                calls_ach = min(100.0, (calls / target_calls) * 100 if target_calls else 0)
-                visits_ach = min(100.0, (visits / target_visits) * 100 if target_visits else 0)
-                enquiries_ach = min(100.0, (enquiries / target_enquiries) * 100 if target_enquiries else 0)
-                orders_ach = min(100.0, (orders / target_orders) * 100 if target_orders else 0)
-
-                achievement_percent = round((calls_ach + visits_ach + enquiries_ach + orders_ach) / 4.0, 2)
-                
-                week_actuals = {
-                    'calls': calls,
-                    'visits': visits,
-                    'enquiries': enquiries,
-                    'quotes': quotes,
-                    'orders': orders,
-                    'achievementPercent': achievement_percent
-                }
-                
-                cache_data = {
-                    'unique_pids': unique_pids,
-                    'unique_column_values': unique_column_values,
-                    'unique_years': unique_years,
-                    'status_counts': status_counts,
-                    'priority_counts': priority_counts,
-                    'project_counts': project_counts,
-                    'due_today_count': due_today_count,
-                    'overdue_count': overdue_count,
-                    'total_qty': total_qty,
-                    'completion_stats': completion_stats,
-                    'week_actuals': week_actuals,
-                }
-                cache.set(cache_key, cache_data, 86400)
-            
         return Response({
             'count': self.page.paginator.count,
             'next': self.get_next_link(),
             'previous': self.get_previous_link(),
             'results': data,
-            'unique_pids': unique_pids,
-            'unique_years': unique_years,
-            'unique_column_values': unique_column_values,
+            'unique_pids': stats_data['unique_pids'],
+            'unique_years': stats_data['unique_years'],
+            'unique_column_values': stats_data['unique_column_values'],
             'stats': {
-                'status_counts': status_counts,
-                'priority_counts': priority_counts,
-                'project_counts': project_counts,
-                'due_today_count': due_today_count,
-                'overdue_count': overdue_count,
-                'total_qty': total_qty,
-                'completion_stats': completion_stats,
-                'week_actuals': week_actuals
+                'status_counts': stats_data['status_counts'],
+                'priority_counts': stats_data['priority_counts'],
+                'project_counts': stats_data['project_counts'],
+                'due_today_count': stats_data['due_today_count'],
+                'overdue_count': stats_data['overdue_count'],
+                'total_qty': stats_data['total_qty'],
+                'completion_stats': stats_data['completion_stats'],
+                'week_actuals': stats_data['week_actuals'],
             }
         })
+
 
 class RowViewSet(viewsets.ModelViewSet):
     serializer_class = RowSerializer
@@ -1944,197 +1700,17 @@ class RowViewSet(viewsets.ModelViewSet):
             return Response({"error": "No edit access to this table"}, status=status.HTTP_403_FORBIDDEN)
 
         cells_data = request.data.get("cells", {})
-        
-        is_sales = table.job_type == "SALES"
-        is_list_pid = table.job_type == "LIST_PID"
-        is_personal = table.job_type == "PERSONAL"
-        is_logs = table.job_type == "LOGS"
-        
-        # Verify DUE_DATE/FOLLOW_UP_DATE/RETURN_DATE and TASK_NAME/CUSTOMER_NAME/TOOL_NAME are present
-        if is_sales:
-            due_date_str = cells_data.get("FOLLOW_UP_DATE")
-            task_name = cells_data.get("CUSTOMER_NAME")
-            date_field_name = "FOLLOW_UP_DATE"
-            name_field_name = "CUSTOMER_NAME"
-        elif is_list_pid:
-            due_date_str = cells_data.get("DUE_DATE_FLOW_FORCE") or cells_data.get("DUE_DATE_CUSTOMER")
-            task_name = cells_data.get("ENQUIRY_NO/QUOTATION_NO") or cells_data.get("ENQUIRY_NO") or cells_data.get("PID") or "Unnamed"
-            date_field_name = "DUE_DATE_FLOW_FORCE"
-            name_field_name = "ENQUIRY_NO/QUOTATION_NO"
-        elif is_personal:
-            due_date_str = None
-            task_name = "Personal Task"
-            date_field_name = "DUE_DATE"
-            name_field_name = "TASK_NAME"
-        elif is_logs:
-            due_date_str = cells_data.get("RETURN_DATE") or cells_data.get("DUE_DATE") or cells_data.get("ISSUE_DATE") or cells_data.get("DATE") or timezone.localdate().isoformat()
-            task_name = cells_data.get("TOOL_NAME") or cells_data.get("TASK_NAME")
-            date_field_name = "RETURN_DATE"
-            name_field_name = "TOOL_NAME"
-        else:
-            due_date_str = cells_data.get("DUE_DATE")
-            task_name = cells_data.get("TASK_NAME")
-            date_field_name = "DUE_DATE"
-            name_field_name = "TASK_NAME"
-
-        priority = cells_data.get("priority", "MEDIUM")
-
-        due_date = None
-        if due_date_str:
-            try:
-                due_date = datetime.strptime(due_date_str.split("T")[0], "%Y-%m-%d").date()
-            except ValueError:
-                return Response({"error": f"Invalid {date_field_name} format. Use YYYY-MM-DD"}, status=status.HTTP_400_BAD_REQUEST)
-        elif not is_list_pid and not is_personal:
-            return Response({"error": f"{date_field_name} is mandatory"}, status=status.HTTP_400_BAD_REQUEST)
-
-        # 1. Create Row
-        row = Row.objects.create(table=table, created_by=request.user)
-
-        # Get system columns
-        cols = {col.name: col for col in table.columns.all()}
-
-        # 2. Compute S_NO with concurrency protection
-        latest_s_no = 0
-        s_no_col = cols.get("S_NO")
-        if s_no_col:
-            latest_cell = CellValue.objects.select_for_update().filter(column=s_no_col).order_by("-id").first()
-            if latest_cell and latest_cell.value is not None:
-                try:
-                    latest_s_no = int(latest_cell.value)
-                except (ValueError, TypeError):
-                    latest_s_no = 0
-        s_no = latest_s_no + 1
-
-        # Save CellValues
-        if is_sales:
-            cell_values = {
-                "S_NO": s_no,
-                "DATE": timezone.localdate().isoformat(),
-                "FOLLOW_UP_DATE": due_date.isoformat() if due_date else None,
-                "CUSTOMER_NAME": task_name,
-                "INITIAL_MAIL": "NO",
-                "ALERT_MAIL": "NO"
-            }
-        elif is_list_pid:
-            enq_col_name = "ENQUIRY_NO/QUOTATION_NO" if "ENQUIRY_NO/QUOTATION_NO" in cols else "ENQUIRY_NO"
-            cell_values = {
-                "S_NO": s_no,
-                "DATE": timezone.localdate().isoformat(),
-                enq_col_name: task_name,
-                "DUE_DATE_FLOW_FORCE": due_date.isoformat() if due_date else None,
-                "INITIAL_MAIL": "NO",
-                "ALERT_MAIL": "NO"
-            }
-        elif is_logs:
-            issue_date_str = cells_data.get("ISSUE_DATE") or cells_data.get("DATE")
-            issue_date_val = timezone.localdate().isoformat()
-            if issue_date_str:
-                try:
-                    issue_date_val = datetime.strptime(str(issue_date_str).split("T")[0], "%Y-%m-%d").date().isoformat()
-                except ValueError:
-                    pass
-            # Return date defaults to issue date if not provided
-            return_date_val = due_date.isoformat() if due_date else issue_date_val
-            status_val = cells_data.get("STATUS", "Not Returned")
-            days_overdue = 0
-            if str(status_val).strip().upper() not in ["RETURNED", "COMPLETED"]:
-                try:
-                    ret_d = datetime.strptime(return_date_val, "%Y-%m-%d").date()
-                    if timezone.localdate() > ret_d:
-                        days_overdue = (timezone.localdate() - ret_d).days
-                except ValueError:
-                    pass
-
-            cell_values = {
-                "S_NO": s_no,
-                "ISSUE_DATE": issue_date_val,
-                "RETURN_DATE": return_date_val,
-                "DAYS_OVERDUE": days_overdue,
-                "TOOL_NAME": task_name,
-                "STATUS": status_val,
-                "ISSUED_BY": cells_data.get("ISSUED_BY", request.user.full_name or request.user.email),
-                "RECEIVED_BY": cells_data.get("RECEIVED_BY", ""),
-                "INITIAL_MAIL": "NO",
-                "ALERT_MAIL": "NO"
-            }
-        elif is_personal:
-            cell_values = {}
-        else:
-            cell_values = {
-                "S_NO": s_no,
-                "DATE": timezone.localdate().isoformat(),
-                "DUE_DATE": due_date.isoformat() if due_date else None,
-                "TASK_NAME": task_name,
-                "INITIAL_MAIL": "NO",
-                "ALERT_MAIL": "NO"
-            }
-
-        # Merge custom columns input
-        for key, val in cells_data.items():
-            if key not in cell_values and key in cols:
-                cell_values[key] = val
-
-        if "PID" in cols and "PID" not in cell_values:
-            cell_values["PID"] = ""
-
-        for col_name, val in cell_values.items():
-            col = cols.get(col_name)
-            if col:
-                CellValue.objects.update_or_create(
-                    row=row,
-                    column=col,
-                    defaults={"value": val, "updated_by": request.user}
-                )
-
-        # 3. Create Task
-        task = Task.objects.create(
-            row=row,
-            due_date=due_date,
-            priority=priority,
-            status="PENDING",
-            assigned_by=request.user
-        )
-
-        # Look for any cell value belonging to a USER column or assignee column to set assignee
-        user_to_assign = None
-        from django.db.models import Q
-        for col_name, val in cell_values.items():
-            col = cols.get(col_name)
-            if col and (col.data_type == "USER" or col_name.upper() in ["ASSIGNED_TO", "ASSIGNED TO", "ASSIGNEE"]):
-                if val:
-                    val_str = str(val).strip()
-                    if val_str.isdigit():
-                        user_to_assign = EmployeeUser.objects.filter(id=int(val_str), is_active=True).first()
-                    elif "@" in val_str:
-                        user_to_assign = EmployeeUser.objects.filter(email__iexact=val_str, is_active=True).first()
-                    else:
-                        user_to_assign = EmployeeUser.objects.filter(full_name__iexact=val_str, is_active=True).first()
-                        if not user_to_assign:
-                            user_to_assign = EmployeeUser.objects.filter(
-                                Q(full_name__icontains=val_str) | Q(email__icontains=val_str),
-                                is_active=True
-                            ).first()
-                    break
-
-        # Handle assignments if provided
         assigned_to_ids = request.data.get("assigned_to", [])
-        if assigned_to_ids:
-            employees = EmployeeUser.objects.filter(id__in=assigned_to_ids)
-            task.assigned_to.set(employees)
-        elif user_to_assign:
-            task.assigned_to.set([user_to_assign])
-        
-        # Log creation
+
         try:
-            ActivityLog.objects.create(
-                task=task,
-                action="Created Task Row",
+            row = RowService.create_row(
+                table=table,
                 user=request.user,
-                details={"task_name": str(task_name), "due_date": str(due_date_str) if due_date_str else ""}
+                cells_data=cells_data,
+                assigned_to_ids=assigned_to_ids,
             )
-        except Exception:
-            pass
+        except RowCreationValidationError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(RowSerializer(row).data, status=status.HTTP_201_CREATED)
 
