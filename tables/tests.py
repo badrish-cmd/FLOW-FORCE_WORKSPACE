@@ -3608,3 +3608,322 @@ class RowServiceTestCase(TestCase):
         )
         self.assertIsNotNone(row)
         self.assertEqual(row.created_by, self.admin)
+
+
+from django.utils import timezone
+from rest_framework.test import APIRequestFactory, force_authenticate
+from auth_app.models import EmployeeUser
+from tasks.models import Task, ActivityLog
+from tables.models import ColumnAccess
+from tables.services.cell_service import (
+    CellMutationService,
+    CellMutationError,
+    CellPermissionDeniedError,
+    CellValidationError,
+    sync_logs_row_overdue,
+)
+from tables.views import RowViewSet, sync_logs_row_overdue as views_sync_logs_row_overdue
+
+
+class CellMutationServiceTestCase(TestCase):
+    def setUp(self):
+        self.admin = EmployeeUser.objects.create_superuser(
+            email="admin_cell@flow-force.com",
+            password="password123",
+            full_name="Admin Cell"
+        )
+        self.emp1 = EmployeeUser.objects.create_user(
+            email="emp1_cell@flow-force.com",
+            password="password123",
+            full_name="Employee One",
+            role="EMPLOYEE",
+            status="APPROVED"
+        )
+        self.emp2 = EmployeeUser.objects.create_user(
+            email="emp2_cell@flow-force.com",
+            password="password123",
+            full_name="Employee Two",
+            role="EMPLOYEE",
+            status="APPROVED"
+        )
+
+        self.table = Table.objects.create(name="Standard Table", job_type="GENERAL", created_by=self.admin)
+        TableAccess.objects.create(table=self.table, user=self.admin, access_level="ADMIN")
+        TableAccess.objects.create(table=self.table, user=self.emp1, access_level="EDIT")
+
+        self.col_s_no = Column.objects.create(table=self.table, name="S_NO", data_type="NUMBER", is_system_column=True, position=1)
+        self.col_task = Column.objects.create(table=self.table, name="TASK_NAME", data_type="TEXT", is_system_column=True, position=2)
+        self.col_due = Column.objects.create(table=self.table, name="DUE_DATE", data_type="DATE", is_system_column=True, position=3)
+        self.col_status = Column.objects.create(table=self.table, name="STATUS", data_type="TEXT", is_system_column=True, position=4)
+        self.col_assignee = Column.objects.create(table=self.table, name="ASSIGNED_TO", data_type="USER", is_system_column=False, position=5)
+        self.col_custom_num = Column.objects.create(table=self.table, name="QUANTITY", data_type="NUMBER", is_system_column=False, position=6)
+
+        self.row = Row.objects.create(table=self.table, created_by=self.admin)
+        self.task = Task.objects.create(
+            row=self.row,
+            due_date=datetime.date(2026, 11, 1),
+            priority="HIGH",
+            status="PENDING",
+            assigned_by=self.admin,
+            alert_mail_sent=True
+        )
+
+    def test_service_normal_cell_update_text_and_number(self):
+        """Verifies updating text and number columns updates CellValue and creates ActivityLog."""
+        cell_text = CellMutationService.update_cell(
+            row=self.row,
+            column=self.col_task,
+            value="Refactored Task Name",
+            user=self.admin
+        )
+        self.assertEqual(cell_text.value, "Refactored Task Name")
+        self.assertEqual(cell_text.updated_by, self.admin)
+
+        cell_num = CellMutationService.update_cell(
+            row=self.row,
+            column=self.col_custom_num,
+            value=42,
+            user=self.emp1
+        )
+        self.assertEqual(cell_num.value, 42)
+        self.assertEqual(cell_num.updated_by, self.emp1)
+
+        logs = ActivityLog.objects.filter(task=self.task).order_by("-id")
+        self.assertTrue(logs.filter(action=f"Updated cell {self.col_task.name}").exists())
+        self.assertTrue(logs.filter(action=f"Updated cell {self.col_custom_num.name}").exists())
+
+    def test_service_permission_denial(self):
+        """Verifies table and column level permission enforcement."""
+        unauthorized_user = EmployeeUser.objects.create_user(
+            email="unauth@flow-force.com",
+            password="pass",
+            role="EMPLOYEE",
+            status="APPROVED"
+        )
+        # 1. No table access and not assigned
+        with self.assertRaises(CellPermissionDeniedError):
+            CellMutationService.update_cell(
+                row=self.row,
+                column=self.col_task,
+                value="Hacked",
+                user=unauthorized_user
+            )
+
+        # 2. Assignee trying to edit S_NO (read-only for assignees)
+        self.task.assigned_to.set([unauthorized_user])
+        with self.assertRaises(CellPermissionDeniedError) as ctx:
+            CellMutationService.update_cell(
+                row=self.row,
+                column=self.col_s_no,
+                value=999,
+                user=unauthorized_user
+            )
+        self.assertIn("read-only for assignees", str(ctx.exception))
+
+        # 3. Non-assignee with table access but column set to READ_ONLY
+        ColumnAccess.objects.create(column=self.col_task, user=self.emp1, access_level="READ_ONLY")
+        with self.assertRaises(CellPermissionDeniedError) as ctx:
+            CellMutationService.update_cell(
+                row=self.row,
+                column=self.col_task,
+                value="Readonly attempt",
+                user=self.emp1
+            )
+        self.assertIn("read-only or hidden", str(ctx.exception))
+
+    def test_service_date_validation_and_task_sync(self):
+        """Verifies date parsing, invalid format error, and Task.due_date sync with alert_mail reset."""
+        # Invalid date format
+        with self.assertRaises(CellValidationError):
+            CellMutationService.update_cell(
+                row=self.row,
+                column=self.col_due,
+                value="not-a-date",
+                user=self.admin
+            )
+
+        # Valid date format -> updates task.due_date and resets alert_mail_sent
+        self.assertTrue(self.task.alert_mail_sent)
+        CellMutationService.update_cell(
+            row=self.row,
+            column=self.col_due,
+            value="2026-12-25",
+            user=self.admin
+        )
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.due_date, datetime.date(2026, 12, 25))
+        self.assertFalse(self.task.alert_mail_sent)
+
+    def test_service_status_and_assigned_to_sync(self):
+        """Verifies STATUS cell updates Task.status, and USER/assignee column updates Task.assigned_to."""
+        # Status sync
+        CellMutationService.update_cell(
+            row=self.row,
+            column=self.col_status,
+            value="Completed",
+            user=self.admin
+        )
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, "COMPLETED")
+
+        CellMutationService.update_cell(
+            row=self.row,
+            column=self.col_status,
+            value="Pending",
+            user=self.admin
+        )
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, "PENDING")
+
+        # Assignee sync by user ID
+        CellMutationService.update_cell(
+            row=self.row,
+            column=self.col_assignee,
+            value=str(self.emp2.id),
+            user=self.admin
+        )
+        self.task.refresh_from_db()
+        self.assertEqual(list(self.task.assigned_to.all()), [self.emp2])
+        self.assertEqual(self.task.assigned_by, self.admin)
+
+        # Assignee clear
+        CellMutationService.update_cell(
+            row=self.row,
+            column=self.col_assignee,
+            value="",
+            user=self.admin
+        )
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.assigned_to.count(), 0)
+
+    def test_service_logs_behavior_and_days_overdue(self):
+        """Verifies LOGS table auto-capture of return_date and calculation of DAYS_OVERDUE."""
+        logs_table = Table.objects.create(name="Logs Table", job_type="LOGS", created_by=self.admin)
+        TableAccess.objects.create(table=logs_table, user=self.admin, access_level="ADMIN")
+        cols = {c.name.upper(): c for c in logs_table.columns.all()}
+        col_issue = cols["ISSUE_DATE"]
+        col_return = cols["RETURN_DATE"]
+        col_log_status = cols["STATUS"]
+        col_overdue = cols["DAYS_OVERDUE"]
+
+        log_row = Row.objects.create(table=logs_table, created_by=self.admin)
+
+        # Set past issue date (5 days ago)
+        past_date = (timezone.localdate() - datetime.timedelta(days=5)).isoformat()
+        CellMutationService.update_cell(
+            row=log_row,
+            column=col_issue,
+            value=past_date,
+            user=self.admin
+        )
+
+        # RETURN_DATE should be auto-set to ISSUE_DATE because missing
+        ret_cell = CellValue.objects.filter(row=log_row, column=col_return).first()
+        self.assertIsNotNone(ret_cell)
+        self.assertEqual(ret_cell.value, past_date)
+
+        # DAYS_OVERDUE should be 5
+        overdue_cell = CellValue.objects.filter(row=log_row, column=col_overdue).first()
+        self.assertIsNotNone(overdue_cell)
+        self.assertEqual(overdue_cell.value, 5)
+
+        # Mark as returned
+        CellMutationService.update_cell(
+            row=log_row,
+            column=col_log_status,
+            value="Returned",
+            user=self.admin
+        )
+        overdue_cell.refresh_from_db()
+        self.assertIsNotNone(overdue_cell.value)
+
+    def test_service_transaction_rollback_on_failure(self):
+        """Verifies transaction rollback if an unexpected failure occurs during cell update."""
+        from unittest.mock import patch
+
+        initial_val = "Initial Value"
+        cell = CellValue.objects.create(row=self.row, column=self.col_task, value=initial_val)
+
+        with patch("tasks.models.ActivityLog.objects.create", side_effect=RuntimeError("Simulated Failure")):
+            with self.assertRaises(RuntimeError):
+                CellMutationService.update_cell(
+                    row=self.row,
+                    column=self.col_task,
+                    value="Should Rollback",
+                    user=self.admin
+                )
+
+        cell.refresh_from_db()
+        self.assertEqual(cell.value, initial_val)
+
+    def test_views_edit_cell_api_contract_and_error_responses(self):
+        """Verifies DRF edit_cell endpoint returns correct status codes and JSON structure."""
+        factory = APIRequestFactory()
+        view = RowViewSet.as_view({"post": "edit_cell"})
+
+        # 1. Success response
+        req = factory.post(
+            f"/tables/api/rows/{self.row.id}/edit-cell/",
+            {"column": self.col_task.id, "value": "API Contract Value"},
+            format="json"
+        )
+        force_authenticate(req, user=self.admin)
+        resp = view(req, pk=self.row.id)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("id", resp.data)
+        self.assertIn("cells", resp.data)
+
+        # 2. Permission denied (403)
+        other_user = EmployeeUser.objects.create_user(
+            email="other@flow-force.com",
+            password="pass",
+            role="EMPLOYEE",
+            status="APPROVED"
+        )
+        req = factory.post(
+            f"/tables/api/rows/{self.row.id}/edit-cell/",
+            {"column": self.col_task.id, "value": "Forbidden"},
+            format="json"
+        )
+        force_authenticate(req, user=other_user)
+        resp = view(req, pk=self.row.id)
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn("error", resp.data)
+
+        # 3. Invalid date format (400)
+        req = factory.post(
+            f"/tables/api/rows/{self.row.id}/edit-cell/",
+            {"column": self.col_due.id, "value": "invalid-date-string"},
+            format="json"
+        )
+        force_authenticate(req, user=self.admin)
+        resp = view(req, pk=self.row.id)
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data.get("error"), "Invalid date format")
+
+        # 4. Column not found (404)
+        req = factory.post(
+            f"/tables/api/rows/{self.row.id}/edit-cell/",
+            {"column": 999999, "value": "Missing Column"},
+            format="json"
+        )
+        force_authenticate(req, user=self.admin)
+        resp = view(req, pk=self.row.id)
+        self.assertEqual(resp.status_code, 404)
+
+    def test_sync_logs_row_overdue_backward_compatibility(self):
+        """Verifies backward compatibility wrapper in tables.views delegates correctly."""
+        logs_table = Table.objects.create(name="Logs Wrapper Table", job_type="LOGS", created_by=self.admin)
+        cols = {c.name.upper(): c for c in logs_table.columns.all()}
+        col_issue = cols["ISSUE_DATE"]
+        col_return = cols["RETURN_DATE"]
+        log_row = Row.objects.create(table=logs_table, created_by=self.admin)
+
+        today_str = timezone.localdate().isoformat()
+        CellValue.objects.create(row=log_row, column=col_issue, value=today_str)
+
+        views_sync_logs_row_overdue(log_row, request_user=self.admin)
+
+        ret_cell = CellValue.objects.filter(row=log_row, column=col_return).first()
+        self.assertIsNotNone(ret_cell)
+        self.assertEqual(ret_cell.value, today_str)
