@@ -2832,3 +2832,309 @@ class RedisCacheConfigurationRegressionTestCase(TestCase):
         from django.conf import settings
         self.assertEqual(settings.CELERY_BROKER_URL, 'redis://localhost:6379/0')
         self.assertEqual(settings.CELERY_RESULT_BACKEND, 'redis://localhost:6379/0')
+
+
+class SpreadsheetSearchOptimizationRegressionTestCase(TestCase):
+    """
+    Phase 2E Regression Tests:
+    Verifies optimized spreadsheet search semantics: case & space insensitivity,
+    partial text matching, searches across multiple cell values, combined filters (year, column, etc.),
+    empty/whitespace search behavior, archived row exclusion, deduplication,
+    pagination fidelity, and query efficiency (EXISTS subquery structure).
+    """
+
+    def setUp(self):
+        from employee_management.models import Department
+        from auth_app.models import EmployeeUser
+        from tables.models import Table, Column, Row, CellValue, TableAccess
+        from rest_framework.test import APIRequestFactory
+
+        self.factory = APIRequestFactory()
+        self.dept = Department.objects.create(name="Phase2E Search Dept")
+        self.admin = EmployeeUser.objects.create(
+            email="search_admin@test.com",
+            full_name="Search Admin",
+            role="ADMIN",
+            department=self.dept
+        )
+        self.table = Table.objects.create(name="Search Optimization Table", job_type="GENERAL", created_by=self.admin)
+        TableAccess.objects.create(table=self.table, user=self.admin, access_level="ADMIN")
+
+        self.col_sno = Column.objects.create(table=self.table, name="S_NO", data_type="TEXT", position=1)
+        self.col_pid = Column.objects.create(table=self.table, name="PID", data_type="TEXT", position=2)
+        self.col_customer = Column.objects.create(table=self.table, name="CUSTOMER_NAME", data_type="TEXT", position=3)
+        self.col_desc = Column.objects.create(table=self.table, name="DESCRIPTION", data_type="TEXT", position=4)
+        self.col_remarks = Column.objects.create(table=self.table, name="REMARKS", data_type="TEXT", position=5)
+
+    def test_case_and_space_insensitive_matching(self):
+        """Search matches regardless of uppercase/lowercase and inline or surrounding whitespace."""
+        from tables.views import RowViewSet
+        from rest_framework.test import force_authenticate
+
+        row = Row.objects.create(table=self.table, created_by=self.admin)
+        CellValue.objects.create(row=row, column=self.col_customer, value="PT Flow Force Indonesia", updated_by=self.admin)
+
+        view = RowViewSet.as_view({'get': 'list'})
+
+        # Searches: no spaces, lowercase, extra spaces, mixed case
+        for query_term in ["ptflowforceindonesia", "  PT   Flow   Force   ", "FLOW FORCE", "forceindonesia"]:
+            req = self.factory.get(f"/tables/api/rows/?table={self.table.id}&search={query_term}")
+            force_authenticate(req, user=self.admin)
+            res = view(req)
+            self.assertEqual(res.status_code, 200)
+            self.assertEqual(len(res.data['results']), 1, f"Failed matching term: {query_term}")
+            self.assertEqual(res.data['results'][0]['id'], row.id)
+
+    def test_partial_text_matching(self):
+        """Search performs partial substring matching on cell text values."""
+        from tables.views import RowViewSet
+        from rest_framework.test import force_authenticate
+
+        row = Row.objects.create(table=self.table, created_by=self.admin)
+        CellValue.objects.create(row=row, column=self.col_desc, value="High Pressure Valve Assembly 5000 PSI", updated_by=self.admin)
+
+        view = RowViewSet.as_view({'get': 'list'})
+
+        for partial in ["Pressure", "valve", "5000", "Assembly", "essure"]:
+            req = self.factory.get(f"/tables/api/rows/?table={self.table.id}&search={partial}")
+            force_authenticate(req, user=self.admin)
+            res = view(req)
+            self.assertEqual(res.status_code, 200)
+            self.assertEqual(len(res.data['results']), 1, f"Failed matching partial: {partial}")
+
+    def test_search_across_multiple_cell_values(self):
+        """Search correctly finds rows matching against different columns."""
+        from tables.views import RowViewSet
+        from rest_framework.test import force_authenticate
+
+        row1 = Row.objects.create(table=self.table, created_by=self.admin)
+        CellValue.objects.create(row=row1, column=self.col_pid, value="PID-1049", updated_by=self.admin)
+        CellValue.objects.create(row=row1, column=self.col_customer, value="Siemens Energy", updated_by=self.admin)
+        CellValue.objects.create(row=row1, column=self.col_remarks, value="Expedited shipment required", updated_by=self.admin)
+
+        row2 = Row.objects.create(table=self.table, created_by=self.admin)
+        CellValue.objects.create(row=row2, column=self.col_pid, value="PID-2080", updated_by=self.admin)
+        CellValue.objects.create(row=row2, column=self.col_customer, value="Chevron Pacific", updated_by=self.admin)
+        CellValue.objects.create(row=row2, column=self.col_remarks, value="Standard lead time", updated_by=self.admin)
+
+        view = RowViewSet.as_view({'get': 'list'})
+
+        # Match row1 via PID
+        req1 = self.factory.get(f"/tables/api/rows/?table={self.table.id}&search=1049")
+        force_authenticate(req1, user=self.admin)
+        res1 = view(req1)
+        self.assertEqual([r['id'] for r in res1.data['results']], [row1.id])
+
+        # Match row2 via Customer
+        req2 = self.factory.get(f"/tables/api/rows/?table={self.table.id}&search=Chevron")
+        force_authenticate(req2, user=self.admin)
+        res2 = view(req2)
+        self.assertEqual([r['id'] for r in res2.data['results']], [row2.id])
+
+        # Match row1 via Remarks
+        req3 = self.factory.get(f"/tables/api/rows/?table={self.table.id}&search=Expedited")
+        force_authenticate(req3, user=self.admin)
+        res3 = view(req3)
+        self.assertEqual([r['id'] for r in res3.data['results']], [row1.id])
+
+    def test_search_combined_with_year_filter(self):
+        """Search works accurately when combined with year filter."""
+        import datetime
+        from tasks.models import Task
+        from tables.views import RowViewSet
+        from rest_framework.test import force_authenticate
+
+        row1 = Row.objects.create(table=self.table, created_by=self.admin)
+        Task.objects.create(row=row1, assigned_by=self.admin, due_date=datetime.date(2024, 6, 15))
+        CellValue.objects.create(row=row1, column=self.col_customer, value="Universal Nickel 2024", updated_by=self.admin)
+
+        row2 = Row.objects.create(table=self.table, created_by=self.admin)
+        Task.objects.create(row=row2, assigned_by=self.admin, due_date=datetime.date(2025, 7, 20))
+        CellValue.objects.create(row=row2, column=self.col_customer, value="Universal Nickel 2025", updated_by=self.admin)
+
+        view = RowViewSet.as_view({'get': 'list'})
+
+        # Search without year filter returns both
+        req_both = self.factory.get(f"/tables/api/rows/?table={self.table.id}&search=Universal")
+        force_authenticate(req_both, user=self.admin)
+        res_both = view(req_both)
+        self.assertEqual(len(res_both.data['results']), 2)
+
+        # Search combined with year=2024 returns only row1
+        req_2024 = self.factory.get(f"/tables/api/rows/?table={self.table.id}&search=Universal&year=2024")
+        force_authenticate(req_2024, user=self.admin)
+        res_2024 = view(req_2024)
+        self.assertEqual(len(res_2024.data['results']), 1)
+        self.assertEqual(res_2024.data['results'][0]['id'], row1.id)
+
+        # Search combined with year=2025 returns only row2
+        req_2025 = self.factory.get(f"/tables/api/rows/?table={self.table.id}&search=Universal&year=2025")
+        force_authenticate(req_2025, user=self.admin)
+        res_2025 = view(req_2025)
+        self.assertEqual(len(res_2025.data['results']), 1)
+        self.assertEqual(res_2025.data['results'][0]['id'], row2.id)
+
+    def test_empty_and_whitespace_search_behavior(self):
+        """Empty search or search with whitespace only returns all active rows without error."""
+        from tables.views import RowViewSet
+        from rest_framework.test import force_authenticate
+
+        r1 = Row.objects.create(table=self.table, created_by=self.admin)
+        r2 = Row.objects.create(table=self.table, created_by=self.admin)
+
+        view = RowViewSet.as_view({'get': 'list'})
+
+        for empty_val in ["", "   ", "\t  \n"]:
+            req = self.factory.get(f"/tables/api/rows/?table={self.table.id}&search={empty_val}")
+            force_authenticate(req, user=self.admin)
+            res = view(req)
+            self.assertEqual(res.status_code, 200)
+            self.assertEqual(len(res.data['results']), 2)
+
+    def test_archived_rows_exclusion(self):
+        """Archived rows are excluded from search results."""
+        from tables.views import RowViewSet
+        from rest_framework.test import force_authenticate
+
+        active_row = Row.objects.create(table=self.table, is_archived=False, created_by=self.admin)
+        CellValue.objects.create(row=active_row, column=self.col_customer, value="Archived Search Target", updated_by=self.admin)
+
+        archived_row = Row.objects.create(table=self.table, is_archived=True, created_by=self.admin)
+        CellValue.objects.create(row=archived_row, column=self.col_customer, value="Archived Search Target", updated_by=self.admin)
+
+        view = RowViewSet.as_view({'get': 'list'})
+        req = self.factory.get(f"/tables/api/rows/?table={self.table.id}&search=Archived Search Target")
+        force_authenticate(req, user=self.admin)
+        res = view(req)
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(res.data['results']), 1)
+        self.assertEqual(res.data['results'][0]['id'], active_row.id)
+
+    def test_no_duplicate_rows_when_multiple_cells_match(self):
+        """Rows matching across multiple columns appear exactly once (no duplicates)."""
+        from tables.views import RowViewSet
+        from rest_framework.test import force_authenticate
+
+        row = Row.objects.create(table=self.table, created_by=self.admin)
+        CellValue.objects.create(row=row, column=self.col_customer, value="Hydraulic Pump Unit", updated_by=self.admin)
+        CellValue.objects.create(row=row, column=self.col_desc, value="Hydraulic System Service", updated_by=self.admin)
+        CellValue.objects.create(row=row, column=self.col_remarks, value="Hydraulic pressure test ok", updated_by=self.admin)
+
+        view = RowViewSet.as_view({'get': 'list'})
+        req = self.factory.get(f"/tables/api/rows/?table={self.table.id}&search=Hydraulic")
+        force_authenticate(req, user=self.admin)
+        res = view(req)
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['count'], 1)
+        self.assertEqual(len(res.data['results']), 1)
+        self.assertEqual(res.data['results'][0]['id'], row.id)
+
+    def test_paginated_search_results(self):
+        """Search correctly respects pagination page_size and preserves count."""
+        from tables.views import RowViewSet
+        from rest_framework.test import force_authenticate
+
+        rows = []
+        cells = []
+        for i in range(25):
+            r = Row(table=self.table, created_by=self.admin)
+            rows.append(r)
+        created_rows = Row.objects.bulk_create(rows)
+
+        for idx, r in enumerate(created_rows):
+            cells.append(CellValue(row=r, column=self.col_customer, value=f"Pagination Client #{idx+1}"))
+        CellValue.objects.bulk_create(cells)
+
+        view = RowViewSet.as_view({'get': 'list'})
+
+        # Page 1 (page_size=10)
+        req1 = self.factory.get(f"/tables/api/rows/?table={self.table.id}&search=Pagination&page_size=10&page=1")
+        force_authenticate(req1, user=self.admin)
+        res1 = view(req1)
+        self.assertEqual(res1.status_code, 200)
+        self.assertEqual(res1.data['count'], 25)
+        self.assertEqual(len(res1.data['results']), 10)
+
+        # Page 2 (page_size=10)
+        req2 = self.factory.get(f"/tables/api/rows/?table={self.table.id}&search=Pagination&page_size=10&page=2")
+        force_authenticate(req2, user=self.admin)
+        res2 = view(req2)
+        self.assertEqual(res2.status_code, 200)
+        self.assertEqual(res2.data['count'], 25)
+        self.assertEqual(len(res2.data['results']), 10)
+        # Ensure page 1 and page 2 IDs are completely disjoint
+        p1_ids = {r['id'] for r in res1.data['results']}
+        p2_ids = {r['id'] for r in res2.data['results']}
+        self.assertTrue(p1_ids.isdisjoint(p2_ids))
+
+        # Page 3 (page_size=10)
+        req3 = self.factory.get(f"/tables/api/rows/?table={self.table.id}&search=Pagination&page_size=10&page=3")
+        force_authenticate(req3, user=self.admin)
+        res3 = view(req3)
+        self.assertEqual(res3.status_code, 200)
+        self.assertEqual(len(res3.data['results']), 5)
+
+    def test_task_status_and_priority_matching(self):
+        """Search finds rows via linked task status or priority."""
+        from tasks.models import Task
+        from tables.views import RowViewSet
+        from rest_framework.test import force_authenticate
+
+        r1 = Row.objects.create(table=self.table, created_by=self.admin)
+        Task.objects.create(row=r1, assigned_by=self.admin, status="IN_PROGRESS", priority="CRITICAL")
+
+        r2 = Row.objects.create(table=self.table, created_by=self.admin)
+        Task.objects.create(row=r2, assigned_by=self.admin, status="COMPLETED", priority="LOW")
+
+        view = RowViewSet.as_view({'get': 'list'})
+
+        # Match via status with space and no space
+        for term in ["inprogress", "in progress", "IN_PROGRESS"]:
+            req = self.factory.get(f"/tables/api/rows/?table={self.table.id}&search={term}")
+            force_authenticate(req, user=self.admin)
+            res = view(req)
+            self.assertEqual(len(res.data['results']), 1, f"Failed matching status: {term}")
+            self.assertEqual(res.data['results'][0]['id'], r1.id)
+
+        # Match via priority
+        req_p = self.factory.get(f"/tables/api/rows/?table={self.table.id}&search=critical")
+        force_authenticate(req_p, user=self.admin)
+        res_p = view(req_p)
+        self.assertEqual(len(res_p.data['results']), 1)
+        self.assertEqual(res_p.data['results'][0]['id'], r1.id)
+
+    def test_search_query_efficiency_and_structure(self):
+        """Verifies query uses EXISTS subquery, avoids redundant annotations on Row, and is bounded."""
+        from tasks.models import Task
+        from tables.views import RowViewSet
+        from rest_framework.test import force_authenticate
+        from django.test.utils import CaptureQueriesContext
+        from django.db import connection
+
+        for i in range(5):
+            r = Row.objects.create(table=self.table, created_by=self.admin)
+            Task.objects.create(row=r, assigned_by=self.admin, status="PENDING", priority="MEDIUM")
+            CellValue.objects.create(row=r, column=self.col_customer, value=f"Client Energy #{i}", updated_by=self.admin)
+
+        view = RowViewSet.as_view({'get': 'list'})
+        req = self.factory.get(f"/tables/api/rows/?table={self.table.id}&search=Energy")
+        force_authenticate(req, user=self.admin)
+
+        with CaptureQueriesContext(connection) as ctx:
+            res = view(req)
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['count'], 5)
+
+        # Check queries executed
+        sql_statements = [q['sql'] for q in ctx.captured_queries]
+        # Query count is bounded (1 table get, 1 table access, 1 count, 1 page slice, 1 cells prefetch, 1 assigned_to prefetch)
+        self.assertLessEqual(len(ctx), 6)
+
+        # Verify EXISTS is in the queries and clean_task_status is NOT selected as output column
+        found_exists = any("EXISTS" in sql.upper() for sql in sql_statements)
+        self.assertTrue(found_exists, "Search query should use EXISTS subquery")
+        found_task_clean_select = any("clean_task_status" in sql for sql in sql_statements)
+        self.assertFalse(found_task_clean_select, "clean_task_status should not be projected in SELECT")

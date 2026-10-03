@@ -100,7 +100,7 @@ def get_filtered_table_rows(table, query_params, user=None):
     if user and not has_table_access(user, table, "VIEW"):
         return Row.objects.none()
 
-    from django.db.models import Prefetch, Q, Value, TextField
+    from django.db.models import Prefetch, Q, Value, TextField, Exists, OuterRef
     from django.db.models.functions import Cast, Lower, Replace
     import datetime
 
@@ -120,28 +120,36 @@ def get_filtered_table_rows(table, query_params, user=None):
 
     # 2. General Row Search Filter (irrespective of case-sensitivity and inline spaces)
     search = query_params.get("search")
-    if search:
-        clean_search = search.lower().replace(" ", "")
-        
-        matching_rows = CellValue.objects.filter(
-            row__table=table,
-            row__is_archived=False
-        ).annotate(
-            text_val=Cast('value', TextField())
-        ).annotate(
-            clean_val=Lower(Replace('text_val', Value(' '), Value(''), output_field=TextField()))
-        ).filter(
-            clean_val__contains=clean_search
-        ).values_list('row_id', flat=True)
-        
-        queryset = queryset.annotate(
-            clean_task_status=Lower(Replace('task__status', Value(' '), Value(''), output_field=TextField())),
-            clean_task_priority=Lower(Replace('task__priority', Value(' '), Value(''), output_field=TextField()))
-        ).filter(
-            Q(id__in=matching_rows) |
-            Q(clean_task_status__contains=clean_search) |
-            Q(clean_task_priority__contains=clean_search)
-        )
+    if search and search.strip():
+        search_stripped = search.strip()
+        clean_search = search_stripped.lower().replace(" ", "")
+
+        if clean_search:
+            # Correlated subquery on CellValue for this row only:
+            # Avoids loading entire table cells, eliminates redundant inner joins to Row,
+            # and short-circuits via LIMIT 1 (EXISTS) as soon as the first matching cell is found.
+            cell_match = CellValue.objects.filter(
+                row=OuterRef('pk')
+            ).annotate(
+                clean_val=Lower(Replace(Cast('value', TextField()), Value(' '), Value(''), output_field=TextField()))
+            ).filter(
+                clean_val__contains=clean_search
+            )
+
+            # Pre-match enum choices for task status and priority in Python to utilize database B-tree indexes
+            from tasks.models import Task
+            search_norm = clean_search.replace("_", "")
+            matching_statuses = [code for code, _ in Task.STATUS_CHOICES if search_norm in code.lower().replace("_", "")]
+            matching_priorities = [code for code, _ in Task.PRIORITY_CHOICES if search_norm in code.lower().replace("_", "")]
+
+            task_cond = Q()
+            if matching_statuses:
+                task_cond |= Q(task__status__in=matching_statuses)
+            if matching_priorities:
+                task_cond |= Q(task__priority__in=matching_priorities)
+
+            search_filter = Q(Exists(cell_match)) | task_cond
+            queryset = queryset.filter(search_filter)
 
     # 3. Custom dynamic column filters (col_<id>)
     for key, val in query_params.items():
