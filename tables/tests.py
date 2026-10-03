@@ -3138,3 +3138,157 @@ class SpreadsheetSearchOptimizationRegressionTestCase(TestCase):
         self.assertTrue(found_exists, "Search query should use EXISTS subquery")
         found_task_clean_select = any("clean_task_status" in sql for sql in sql_statements)
         self.assertFalse(found_task_clean_select, "clean_task_status should not be projected in SELECT")
+
+
+class SpreadsheetFrontendPerformanceRegressionTestCase(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(name="Phase 2F Dept", slug="phase-2f-dept")
+        self.admin = User.objects.create_user(
+            email="phase2fadmin@flow-force.com",
+            password="testpassword",
+            full_name="Phase 2F Admin",
+            role="ADMIN",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.table = Table.objects.create(
+            name="Frontend Perf Test Table",
+            job_type="PERSONAL",
+            created_by=self.admin
+        )
+        TableAccess.objects.create(table=self.table, user=self.admin, access_level="ADMIN")
+
+        self.col_job = Column.objects.create(
+            table=self.table,
+            name="JOB_NUMBER",
+            data_type="TEXT",
+            position=1
+        )
+        self.col_task = Column.objects.create(
+            table=self.table,
+            name="TASK_NAME",
+            data_type="TEXT",
+            position=2
+        )
+        self.col_due = Column.objects.create(
+            table=self.table,
+            name="DUE_DATE",
+            data_type="DATE",
+            position=3
+        )
+        self.col_notes = Column.objects.create(
+            table=self.table,
+            name="NOTES",
+            data_type="TEXT",
+            options='{"input_type": "multiline", "rows": 4, "placeholder": "Notes..."}',
+            position=4
+        )
+
+        # Create rows: 2 rows with same job number, 1 row with different, 1 row with "-"
+        self.r1 = Row.objects.create(table=self.table, created_by=self.admin)
+        CellValue.objects.create(row=self.r1, column=self.col_job, value="JOB-101", updated_by=self.admin)
+        CellValue.objects.create(row=self.r1, column=self.col_task, value="First Task", updated_by=self.admin)
+        CellValue.objects.create(row=self.r1, column=self.col_due, value="2026-10-01", updated_by=self.admin)
+
+        self.r2 = Row.objects.create(table=self.table, created_by=self.admin)
+        CellValue.objects.create(row=self.r2, column=self.col_job, value="JOB-101", updated_by=self.admin)
+        CellValue.objects.create(row=self.r2, column=self.col_task, value="Second Task", updated_by=self.admin)
+        CellValue.objects.create(row=self.r2, column=self.col_due, value="2026-10-15", updated_by=self.admin)
+
+        self.r3 = Row.objects.create(table=self.table, created_by=self.admin)
+        CellValue.objects.create(row=self.r3, column=self.col_job, value="JOB-102", updated_by=self.admin)
+        CellValue.objects.create(row=self.r3, column=self.col_task, value="Third Task", updated_by=self.admin)
+        CellValue.objects.create(row=self.r3, column=self.col_due, value="2026-10-20", updated_by=self.admin)
+
+        self.r4 = Row.objects.create(table=self.table, created_by=self.admin)
+        CellValue.objects.create(row=self.r4, column=self.col_job, value="-", updated_by=self.admin)
+        CellValue.objects.create(row=self.r4, column=self.col_task, value="Fourth Task", updated_by=self.admin)
+
+    def test_spreadsheet_html_renders_optimized_frontend_assets(self):
+        """Verifies table_spreadsheet.html renders with 200 OK and includes all frontend performance optimizations."""
+        self.client.force_login(self.admin)
+        response = self.client.get(f"/tables/{self.table.id}/")
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode("utf-8")
+
+        # Verify optimized state variables
+        self.assertIn("_cachedJobColName: undefined", html)
+        self.assertIn("_colConfigs: {}", html)
+        self.assertIn("_jobGroups: {}", html)
+        self.assertIn("_cachedTodayDate: null", html)
+        self.assertIn("_cachedTodayIso: null", html)
+        self.assertIn("_fetchAbortController: null", html)
+
+        # Verify optimized methods
+        self.assertIn("updateJobGroups()", html)
+        self.assertIn("getTodayIso()", html)
+        self.assertIn("getTodayDate()", html)
+        self.assertIn("isDateColumn(col)", html)
+        self.assertIn("AbortController()", html)
+
+        # Verify column metadata and options are safely passed to the template
+        self.assertIn("JOB_NUMBER", html)
+        self.assertIn("NOTES", html)
+
+    def test_api_rows_payload_matches_frontend_precomputation_contracts(self):
+        """Verifies /tables/api/rows/ returns all fields required for precomputed cells_dict and job groups."""
+        self.client.force_login(self.admin)
+        response = self.client.get(f"/tables/api/rows/?table={self.table.id}&include_stats=true")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        self.assertEqual(data["count"], 4)
+        results = data["results"]
+        self.assertEqual(len(results), 4)
+
+        # Check cells are serialized with column_name and value
+        for row in results:
+            self.assertIn("cells", row)
+            cells = row["cells"]
+            col_map = {c["column_name"]: c["value"] for c in cells}
+            self.assertIn("JOB_NUMBER", col_map)
+            self.assertIn("TASK_NAME", col_map)
+
+        # Verify stats and unique lists are returned
+        self.assertIn("stats", data)
+        self.assertIn("unique_pids", data)
+        self.assertIn("unique_years", data)
+
+    def test_row_editing_apis_preserve_contracts(self):
+        """Verifies cell and row edit endpoints work properly and update values for subsequent fetchRows."""
+        self.client.force_login(self.admin)
+
+        # Edit single cell
+        edit_cell_resp = self.client.post(
+            f"/tables/api/rows/{self.r1.id}/edit-cell/",
+            data={"column": self.col_task.id, "value": "Updated Task 1"},
+            content_type="application/json"
+        )
+        self.assertEqual(edit_cell_resp.status_code, 200)
+
+        # Edit row
+        edit_row_resp = self.client.post(
+            f"/tables/api/rows/{self.r2.id}/edit-row/",
+            data={"cells": {"TASK_NAME": "Batch Updated Task 2", "JOB_NUMBER": "JOB-101"}},
+            content_type="application/json"
+        )
+        self.assertEqual(edit_row_resp.status_code, 200)
+
+        # Verify updated row data via rows API
+        fetch_resp = self.client.get(f"/tables/api/rows/?table={self.table.id}")
+        self.assertEqual(fetch_resp.status_code, 200)
+        fetch_data = fetch_resp.json()
+        row_map = {r["id"]: {c["column_name"]: c["value"] for c in r["cells"]} for r in fetch_data["results"]}
+
+        self.assertEqual(row_map[self.r1.id]["TASK_NAME"], "Updated Task 1")
+        self.assertEqual(row_map[self.r2.id]["TASK_NAME"], "Batch Updated Task 2")
+
+    def test_deduplicated_pagination_query_contract(self):
+        """Verifies pagination without stats skips stats calculation while preserving row data."""
+        self.client.force_login(self.admin)
+        response = self.client.get(f"/tables/api/rows/?table={self.table.id}&page=1&page_size=2")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data["results"]), 2)
+        self.assertEqual(data["count"], 4)
+

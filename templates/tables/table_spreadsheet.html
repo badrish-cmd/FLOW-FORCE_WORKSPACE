@@ -2031,6 +2031,14 @@
             autoOpenTaskId: null,
             isSavingCell: false,
             isLoading: false,
+            _cachedJobColName: undefined,
+            _colConfigs: {},
+            _dateColMap: {},
+            _jobGroups: {},
+            _cachedTodayDate: null,
+            _cachedTodayIso: null,
+            _fetchAbortController: null,
+            _lastFetchQuery: '',
             
             selectedPidFilter: '',
             selectedYearFilter: '',
@@ -2424,16 +2432,20 @@ comments: [],
 
             isRowCompleted(row) {
                 if (!row) return false;
+                if (row._isCompleted !== undefined) return row._isCompleted;
                 const statusVal = String(this.getCellValue(row, 'STATUS') || '').toLowerCase().trim();
                 if (statusVal === 'completed' || statusVal === 'complete') {
+                    row._isCompleted = true;
                     return true;
                 }
                 if (row.task_details) {
                     const taskStatus = String(row.task_details.status || '').toLowerCase().trim();
                     if (taskStatus === 'completed' || taskStatus === 'approved') {
+                        row._isCompleted = true;
                         return true;
                     }
                 }
+                row._isCompleted = false;
                 return false;
             },
 
@@ -2562,8 +2574,6 @@ comments: [],
              },
 
             fetchRows() {
-                this.isLoading = true;
-                
                 const params = new URLSearchParams({
                     table: this.tableId,
                     page: this.currentPage,
@@ -2592,7 +2602,24 @@ comments: [],
                         params.append('col_' + colId, filterVal);
                     }
                 });
-                fetch(`/tables/api/rows/?${params.toString()}`)
+
+                const queryStr = params.toString();
+                // Deduplicate if identical request is currently active
+                if (this.isLoading && this._lastFetchQuery === queryStr) {
+                    return;
+                }
+
+                // Abort any pending fetch to prevent race conditions and redundant work
+                if (this._fetchAbortController) {
+                    this._fetchAbortController.abort();
+                }
+                this._fetchAbortController = new AbortController();
+                const signal = this._fetchAbortController.signal;
+
+                this.isLoading = true;
+                this._lastFetchQuery = queryStr;
+
+                fetch(`/tables/api/rows/?${queryStr}`, { signal })
                     .then(res => res.json())
                     .then(data => {
                         const results = data.results || [];
@@ -2610,7 +2637,7 @@ comments: [],
                         this.uniqueColumnValues = data.unique_column_values || {};
                         this.dashboardStats = data.stats || {};
 
-                        // Optimize: pre-map cells to a cells_dict lookup to avoid O(C) loops during render
+                        // Optimize: pre-map cells to a cells_dict lookup and memoize row completion
                         results.forEach(row => {
                             row.cells_dict = {};
                             if (row.cells) {
@@ -2618,8 +2645,10 @@ comments: [],
                                     row.cells_dict[c.column_name] = c.value;
                                 });
                             }
+                            row._isCompleted = this.isRowCompleted(row);
                         });
                         this.rows = results;
+                        this.updateJobGroups();
                         
                         if (this.autoOpenTaskId) {
                             const matchingRow = this.rows.find(r => r.task_details && r.task_details.id === this.autoOpenTaskId);
@@ -2639,6 +2668,7 @@ comments: [],
                                                     singleRow.cells_dict[c.column_name] = c.value;
                                                 });
                                             }
+                                            singleRow._isCompleted = this.isRowCompleted(singleRow);
                                             this.openTaskModal(singleRow);
                                         }
                                         this.autoOpenTaskId = null;
@@ -2649,8 +2679,14 @@ comments: [],
                             this.renderCharts();
                         }
                     })
+                    .catch(err => {
+                        if (err.name === 'AbortError') return;
+                        console.error('Failed to fetch rows:', err);
+                    })
                     .finally(() => {
-                        this.isLoading = false;
+                        if (this._lastFetchQuery === queryStr) {
+                            this.isLoading = false;
+                        }
                     });
             },
 
@@ -2694,25 +2730,60 @@ comments: [],
                 });
             },
 
+            getTodayDate() {
+                if (!this._cachedTodayDate) {
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    this._cachedTodayDate = today;
+                    const y = today.getFullYear();
+                    const m = String(today.getMonth() + 1).padStart(2, '0');
+                    const d = String(today.getDate()).padStart(2, '0');
+                    this._cachedTodayIso = `${y}-${m}-${d}`;
+                }
+                return this._cachedTodayDate;
+            },
+
+            getTodayIso() {
+                if (!this._cachedTodayIso) {
+                    this.getTodayDate();
+                }
+                return this._cachedTodayIso;
+            },
+
+            isDateColumn(col) {
+                if (!col) return false;
+                if (!this._dateColMap) this._dateColMap = {};
+                const colName = col.name;
+                if (colName in this._dateColMap) return this._dateColMap[colName];
+                const upper = String(colName).toUpperCase();
+                const isDate = (col.data_type === 'DATE' ||
+                               col.data_type === 'DATETIME' ||
+                               upper.includes('DATE') ||
+                               upper.includes('DUE') ||
+                               upper === 'FOLLOW_UP_DATE');
+                this._dateColMap[colName] = isDate;
+                return isDate;
+            },
+
             isOverdue(row) {
                 if (!row) return false;
                 if (this.isRowCompleted(row)) return false;
 
+                const todayIso = this.getTodayIso();
+                const today = this.getTodayDate();
+
                 // Check if any date/due date column in this row is overdue
                 for (const col of this.columns) {
-                    const colName = String(col.name).toUpperCase();
-                    const isDateColumn = col.data_type === 'DATE' || 
-                                         col.data_type === 'DATETIME' || 
-                                         colName.includes('DATE') || 
-                                         colName.includes('DUE') || 
-                                         colName === 'FOLLOW_UP_DATE';
-                    if (!isDateColumn) continue;
+                    if (!this.isDateColumn(col)) continue;
 
                     const val = this.getCellValue(row, col.name);
                     if (!val) continue;
 
-                    const today = new Date();
-                    today.setHours(0, 0, 0, 0);
+                    const strVal = String(val).trim();
+                    if (/^\d{4}-\d{2}-\d{2}$/.test(strVal)) {
+                        if (strVal < todayIso) return true;
+                        continue;
+                    }
 
                     const cellDate = new Date(val);
                     if (isNaN(cellDate.getTime())) continue;
@@ -2728,21 +2799,18 @@ comments: [],
             isCellOverdue(row, col) {
                 if (!row || !col) return false;
                 if (this.isRowCompleted(row)) return false;
-
-                const colName = String(col.name).toUpperCase();
-                const isDateColumn = col.data_type === 'DATE' || 
-                                     col.data_type === 'DATETIME' || 
-                                     colName.includes('DATE') || 
-                                     colName.includes('DUE') || 
-                                     colName === 'FOLLOW_UP_DATE';
-                if (!isDateColumn) return false;
+                if (!this.isDateColumn(col)) return false;
 
                 const val = this.getCellValue(row, col.name);
                 if (!val) return false;
 
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
+                const strVal = String(val).trim();
+                const todayIso = this.getTodayIso();
+                if (/^\d{4}-\d{2}-\d{2}$/.test(strVal)) {
+                    return strVal < todayIso;
+                }
 
+                const today = this.getTodayDate();
                 const cellDate = new Date(val);
                 if (isNaN(cellDate.getTime())) return false;
                 cellDate.setHours(0, 0, 0, 0);
@@ -2754,33 +2822,44 @@ comments: [],
                 if (row.cells_dict && columnName in row.cells_dict) {
                     return row.cells_dict[columnName];
                 }
-                const cell = row.cells.find(c => c.column_name === columnName);
+                const cell = row.cells ? row.cells.find(c => c.column_name === columnName) : null;
                 return cell ? cell.value : '';
             },
 
             getJobColumnName() {
+                if (this._cachedJobColName !== undefined) return this._cachedJobColName;
                 const cols = (this.columns || []).map(c => c.name);
                 // 1. Explicit Job Number synonyms
                 const explicit = cols.find(name => {
                     const u = name.trim().toUpperCase();
                     return u === 'JOB_NUMBER' || u === 'JOB NUMBER' || u === 'JOB_NO' || u === 'JOB NO' || u === 'JOB' || u === 'JOB_ID';
                 });
-                if (explicit) return explicit;
+                if (explicit) {
+                    this._cachedJobColName = explicit;
+                    return explicit;
+                }
 
                 // 2. Flow-Force standard field: PID (Project / Job Identifier in LIST_PID and ENGINEER tables)
                 const pid = cols.find(name => {
                     const u = name.trim().toUpperCase();
                     return u === 'PID' || u === 'NEW_PID_NO';
                 });
-                if (pid) return pid;
+                if (pid) {
+                    this._cachedJobColName = pid;
+                    return pid;
+                }
 
                 // 3. Fallback to ENQUIRY_NO / QUOTATION_NO
                 const enq = cols.find(name => {
                     const u = name.trim().toUpperCase();
                     return u === 'ENQUIRY_NO/QUOTATION_NO' || u === 'ENQUIRY_NO' || u === 'QUOTATION_NO';
                 });
-                if (enq) return enq;
+                if (enq) {
+                    this._cachedJobColName = enq;
+                    return enq;
+                }
 
+                this._cachedJobColName = null;
                 return null;
             },
 
@@ -2796,11 +2875,61 @@ comments: [],
                 return String(val).trim();
             },
 
+            updateJobGroups() {
+                this._jobGroups = {};
+                const jobCol = this.getJobColumnName();
+                const visibleRows = this.filteredRows() || [];
+                const n = visibleRows.length;
+                if (!jobCol || n === 0) return;
+
+                if (this.rowEditingRowId !== null) {
+                    for (let i = 0; i < n; i++) {
+                        const r = visibleRows[i];
+                        if (r) this._jobGroups[r.id] = { isFirst: true, span: 1 };
+                    }
+                    return;
+                }
+
+                let i = 0;
+                while (i < n) {
+                    const row = visibleRows[i];
+                    const val = this.getJobValue(row);
+
+                    // If empty or null or placeholder dash, do not group - each row gets its own cell
+                    if (!val || val === '-') {
+                        this._jobGroups[row.id] = { isFirst: true, span: 1 };
+                        i++;
+                        continue;
+                    }
+
+                    // Count consecutive matching rows
+                    let span = 1;
+                    while (i + span < n && this.getJobValue(visibleRows[i + span]) === val) {
+                        span++;
+                    }
+
+                    // First row of group
+                    this._jobGroups[row.id] = { isFirst: true, span: span };
+
+                    // Subsequent rows in group
+                    for (let s = 1; s < span; s++) {
+                        const nextRow = visibleRows[i + s];
+                        this._jobGroups[nextRow.id] = { isFirst: false, span: 1 };
+                    }
+
+                    i += span;
+                }
+            },
+
             isJobGroupFirst(row, rowIndex, columnName) {
                 if (!this.isJobColumn(columnName)) return true;
                 if (this.rowEditingRowId !== null) return true;
+                if (!row) return true;
+                const group = this._jobGroups ? this._jobGroups[row.id] : null;
+                if (group) return group.isFirst;
+
+                // Fallback
                 const currentVal = this.getJobValue(row);
-                // If empty or null or placeholder dash, do not group - each row gets its own cell
                 if (!currentVal || currentVal === '-') return true;
 
                 if (rowIndex === 0) return true;
@@ -2813,8 +2942,12 @@ comments: [],
             getJobGroupSpan(row, rowIndex, columnName) {
                 if (!this.isJobColumn(columnName)) return 1;
                 if (this.rowEditingRowId !== null) return 1;
+                if (!row) return 1;
+                const group = this._jobGroups ? this._jobGroups[row.id] : null;
+                if (group) return group.span;
+
+                // Fallback
                 const currentVal = this.getJobValue(row);
-                // If empty or null, single row
                 if (!currentVal || currentVal === '-') return 1;
 
                 const visibleRows = this.filteredRows();
@@ -2879,6 +3012,7 @@ comments: [],
             cancelRowEdit() {
                 this.rowEditingRowId = null;
                 this.editingRowValues = {};
+                this.updateJobGroups();
             },
 
             saveRowEdit() {
@@ -3153,8 +3287,13 @@ comments: [],
             // Helper methods for Text Box / Multiline columns
             getColumnConfigByName(colName) {
                 if (!colName) return { isMultiline: false, rows: 3, placeholder: '', maxLength: null, resizable: true };
+                if (!this._colConfigs) this._colConfigs = {};
+                if (this._colConfigs[colName]) return this._colConfigs[colName];
+
                 const col = this.columns.find(c => c.name === colName);
-                return this.getColumnConfig(col);
+                const cfg = this.getColumnConfig(col);
+                this._colConfigs[colName] = cfg;
+                return cfg;
             },
 
             getColumnConfig(col) {
