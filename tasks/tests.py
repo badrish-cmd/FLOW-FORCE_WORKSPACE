@@ -1516,3 +1516,62 @@ class AnnouncementTestCase(TestCase):
         res_pub = self.client.get("/announcements/manage/?tab=published")
         self.assertEqual(len(res_pub.context["announcements"]), 1)
         self.assertEqual(res_pub.context["announcements"][0]["item"].title, "Pub 1")
+
+    def test_super_admin_receives_unread_published_announcement(self):
+        # 1. Admin creates and publishes an announcement
+        ann = Announcement.objects.create(
+            title="Super Admin Alert",
+            content="Important update for everyone including super admins.",
+            is_published=True,
+            published_at=timezone.now(),
+            created_by=self.admin
+        )
+
+        # 2. Super admin gets active_announcement in global_context
+        req_super = self.factory.get("/")
+        req_super.user = self.super_admin
+        ctx_super = global_context(req_super)
+        self.assertEqual(ctx_super["active_announcement"], ann)
+
+        # 3. Super admin can see announcement in history (/announcements/)
+        self.client.force_login(self.super_admin)
+        resp_list = self.client.get("/announcements/")
+        self.assertEqual(resp_list.status_code, 200)
+        self.assertContains(resp_list, "Super Admin Alert")
+
+        # 4. Super admin can acknowledge
+        ack_resp = self.client.post(f"/announcements/{ann.id}/acknowledge/", HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        self.assertEqual(ack_resp.status_code, 200)
+
+        # 5. After acknowledge, super admin no longer receives it in global_context
+        ctx_super_after = global_context(req_super)
+        self.assertEqual(ctx_super_after["active_announcement"], None)
+
+        # 6. Other employees (e.g. employee_a) who have not acknowledged still see it
+        req_emp = self.factory.get("/")
+        req_emp.user = self.employee_a
+        ctx_emp = global_context(req_emp)
+        self.assertEqual(ctx_emp["active_announcement"], ann)
+
+    def test_publishing_does_not_auto_mark_as_read_for_creator_or_super_admin(self):
+        # Super admin creates and publishes announcement
+        self.client.force_login(self.super_admin)
+        resp = self.client.post("/announcements/create/", {
+            "title": "Created By Super Admin",
+            "category": "SECURITY",
+            "content": "Security patch applied.",
+            "is_published": "on",
+        })
+        self.assertEqual(resp.status_code, 302)
+        ann = Announcement.objects.filter(title="Created By Super Admin").first()
+        self.assertIsNotNone(ann)
+        self.assertTrue(ann.is_published)
+
+        # AnnouncementRead must not exist for creator (super_admin)
+        self.assertFalse(AnnouncementRead.objects.filter(announcement=ann, employee=self.super_admin).exists())
+
+        # Super admin should see it in global_context
+        req = self.factory.get("/")
+        req.user = self.super_admin
+        ctx = global_context(req)
+        self.assertEqual(ctx["active_announcement"], ann)
