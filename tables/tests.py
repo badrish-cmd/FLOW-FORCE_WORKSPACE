@@ -2204,7 +2204,7 @@ class TableDuplicationRegressionTestCase(TestCase):
         force_authenticate(req, user=self.admin)
 
         # Inject failure during CellValue creation
-        with patch("tables.views.CellValue.objects.create", side_effect=RuntimeError("Simulated DB Crash")):
+        with patch("tables.services.duplicate_service.CellValue.objects.create", side_effect=RuntimeError("Simulated DB Crash")):
             res = view(req, pk=self.table.id)
             self.assertEqual(res.status_code, 500)
             self.assertIn("Failed to duplicate table", res.data["error"])

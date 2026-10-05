@@ -32,6 +32,7 @@ from .services.row_mutation_service import (
     RowPermissionDeniedError,
     RowValidationError,
 )
+from .services.duplicate_service import TableDuplicateService
 
 def get_table_statistics(table, today_date=None, use_cache=True):
     """
@@ -355,106 +356,15 @@ class TableViewSet(viewsets.ModelViewSet):
             return Response({"error": "Only admins can duplicate this table"}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            with transaction.atomic():
-                # Clone table metadata
-                new_table = Table.objects.create(
-                    name=f"Copy of {table.name}",
-                    description=table.description,
-                    created_by=request.user,
-                    department=table.department,
-                    job_type=table.job_type
-                )
-
-                column_mapping = {}
-
-                # Match system columns by name and copy options, position, is_mandatory, etc.
-                for old_col in table.columns.filter(is_system_column=True):
-                    new_col = new_table.columns.filter(name=old_col.name).first()
-                    if new_col:
-                        new_col.options = old_col.options
-                        new_col.position = old_col.position
-                        new_col.is_mandatory = old_col.is_mandatory
-                        new_col.save()
-                        column_mapping[old_col.id] = new_col
-
-                # Clone custom columns (excluding system columns as they are auto-created in save())
-                for old_col in table.columns.filter(is_system_column=False):
-                    existing_col = new_table.columns.filter(name=old_col.name).first()
-                    if existing_col:
-                        existing_col.options = old_col.options
-                        existing_col.position = old_col.position
-                        existing_col.is_mandatory = old_col.is_mandatory
-                        existing_col.save()
-                        column_mapping[old_col.id] = existing_col
-                    else:
-                        new_col = Column.objects.create(
-                            table=new_table,
-                            name=old_col.name,
-                            data_type=old_col.data_type,
-                            is_mandatory=old_col.is_mandatory,
-                            is_system_column=False,
-                            position=old_col.position,
-                            options=old_col.options
-                        )
-                        column_mapping[old_col.id] = new_col
-
-                # Clone TableAccess
-                for access in table.access_rules.all():
-                    TableAccess.objects.create(
-                        table=new_table,
-                        user=access.user,
-                        department=access.department,
-                        access_level=access.access_level
-                    )
-
-                # Clone Rows, CellValues and Tasks
-                for old_row in table.rows.all():
-                    new_row = Row.objects.create(
-                        table=new_table,
-                        created_by=request.user,
-                        is_archived=old_row.is_archived
-                    )
-
-                    # Copy cells
-                    for old_cell in old_row.cells.all():
-                        new_col = column_mapping.get(old_cell.column_id)
-                        if new_col:
-                            CellValue.objects.create(
-                                row=new_row,
-                                column=new_col,
-                                value=old_cell.value,
-                                updated_by=request.user
-                            )
-
-                    # Copy Task if it exists
-                    if hasattr(old_row, "task"):
-                        old_task = old_row.task
-                        new_task = Task(
-                            row=new_row,
-                            assigned_by=old_task.assigned_by,
-                            status=old_task.status,
-                            due_date=old_task.due_date,
-                            priority=old_task.priority,
-                            initial_mail_sent=old_task.initial_mail_sent,
-                            alert_mail_sent=old_task.alert_mail_sent,
-                            last_escalation_level=old_task.last_escalation_level,
-                            last_escalation_at=old_task.last_escalation_at
-                        )
-                        new_task._skip_sync_signals = True
-                        new_task._skip_assignment_signal = True
-                        new_task.save()
-
-                        if old_task.assigned_to.exists():
-                            new_task._skip_assignment_signal = True
-                            new_task.assigned_to.set(old_task.assigned_to.all())
-
-                return Response(TableSerializer(new_table).data, status=status.HTTP_201_CREATED)
+            new_table = TableDuplicateService.duplicate_table(table, request.user)
+            return Response(TableSerializer(new_table).data, status=status.HTTP_201_CREATED)
         except Exception as e:
             logger.exception("Internal Server Error during table duplication: %s", str(e))
             return Response(
                 {"error": "Failed to duplicate table. An internal server error occurred."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
 
     @action(detail=True, methods=["post"], url_path="bulk-delete-rows")
     @transaction.atomic

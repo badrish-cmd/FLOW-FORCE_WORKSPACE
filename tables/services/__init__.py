@@ -16,6 +16,7 @@ from .row_mutation_service import (
     RowPermissionDeniedError,
     RowValidationError,
 )
+from .duplicate_service import TableDuplicateService, TableDuplicateError
 
 __all__ = [
     "TableStatisticsService",
@@ -30,4 +31,6 @@ __all__ = [
     "RowMutationError",
     "RowPermissionDeniedError",
     "RowValidationError",
+    "TableDuplicateService",
+    "TableDuplicateError",
 ]
