@@ -73,10 +73,20 @@ def global_context(request):
 
     sidebar_tables = get_accessible_tables(request.user).select_related('department')
 
+    from django.utils.functional import SimpleLazyObject
+    from tasks.models import Announcement
+
+    def _get_active_announcement():
+        return Announcement.objects.filter(
+            is_published=True
+        ).exclude(
+            reads__employee=request.user
+        ).order_by('-published_at', '-id').first()
+
     return {
         "task_notifications_unread": unread_count,
         "unread_notifications": unread_list[:15],
         "read_notifications": read_list[:15],
         "sidebar_trackers": sidebar_tables,
+        "active_announcement": SimpleLazyObject(_get_active_announcement),
     }
-

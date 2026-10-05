@@ -374,3 +374,74 @@ class TaskFollowUp(models.Model):
 
     def __str__(self):
         return f"Follow-up for Task {self.task_id} on {self.follow_up_date}"
+
+
+class Announcement(models.Model):
+    CATEGORY_CHOICES = [
+        ("FEATURE", "New Feature"),
+        ("IMPROVEMENT", "Improvement"),
+        ("BUGFIX", "Bug Fix"),
+        ("PERFORMANCE", "Performance"),
+        ("SECURITY", "Security"),
+        ("MAINTENANCE", "Maintenance"),
+    ]
+
+    title = models.CharField(max_length=255)
+    category = models.CharField(
+        max_length=30,
+        choices=CATEGORY_CHOICES,
+        default="IMPROVEMENT"
+    )
+    content = models.TextField(help_text="Detailed description of the update")
+    bullet_points = models.TextField(
+        blank=True,
+        default="",
+        help_text="One bullet point per line"
+    )
+    is_published = models.BooleanField(default=False, db_index=True)
+    published_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_announcements"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-published_at", "-created_at"]
+
+    def __str__(self):
+        return self.title
+
+    @property
+    def bullet_list(self):
+        """Returns non-empty bullet points stripped of leading/trailing whitespace."""
+        if not self.bullet_points:
+            return []
+        return [line.strip() for line in self.bullet_points.splitlines() if line.strip()]
+
+
+class AnnouncementRead(models.Model):
+    announcement = models.ForeignKey(
+        Announcement,
+        on_delete=models.CASCADE,
+        related_name="reads"
+    )
+    employee = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="announcement_reads"
+    )
+    read_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("announcement", "employee")]
+        indexes = [
+            models.Index(fields=["employee", "announcement"]),
+        ]
+
+    def __str__(self):
+        return f"Read {self.announcement_id} by {self.employee.email}"

@@ -3622,7 +3622,20 @@ from tables.services.cell_service import (
     CellValidationError,
     sync_logs_row_overdue,
 )
-from tables.views import RowViewSet, sync_logs_row_overdue as views_sync_logs_row_overdue
+from tables.services.row_mutation_service import (
+    RowMutationService,
+    RowMutationError,
+    RowPermissionDeniedError,
+    RowValidationError,
+)
+from tables.views import (
+    RowViewSet,
+    TableViewSet,
+    sync_logs_row_overdue as views_sync_logs_row_overdue,
+    edit_table_row as views_edit_table_row,
+    bulk_update_table as views_bulk_update_table,
+)
+
 
 
 class CellMutationServiceTestCase(TestCase):
@@ -3927,3 +3940,444 @@ class CellMutationServiceTestCase(TestCase):
         ret_cell = CellValue.objects.filter(row=log_row, column=col_return).first()
         self.assertIsNotNone(ret_cell)
         self.assertEqual(ret_cell.value, today_str)
+
+
+class RowMutationServiceTestCase(TestCase):
+    def setUp(self):
+        self.admin = EmployeeUser.objects.create_superuser(
+            email="admin_rowmut@flow-force.com",
+            password="password123",
+            full_name="Admin RowMut"
+        )
+        self.emp1 = EmployeeUser.objects.create_user(
+            email="emp1_rowmut@flow-force.com",
+            password="password123",
+            full_name="Worker One",
+            role="EMPLOYEE",
+            status="APPROVED"
+        )
+        self.emp2 = EmployeeUser.objects.create_user(
+            email="emp2_rowmut@flow-force.com",
+            password="password123",
+            full_name="Worker Two",
+            role="EMPLOYEE",
+            status="APPROVED"
+        )
+        self.unauth = EmployeeUser.objects.create_user(
+            email="unauth_rowmut@flow-force.com",
+            password="password123",
+            full_name="Unauth RowMut",
+            role="EMPLOYEE",
+            status="APPROVED"
+        )
+
+        self.table = Table.objects.create(
+            name="Row Mutation Test Table",
+            job_type="PERSONAL",
+            created_by=self.admin
+        )
+        TableAccess.objects.create(table=self.table, user=self.admin, access_level="ADMIN")
+
+        TableAccess.objects.create(table=self.table, user=self.emp1, access_level="EDIT")
+        TableAccess.objects.create(table=self.table, user=self.emp2, access_level="VIEW")
+
+        self.col_task = Column.objects.create(
+            table=self.table, name="TASK_NAME", data_type="TEXT", position=1, is_system_column=True
+        )
+        self.col_job = Column.objects.create(
+            table=self.table, name="JOB_NUMBER", data_type="TEXT", position=2, is_system_column=False
+        )
+        self.col_due = Column.objects.create(
+            table=self.table, name="DUE_DATE", data_type="DATE", position=3, is_system_column=True
+        )
+        self.col_status = Column.objects.create(
+            table=self.table, name="STATUS", data_type="TEXT", position=4, is_system_column=False
+        )
+        self.col_assignee = Column.objects.create(
+            table=self.table, name="ASSIGNED_TO", data_type="USER", position=5, is_system_column=False
+        )
+        self.col_sno = Column.objects.create(
+            table=self.table, name="S_NO", data_type="NUMBER", position=6, is_system_column=False
+        )
+        self.col_init_mail = Column.objects.create(
+            table=self.table, name="INITIAL_MAIL", data_type="TEXT", position=7, is_system_column=False
+        )
+        self.col_alert_mail = Column.objects.create(
+            table=self.table, name="ALERT_MAIL", data_type="TEXT", position=8, is_system_column=False
+        )
+
+        self.row = Row.objects.create(table=self.table, created_by=self.admin)
+        self.task = Task.objects.create(
+            row=self.row,
+            due_date="2026-08-01",
+            status="PENDING",
+            priority="MEDIUM",
+            assigned_by=self.admin,
+            alert_mail_sent=True,
+        )
+
+    def test_normal_multi_cell_row_edit(self):
+        cells_data = {
+            "TASK_NAME": "Fabricate Flange",
+            "JOB_NUMBER": "JOB-2026-X",
+        }
+        row, updated_cols = RowMutationService.edit_row(
+            row=self.row,
+            cells_data=cells_data,
+            user=self.admin
+        )
+        self.assertEqual(set(updated_cols), {"TASK_NAME", "JOB_NUMBER"})
+        self.assertEqual(CellValue.objects.get(row=self.row, column=self.col_task).value, "Fabricate Flange")
+        self.assertEqual(CellValue.objects.get(row=self.row, column=self.col_job).value, "JOB-2026-X")
+
+    def test_unauthorized_row_edit_raises_permission_denied(self):
+        with self.assertRaises(RowPermissionDeniedError):
+            RowMutationService.edit_row(
+                row=self.row,
+                cells_data={"TASK_NAME": "Hacked Task"},
+                user=self.unauth
+            )
+
+    def test_assignee_can_edit_assigned_row_without_table_edit_access(self):
+        self.task.assigned_to.set([self.unauth])
+        row, updated_cols = RowMutationService.edit_row(
+            row=self.row,
+            cells_data={"TASK_NAME": "Updated By Assignee"},
+            user=self.unauth
+        )
+        self.assertIn("TASK_NAME", updated_cols)
+        self.assertEqual(CellValue.objects.get(row=self.row, column=self.col_task).value, "Updated By Assignee")
+
+    def test_assignee_restricted_columns_skipped(self):
+        self.task.assigned_to.set([self.unauth])
+        cells_data = {
+            "S_NO": 99,
+            "INITIAL_MAIL": "YES",
+            "ALERT_MAIL": "YES",
+            "TASK_NAME": "Permitted Assignee Update",
+        }
+        row, updated_cols = RowMutationService.edit_row(
+            row=self.row,
+            cells_data=cells_data,
+            user=self.unauth
+        )
+        self.assertEqual(updated_cols, ["TASK_NAME"])
+        self.assertFalse(CellValue.objects.filter(row=self.row, column=self.col_sno).exists())
+        # INITIAL_MAIL remains at the initial "NO" set during task creation signal, not updated to "YES"
+        self.assertEqual(CellValue.objects.get(row=self.row, column=self.col_init_mail).value, "NO")
+
+    def test_column_level_permission_filtering(self):
+        # Clear assignments so emp1 is treated as non-assignee relying on table edit access
+        self.task.assigned_to.clear()
+        ColumnAccess.objects.create(column=self.col_job, user=self.emp1, access_level="READ_ONLY")
+        cells_data = {
+            "TASK_NAME": "Allowed Change",
+            "JOB_NUMBER": "Forbidden Job Number",
+        }
+        row, updated_cols = RowMutationService.edit_row(
+            row=self.row,
+            cells_data=cells_data,
+            user=self.emp1
+        )
+        self.assertEqual(updated_cols, ["TASK_NAME"])
+        self.assertFalse(CellValue.objects.filter(row=self.row, column=self.col_job).exists())
+        self.assertEqual(CellValue.objects.get(row=self.row, column=self.col_task).value, "Allowed Change")
+
+
+    def test_due_date_synchronization_and_mail_reset(self):
+        from unittest.mock import patch
+        with patch("tasks.tasks.update_task_row_mail_columns") as mock_mail_sync:
+            RowMutationService.edit_row(
+                row=self.row,
+                cells_data={"DUE_DATE": "2026-09-15"},
+                user=self.admin
+            )
+            self.task.refresh_from_db()
+            self.assertEqual(str(self.task.due_date), "2026-09-15")
+            self.assertFalse(self.task.alert_mail_sent)
+            mock_mail_sync.assert_called_once_with(self.task)
+
+    def test_due_date_list_pid_handling(self):
+        pid_table = Table.objects.create(name="PID Test Table", job_type="LIST_PID", created_by=self.admin)
+        TableAccess.objects.create(table=pid_table, user=self.admin, access_level="ADMIN")
+        col_ff = pid_table.columns.get(name="DUE_DATE_FLOW_FORCE")
+        col_cust = pid_table.columns.get(name="DUE_DATE_CUSTOMER")
+        pid_row = Row.objects.create(table=pid_table, created_by=self.admin)
+        pid_task = Task.objects.create(row=pid_row, due_date="2026-01-01", status="PENDING", assigned_by=self.admin)
+
+
+        # 1. Flow force priority
+        RowMutationService.edit_row(
+            row=pid_row,
+            cells_data={"DUE_DATE_FLOW_FORCE": "2026-11-10", "DUE_DATE_CUSTOMER": "2026-11-20"},
+            user=self.admin
+        )
+        pid_task.refresh_from_db()
+        self.assertEqual(str(pid_task.due_date), "2026-11-10")
+
+        # 2. Customer fallback if Flow Force missing/empty
+        CellValue.objects.filter(row=pid_row, column=col_ff).update(value="")
+        RowMutationService.edit_row(
+            row=pid_row,
+            cells_data={"DUE_DATE_CUSTOMER": "2026-12-05"},
+            user=self.admin
+        )
+        pid_task.refresh_from_db()
+        self.assertEqual(str(pid_task.due_date), "2026-12-05")
+
+    def test_silent_invalid_date_handling(self):
+        RowMutationService.edit_row(
+            row=self.row,
+            cells_data={"DUE_DATE": "invalid-date", "TASK_NAME": "Still Updated"},
+            user=self.admin
+        )
+        self.task.refresh_from_db()
+        self.assertEqual(str(self.task.due_date), "2026-08-01")
+        self.assertEqual(CellValue.objects.get(row=self.row, column=self.col_task).value, "Still Updated")
+
+    def test_status_synchronization(self):
+        # COMPLETE -> COMPLETED
+        RowMutationService.edit_row(
+            row=self.row,
+            cells_data={"STATUS": "COMPLETE"},
+            user=self.admin
+        )
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, "COMPLETED")
+
+        # NOT_RETURNED -> PENDING
+        RowMutationService.edit_row(
+            row=self.row,
+            cells_data={"STATUS": "not returned"},
+            user=self.admin
+        )
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, "PENDING")
+
+    def test_assignee_synchronization(self):
+        # 1. By ID
+        RowMutationService.edit_row(
+            row=self.row,
+            cells_data={"ASSIGNED_TO": str(self.emp1.id)},
+            user=self.admin
+        )
+        self.task.refresh_from_db()
+        self.assertEqual(list(self.task.assigned_to.all()), [self.emp1])
+        self.assertEqual(self.task.assigned_by, self.admin)
+
+        # 2. By Email
+        RowMutationService.edit_row(
+            row=self.row,
+            cells_data={"ASSIGNED_TO": self.emp2.email},
+            user=self.admin
+        )
+        self.task.refresh_from_db()
+        self.assertEqual(list(self.task.assigned_to.all()), [self.emp2])
+
+        # 3. By Full Name
+        RowMutationService.edit_row(
+            row=self.row,
+            cells_data={"ASSIGNED_TO": "Worker One"},
+            user=self.admin
+        )
+        self.task.refresh_from_db()
+        self.assertEqual(list(self.task.assigned_to.all()), [self.emp1])
+
+        # 4. Clear assignee
+        RowMutationService.edit_row(
+            row=self.row,
+            cells_data={"ASSIGNED_TO": ""},
+            user=self.admin
+        )
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.assigned_to.count(), 0)
+
+    def test_activity_log_creation(self):
+        RowMutationService.edit_row(
+            row=self.row,
+            cells_data={"TASK_NAME": "Logged Multi Cell", "JOB_NUMBER": "JOB-LOG-1"},
+            user=self.admin
+        )
+        log = ActivityLog.objects.filter(task=self.task, action="Updated multiple cells in row").first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.user, self.admin)
+        self.assertIn("TASK_NAME", log.details.get("updated_columns", []))
+        self.assertIn("JOB_NUMBER", log.details.get("updated_columns", []))
+
+    def test_logs_table_synchronization(self):
+        logs_table = Table.objects.create(name="Logs Row Mut Table", job_type="LOGS", created_by=self.admin)
+        TableAccess.objects.create(table=logs_table, user=self.admin, access_level="ADMIN")
+        col_issue = logs_table.columns.get(name="ISSUE_DATE")
+        col_return = logs_table.columns.get(name="RETURN_DATE")
+        col_stat = logs_table.columns.get(name="STATUS")
+        log_row = Row.objects.create(table=logs_table, created_by=self.admin)
+        today_str = timezone.localdate().isoformat()
+        CellValue.objects.create(row=log_row, column=col_issue, value=today_str)
+
+
+        RowMutationService.edit_row(
+            row=log_row,
+            cells_data={"STATUS": "Not Returned"},
+            user=self.admin
+        )
+
+        return_cell = CellValue.objects.filter(row=log_row, column=col_return).first()
+        self.assertIsNotNone(return_cell)
+        self.assertEqual(return_cell.value, today_str)
+        overdue_cell = CellValue.objects.filter(row=log_row, column__name="DAYS_OVERDUE").first()
+        self.assertIsNotNone(overdue_cell)
+        self.assertEqual(overdue_cell.value, 0)
+
+    def test_bulk_update_permissions(self):
+        with self.assertRaises(RowPermissionDeniedError):
+            RowMutationService.bulk_update_table(
+                table=self.table,
+                field="INITIAL_MAIL",
+                value="YES",
+                user=self.emp1
+            )
+
+    def test_bulk_update_initial_mail_and_alert_mail(self):
+        count = RowMutationService.bulk_update_table(
+            table=self.table,
+            field="INITIAL_MAIL",
+            value="YES",
+            user=self.admin
+        )
+        self.assertEqual(count, 1)
+        self.task.refresh_from_db()
+        self.assertTrue(self.task.initial_mail_sent)
+        self.assertEqual(CellValue.objects.get(row=self.row, column=self.col_init_mail).value, "YES")
+
+        self.task.alert_mail_sent = False
+        self.task.save()
+        count = RowMutationService.bulk_update_table(
+            table=self.table,
+            field="ALERT_MAIL",
+            value="YES",
+            user=self.admin
+        )
+        self.assertEqual(count, 1)
+        self.task.refresh_from_db()
+        self.assertTrue(self.task.alert_mail_sent)
+        self.assertEqual(CellValue.objects.get(row=self.row, column=self.col_alert_mail).value, "YES")
+
+    def test_bulk_update_status(self):
+        count = RowMutationService.bulk_update_table(
+            table=self.table,
+            field="STATUS",
+            value="COMPLETED",
+            user=self.admin
+        )
+        self.assertEqual(count, 1)
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, "COMPLETED")
+        self.assertEqual(CellValue.objects.get(row=self.row, column=self.col_status).value, "COMPLETED")
+        log = ActivityLog.objects.filter(task=self.task, action="Updated cell STATUS via Bulk Update").first()
+        self.assertIsNotNone(log)
+
+    def test_bulk_update_invalid_field(self):
+        with self.assertRaises(RowValidationError):
+            RowMutationService.bulk_update_table(
+                table=self.table,
+                field="INVALID_FIELD",
+                value="VAL",
+                user=self.admin
+            )
+
+    def test_transaction_rollback_on_failure(self):
+        from unittest.mock import patch
+        initial_val = "Safe Initial"
+        cell = CellValue.objects.create(row=self.row, column=self.col_task, value=initial_val)
+
+        with patch("tasks.models.ActivityLog.objects.create", side_effect=RuntimeError("Simulated Crash")):
+            with self.assertRaises(RuntimeError):
+                RowMutationService.edit_row(
+                    row=self.row,
+                    cells_data={"TASK_NAME": "Will Crash"},
+                    user=self.admin
+                )
+        cell.refresh_from_db()
+        self.assertEqual(cell.value, initial_val)
+
+    def test_api_compatibility_edit_row(self):
+        factory = APIRequestFactory()
+        view = RowViewSet.as_view({"post": "edit_row"})
+
+        # Success (200)
+        req = factory.post(
+            f"/tables/api/rows/{self.row.id}/edit-row/",
+            {"cells": {"TASK_NAME": "API Updated Row", "JOB_NUMBER": "API-JOB-1"}},
+            format="json"
+        )
+        force_authenticate(req, user=self.admin)
+        resp = view(req, pk=self.row.id)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["id"], self.row.id)
+        self.assertIn("cells", resp.data)
+
+        # Forbidden (403)
+        req = factory.post(
+            f"/tables/api/rows/{self.row.id}/edit-row/",
+            {"cells": {"TASK_NAME": "API Forbidden"}},
+            format="json"
+        )
+        force_authenticate(req, user=self.unauth)
+        resp = view(req, pk=self.row.id)
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.data.get("error"), "No edit access to this table or task row")
+
+    def test_api_compatibility_bulk_update(self):
+        factory = APIRequestFactory()
+        view = TableViewSet.as_view({"post": "bulk_update"})
+
+        # Success (200)
+        req = factory.post(
+            f"/tables/api/tables/{self.table.id}/bulk-update/",
+            {"field": "STATUS", "value": "COMPLETED"},
+            format="json"
+        )
+        force_authenticate(req, user=self.admin)
+        resp = view(req, pk=self.table.id)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("message", resp.data)
+        self.assertEqual(resp.data["message"], "Successfully updated 1 rows")
+
+        # Forbidden (403)
+        req = factory.post(
+            f"/tables/api/tables/{self.table.id}/bulk-update/",
+            {"field": "STATUS", "value": "COMPLETED"},
+            format="json"
+        )
+        force_authenticate(req, user=self.emp1)
+        resp = view(req, pk=self.table.id)
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.data.get("error"), "Only admins can perform bulk updates")
+
+        # Bad Request (400)
+        req = factory.post(
+            f"/tables/api/tables/{self.table.id}/bulk-update/",
+            {"field": "INVALID", "value": "COMPLETED"},
+            format="json"
+        )
+        force_authenticate(req, user=self.admin)
+        resp = view(req, pk=self.table.id)
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data.get("error"), "Invalid field for bulk update")
+
+    def test_views_backward_compatibility_wrappers(self):
+        row, updated_cols = views_edit_table_row(
+            row=self.row,
+            cells_data={"TASK_NAME": "Wrapper Updated"},
+            user=self.admin
+        )
+        self.assertIn("TASK_NAME", updated_cols)
+        self.assertEqual(CellValue.objects.get(row=self.row, column=self.col_task).value, "Wrapper Updated")
+
+        count = views_bulk_update_table(
+            table=self.table,
+            field="STATUS",
+            value="COMPLETED",
+            user=self.admin
+        )
+        self.assertEqual(count, 1)

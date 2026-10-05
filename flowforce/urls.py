@@ -54,7 +54,13 @@ urlpatterns = [
         name="notification_mark_read"
     ),
 
+    path(
+        "announcements/",
+        include("tasks.announcement_urls")
+    ),
+
 ]
+
 
 from django.conf import settings
 from django.conf.urls.static import static

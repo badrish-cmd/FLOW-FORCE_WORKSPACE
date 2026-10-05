@@ -26,6 +26,12 @@ from .services.cell_service import (
     CellValidationError,
     sync_logs_row_overdue as _sync_logs_row_overdue,
 )
+from .services.row_mutation_service import (
+    RowMutationService,
+    RowMutationError,
+    RowPermissionDeniedError,
+    RowValidationError,
+)
 
 def get_table_statistics(table, today_date=None, use_cache=True):
     """
@@ -48,6 +54,22 @@ def sync_logs_row_overdue(row, request_user=None):
     Delegates directly to CellMutationService / cell_service.sync_logs_row_overdue.
     """
     return _sync_logs_row_overdue(row, request_user=request_user)
+
+
+def edit_table_row(row, cells_data, user, check_permissions=True):
+    """
+    Backward-compatibility wrapper for row mutation.
+    Delegates directly to RowMutationService.edit_row.
+    """
+    return RowMutationService.edit_row(row=row, cells_data=cells_data, user=user, check_permissions=check_permissions)
+
+
+def bulk_update_table(table, field, value, user, check_permissions=True):
+    """
+    Backward-compatibility wrapper for table bulk update.
+    Delegates directly to RowMutationService.bulk_update_table.
+    """
+    return RowMutationService.bulk_update_table(table=table, field=field, value=value, user=user, check_permissions=check_permissions)
 
 
 def get_filtered_table_rows(table, query_params, user=None):
@@ -1193,66 +1215,23 @@ class TableViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def bulk_update(self, request, pk=None):
         table = self.get_object_or_404(pk)
-        if not has_table_access(request.user, table, "ADMIN"):
-            return Response({"error": "Only admins can perform bulk updates"}, status=status.HTTP_403_FORBIDDEN)
-
         field = request.data.get("field")
         value = request.data.get("value")
 
-        if field not in ["INITIAL_MAIL", "ALERT_MAIL", "STATUS"]:
-            return Response({"error": "Invalid field for bulk update"}, status=status.HTTP_400_BAD_REQUEST)
-
-        rows = table.rows.filter(is_archived=False)
-        updated_count = 0
-
-        if field == "INITIAL_MAIL":
-            col = table.columns.filter(name__iexact="INITIAL_MAIL").first()
-            if col:
-                for row in rows:
-                    CellValue.objects.update_or_create(
-                        row=row, column=col,
-                        defaults={"value": "YES", "updated_by": request.user}
-                    )
-                    task = getattr(row, "task", None)
-                    if task:
-                        task.initial_mail_sent = True
-                        task.save(update_fields=["initial_mail_sent"])
-                    updated_count += 1
-        elif field == "ALERT_MAIL":
-            col = table.columns.filter(name__iexact="ALERT_MAIL").first()
-            if col:
-                for row in rows:
-                    CellValue.objects.update_or_create(
-                        row=row, column=col,
-                        defaults={"value": "YES", "updated_by": request.user}
-                    )
-                    task = getattr(row, "task", None)
-                    if task:
-                        task.alert_mail_sent = True
-                        task.save(update_fields=["alert_mail_sent"])
-                    updated_count += 1
-        elif field == "STATUS":
-            status_col = table.columns.filter(name__iexact="STATUS").first()
-            for row in rows:
-                if status_col:
-                    CellValue.objects.update_or_create(
-                        row=row, column=status_col,
-                        defaults={"value": "COMPLETED", "updated_by": request.user}
-                    )
-                task = getattr(row, "task", None)
-                if task:
-                    task.status = "COMPLETED"
-                    task.save(update_fields=["status"])
-                    
-                    ActivityLog.objects.create(
-                        task=task,
-                        action="Updated cell STATUS via Bulk Update",
-                        user=request.user,
-                        details={"column": "STATUS", "value": "COMPLETED"}
-                    )
-                updated_count += 1
+        try:
+            updated_count = RowMutationService.bulk_update_table(
+                table=table,
+                field=field,
+                value=value,
+                user=request.user,
+            )
+        except RowPermissionDeniedError as e:
+            return Response({"error": str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except RowValidationError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({"message": f"Successfully updated {updated_count} rows"}, status=status.HTTP_200_OK)
+
 
     @action(detail=True, methods=["get"], url_path="export-excel")
     def export_excel(self, request, pk=None):
@@ -1741,145 +1720,19 @@ class RowViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def edit_row(self, request, pk=None):
         row = get_object_or_404(Row, pk=pk)
-        table = row.table
-
-        task = getattr(row, "task", None)
-        is_assigned = False
-        if task:
-            is_assigned = task.assigned_to.filter(id=request.user.id).exists()
-
-        if not (has_table_access(request.user, table, "EDIT") or is_assigned):
-            return Response({"error": "No edit access to this table or task row"}, status=status.HTTP_403_FORBIDDEN)
-
-        cells_data = request.data.get("cells", {})
-        cols = {col.name: col for col in table.columns.all()}
-
-        updated_columns = []
-        for col_name, value in cells_data.items():
-            column = cols.get(col_name)
-            if not column:
-                continue
-
-            # Enforce column level permissions
-            if table.job_type != "LIST_PID":
-                if is_assigned:
-                    if column.name == "S_NO" or column.name in ["INITIAL_MAIL", "ALERT_MAIL"]:
-                        continue
-                else:
-                    perm = get_column_access_level(request.user, column)
-                    if perm != "EDITABLE":
-                        continue
-
-            # Update CellValue
-            CellValue.objects.update_or_create(
-                row=row, column=column,
-                defaults={"value": value, "updated_by": request.user}
-            )
-            updated_columns.append(column.name)
-
-            # Sync System Columns with Task Model if necessary
-            is_list_pid = (table.job_type == "LIST_PID")
-            if column.is_system_column or (is_list_pid and column.name.upper() in ["DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]):
-                task = getattr(row, "task", None)
-                if task:
-                    new_date = None
-                    if is_list_pid:
-                        flow_force_col = Column.objects.filter(table=table, name__iexact="DUE_DATE_FLOW_FORCE").first()
-                        customer_col = Column.objects.filter(table=table, name__iexact="DUE_DATE_CUSTOMER").first()
-                        
-                        ff_val = CellValue.objects.filter(row=row, column=flow_force_col).first() if flow_force_col else None
-                        cust_val = CellValue.objects.filter(row=row, column=customer_col).first() if customer_col else None
-                        
-                        if ff_val and ff_val.value:
-                            try:
-                                new_date = datetime.strptime(str(ff_val.value).split("T")[0], "%Y-%m-%d").date()
-                            except ValueError:
-                                pass
-                        if not new_date and cust_val and cust_val.value:
-                            try:
-                                new_date = datetime.strptime(str(cust_val.value).split("T")[0], "%Y-%m-%d").date()
-                            except ValueError:
-                                pass
-                    else:
-                        if column.name in ["DUE_DATE", "FOLLOW_UP_DATE", "RETURN_DATE", "DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]:
-                            try:
-                                new_date = datetime.strptime(str(value).split("T")[0], "%Y-%m-%d").date()
-                            except ValueError:
-                                pass
-
-                    if new_date:
-                        if task.due_date != new_date:
-                            task.due_date = new_date
-                            task.alert_mail_sent = False
-                            task.save(update_fields=["due_date", "alert_mail_sent"])
-                            from tasks.tasks import update_task_row_mail_columns
-                            update_task_row_mail_columns(task)
-                        else:
-                            task.due_date = new_date
-                            task.save(update_fields=["due_date"])
-
-            # Sync with Task assigned_to if column data_type is USER or column name represents assignment
-            col_name_upper = column.name.upper()
-            if col_name_upper == "STATUS":
-                task = getattr(row, "task", None)
-                if task:
-                    val_upper = str(value).upper().strip().replace(" ", "_")
-                    if val_upper in ["COMPLETE", "COMPLETED", "RETURNED"]:
-                        val_upper = "COMPLETED"
-                    elif val_upper in ["NOT_RETURNED", "NOT RETURNED", "PENDING"]:
-                        val_upper = "PENDING"
-                    valid_statuses = [choice[0] for choice in Task.STATUS_CHOICES]
-                    if val_upper in valid_statuses:
-                        task.status = val_upper
-                        task.save(update_fields=["status"])
-
-            if column.data_type == "USER" or col_name_upper in ["ASSIGNED_TO", "ASSIGNED TO", "ASSIGNEE"]:
-                task = getattr(row, "task", None)
-                if task:
-                    from django.db.models import Q
-                    try:
-                        if value:
-                            if str(value).isdigit():
-                                user = EmployeeUser.objects.get(id=int(value), is_active=True)
-                            elif "@" in str(value):
-                                user = EmployeeUser.objects.get(email=value, is_active=True)
-                            else:
-                                user = EmployeeUser.objects.get(full_name__iexact=value, is_active=True)
-                            
-                            task.assigned_to.set([user])
-                            task.assigned_by = request.user
-                            task.save()
-                        else:
-                            task.assigned_to.clear()
-                    except EmployeeUser.DoesNotExist:
-                        if value:
-                            user = EmployeeUser.objects.filter(
-                                Q(full_name__icontains=value) | Q(email__icontains=value),
-                                is_active=True
-                            ).first()
-                            if user:
-                                task.assigned_to.set([user])
-                                task.assigned_by = request.user
-                                task.save()
-                            else:
-                                task.assigned_to.clear()
-                        else:
-                            task.assigned_to.clear()
-
-        # Log change
-        task = getattr(row, "task", None)
-        if task and updated_columns:
-            ActivityLog.objects.create(
-                task=task,
-                action="Updated multiple cells in row",
+        try:
+            row, _ = RowMutationService.edit_row(
+                row=row,
+                cells_data=request.data.get("cells", {}),
                 user=request.user,
-                details={"updated_columns": updated_columns}
             )
-
-        if table.job_type == "LOGS":
-            sync_logs_row_overdue(row, request_user=request.user)
+        except RowPermissionDeniedError as e:
+            return Response({"error": str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except RowValidationError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(RowSerializer(row).data, status=status.HTTP_200_OK)
+
 
 class TableAccessViewSet(viewsets.ModelViewSet):
     serializer_class = TableAccessSerializer

@@ -10,6 +10,12 @@ from .cell_service import (
     CellValidationError,
     sync_logs_row_overdue,
 )
+from .row_mutation_service import (
+    RowMutationService,
+    RowMutationError,
+    RowPermissionDeniedError,
+    RowValidationError,
+)
 
 __all__ = [
     "TableStatisticsService",
@@ -20,4 +26,8 @@ __all__ = [
     "CellPermissionDeniedError",
     "CellValidationError",
     "sync_logs_row_overdue",
+    "RowMutationService",
+    "RowMutationError",
+    "RowPermissionDeniedError",
+    "RowValidationError",
 ]

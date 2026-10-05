@@ -1170,3 +1170,349 @@ class TasksReportsExportOptimizationRegressionTestCase(TestCase):
         # Query counts must be identical, proving zero linear N+1 query growth
         self.assertEqual(query_count_5, query_count_25)
         self.assertLessEqual(query_count_25, 6)
+
+
+from tasks.models import Announcement, AnnouncementRead
+from tasks.context_processors import global_context
+from django.test import RequestFactory
+
+
+class AnnouncementTestCase(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(name="Announcements Dept", slug="announcements-dept")
+        self.admin = User.objects.create_user(
+            email="ann_admin@flow-force.com",
+            password="testpassword",
+            full_name="Announcement Admin",
+            role="ADMIN",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.super_admin = User.objects.create_user(
+            email="ann_super@flow-force.com",
+            password="testpassword",
+            full_name="Announcement Super Admin",
+            role="SUPER_ADMIN",
+            status="APPROVED"
+        )
+        self.employee_a = User.objects.create_user(
+            email="employee_a@flow-force.com",
+            password="testpassword",
+            full_name="Employee A",
+            role="EMPLOYEE",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.employee_b = User.objects.create_user(
+            email="employee_b@flow-force.com",
+            password="testpassword",
+            full_name="Employee B",
+            role="EMPLOYEE",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.factory = RequestFactory()
+
+    def test_admin_can_create_announcement(self):
+        self.client.force_login(self.admin)
+        resp = self.client.post("/announcements/create/", {
+            "title": "Phase 3C Release",
+            "category": "IMPROVEMENT",
+            "content": "Cell editing optimizations released.",
+            "bullet_points": "Faster cell save\nAtomic sync",
+            "is_published": "on",
+        })
+        self.assertEqual(resp.status_code, 302)
+        ann = Announcement.objects.filter(title="Phase 3C Release").first()
+        self.assertIsNotNone(ann)
+        self.assertEqual(ann.category, "IMPROVEMENT")
+        self.assertTrue(ann.is_published)
+        self.assertIsNotNone(ann.published_at)
+        self.assertEqual(ann.created_by, self.admin)
+        self.assertEqual(ann.bullet_list, ["Faster cell save", "Atomic sync"])
+
+    def test_non_admin_cannot_create_announcement(self):
+        self.client.force_login(self.employee_a)
+        resp = self.client.post("/announcements/create/", {
+            "title": "Unauthorized Announcement",
+            "category": "FEATURE",
+            "content": "Should not be saved.",
+        })
+        self.assertEqual(resp.status_code, 403)
+        self.assertFalse(Announcement.objects.filter(title="Unauthorized Announcement").exists())
+
+    def test_draft_announcement_is_invisible_to_employees(self):
+        draft = Announcement.objects.create(
+            title="Draft Secret Update",
+            content="Not ready for employees.",
+            is_published=False,
+            created_by=self.admin
+        )
+        self.client.force_login(self.employee_a)
+        resp = self.client.get("/announcements/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "Draft Secret Update")
+
+        req = self.factory.get("/")
+        req.user = self.employee_a
+        ctx = global_context(req)
+        self.assertEqual(ctx["active_announcement"], None)
+
+    def test_published_announcement_appears_to_employees(self):
+        ann = Announcement.objects.create(
+            title="Published Work Notes",
+            content="All employees can view.",
+            is_published=True,
+            published_at=timezone.now(),
+            created_by=self.admin
+        )
+        self.client.force_login(self.employee_a)
+        resp = self.client.get("/announcements/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Published Work Notes")
+
+    def test_employee_sees_unread_announcement_via_context(self):
+        ann = Announcement.objects.create(
+            title="Exciting Feature",
+            content="Check out the update.",
+            is_published=True,
+            published_at=timezone.now(),
+            created_by=self.admin
+        )
+        req = self.factory.get("/")
+        req.user = self.employee_a
+        ctx = global_context(req)
+        self.assertEqual(ctx["active_announcement"], ann)
+
+    def test_employee_acknowledges_announcement(self):
+        ann = Announcement.objects.create(
+            title="Acknowledge Me",
+            content="Read me please.",
+            is_published=True,
+            published_at=timezone.now(),
+            created_by=self.admin
+        )
+        self.client.force_login(self.employee_a)
+        resp = self.client.post(f"/announcements/{ann.id}/acknowledge/", HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(AnnouncementRead.objects.filter(announcement=ann, employee=self.employee_a).exists())
+
+    def test_acknowledged_announcement_does_not_appear_again(self):
+        ann = Announcement.objects.create(
+            title="Pop Up Once Only",
+            content="Should never popup again after Got it.",
+            is_published=True,
+            published_at=timezone.now(),
+            created_by=self.admin
+        )
+        AnnouncementRead.objects.create(announcement=ann, employee=self.employee_a)
+
+        req = self.factory.get("/")
+        req.user = self.employee_a
+        ctx = global_context(req)
+        self.assertEqual(ctx["active_announcement"], None)
+
+    def test_employee_a_acknowledging_does_not_affect_employee_b(self):
+        ann = Announcement.objects.create(
+            title="Per Employee Status",
+            content="Independent acknowledgement.",
+            is_published=True,
+            published_at=timezone.now(),
+            created_by=self.admin
+        )
+        AnnouncementRead.objects.create(announcement=ann, employee=self.employee_a)
+
+        req_b = self.factory.get("/")
+        req_b.user = self.employee_b
+        ctx_b = global_context(req_b)
+        self.assertEqual(ctx_b["active_announcement"], ann)
+
+    def test_multiple_announcements_handled_correctly_and_latest_selected_first(self):
+        older = Announcement.objects.create(
+            title="Older Announcement",
+            content="First released.",
+            is_published=True,
+            published_at=timezone.now() - timedelta(days=2),
+            created_by=self.admin
+        )
+        newer = Announcement.objects.create(
+            title="Newer Announcement",
+            content="Second released.",
+            is_published=True,
+            published_at=timezone.now() - timedelta(days=1),
+            created_by=self.admin
+        )
+
+        req = self.factory.get("/")
+        req.user = self.employee_a
+
+        # 1. Latest announcement is returned first
+        ctx1 = global_context(req)
+        self.assertEqual(ctx1["active_announcement"], newer)
+
+        # 2. Acknowledge newer
+        AnnouncementRead.objects.create(announcement=newer, employee=self.employee_a)
+
+        # 3. Older announcement is returned next
+        ctx2 = global_context(req)
+        self.assertEqual(ctx2["active_announcement"], older)
+
+        # 4. Acknowledge older
+        AnnouncementRead.objects.create(announcement=older, employee=self.employee_a)
+
+        # 5. No unread announcements remain
+        ctx3 = global_context(req)
+        self.assertEqual(ctx3["active_announcement"], None)
+
+    def test_admin_can_publish_unpublish(self):
+        ann = Announcement.objects.create(
+            title="Toggle Me",
+            content="State flipping.",
+            is_published=False,
+            created_by=self.admin
+        )
+        self.client.force_login(self.admin)
+
+        # Toggle to published
+        resp1 = self.client.post(f"/announcements/{ann.id}/toggle-publish/")
+        self.assertEqual(resp1.status_code, 302)
+        ann.refresh_from_db()
+        self.assertTrue(ann.is_published)
+        self.assertIsNotNone(ann.published_at)
+
+        # Toggle to draft
+        resp2 = self.client.post(f"/announcements/{ann.id}/toggle-publish/")
+        self.assertEqual(resp2.status_code, 302)
+        ann.refresh_from_db()
+        self.assertFalse(ann.is_published)
+
+    def test_non_admin_cannot_publish_unpublish(self):
+        ann = Announcement.objects.create(
+            title="Employee Cannot Toggle",
+            content="Protected action.",
+            is_published=False,
+            created_by=self.admin
+        )
+        self.client.force_login(self.employee_a)
+        resp = self.client.post(f"/announcements/{ann.id}/toggle-publish/")
+        self.assertEqual(resp.status_code, 403)
+        ann.refresh_from_db()
+        self.assertFalse(ann.is_published)
+
+    def test_admin_can_edit_announcement(self):
+        ann = Announcement.objects.create(
+            title="Original Title",
+            content="Original Content",
+            category="BUGFIX",
+            is_published=False,
+            created_by=self.admin
+        )
+        self.client.force_login(self.admin)
+        resp = self.client.post(f"/announcements/{ann.id}/edit/", {
+            "title": "Updated Title",
+            "content": "Updated Content",
+            "category": "PERFORMANCE",
+            "bullet_points": "Point A\nPoint B",
+            "is_published": "on",
+        })
+        self.assertEqual(resp.status_code, 302)
+        ann.refresh_from_db()
+        self.assertEqual(ann.title, "Updated Title")
+        self.assertEqual(ann.content, "Updated Content")
+        self.assertEqual(ann.category, "PERFORMANCE")
+        self.assertTrue(ann.is_published)
+
+    def test_non_admin_cannot_edit_or_delete_announcement(self):
+        ann = Announcement.objects.create(
+            title="Immutable by Employees",
+            content="Cannot touch.",
+            is_published=True,
+            created_by=self.admin
+        )
+        self.client.force_login(self.employee_a)
+
+        # Edit attempt
+        resp_edit = self.client.post(f"/announcements/{ann.id}/edit/", {
+            "title": "Hacked Title",
+            "content": "Hacked Content",
+        })
+        self.assertEqual(resp_edit.status_code, 403)
+
+        # Delete attempt
+        resp_del = self.client.post(f"/announcements/{ann.id}/delete/")
+        self.assertEqual(resp_del.status_code, 403)
+
+        ann.refresh_from_db()
+        self.assertEqual(ann.title, "Immutable by Employees")
+
+    def test_admin_can_delete_announcement(self):
+        ann = Announcement.objects.create(
+            title="To Be Deleted",
+            content="Goodbye.",
+            is_published=True,
+            created_by=self.admin
+        )
+        self.client.force_login(self.admin)
+        resp = self.client.post(f"/announcements/{ann.id}/delete/")
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(Announcement.objects.filter(id=ann.id).exists())
+
+    def test_duplicate_acknowledgement_does_not_create_duplicate_records(self):
+        ann = Announcement.objects.create(
+            title="Idempotent Ack",
+            content="Ack twice.",
+            is_published=True,
+            published_at=timezone.now(),
+            created_by=self.admin
+        )
+        self.client.force_login(self.employee_a)
+
+        self.client.post(f"/announcements/{ann.id}/acknowledge/", HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        self.client.post(f"/announcements/{ann.id}/acknowledge/", HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+
+        read_count = AnnouncementRead.objects.filter(announcement=ann, employee=self.employee_a).count()
+        self.assertEqual(read_count, 1)
+
+    def test_existing_task_notification_functionality_remains_unchanged(self):
+        notif = Notification.objects.create(
+            user=self.employee_a,
+            title="Task Notification 101",
+            description="You have a new task assigned.",
+            type="ASSIGNED",
+            is_read=False
+        )
+        req = self.factory.get("/")
+        req.user = self.employee_a
+        ctx = global_context(req)
+
+        self.assertEqual(ctx["task_notifications_unread"], 1)
+        self.assertEqual(len(ctx["unread_notifications"]), 1)
+        self.assertEqual(ctx["unread_notifications"][0]["title"], "Task Notification 101")
+
+    def test_bullet_list_property(self):
+        ann = Announcement(
+            bullet_points="   Leading/trailing spaces   \n\n   Bullet 2   \n\n"
+        )
+        self.assertEqual(ann.bullet_list, ["Leading/trailing spaces", "Bullet 2"])
+
+    def test_admin_manage_dashboard_access_and_tabs(self):
+        Announcement.objects.create(title="Pub 1", content="C1", is_published=True, published_at=timezone.now(), created_by=self.admin)
+        Announcement.objects.create(title="Draft 1", content="C2", is_published=False, created_by=self.admin)
+
+        # 1. Non-admin gets 403
+        self.client.force_login(self.employee_a)
+        res_emp = self.client.get("/announcements/manage/")
+        self.assertEqual(res_emp.status_code, 403)
+
+        # 2. Admin gets 200
+        self.client.force_login(self.admin)
+        res_all = self.client.get("/announcements/manage/")
+        self.assertEqual(res_all.status_code, 200)
+        self.assertEqual(res_all.context["total_count"], 2)
+        self.assertEqual(res_all.context["published_count"], 1)
+        self.assertEqual(res_all.context["draft_count"], 1)
+
+        # 3. Filter tabs
+        res_pub = self.client.get("/announcements/manage/?tab=published")
+        self.assertEqual(len(res_pub.context["announcements"]), 1)
+        self.assertEqual(res_pub.context["announcements"][0]["item"].title, "Pub 1")
