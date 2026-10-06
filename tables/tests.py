@@ -4913,3 +4913,176 @@ class TableImportServiceTest(TestCase):
         resp_empty = view(req_empty, pk=self.table.id)
         self.assertEqual(resp_empty.status_code, 400)
         self.assertEqual(resp_empty.data.get("error"), "No CSV file provided")
+
+
+from django.test import TransactionTestCase, override_settings
+from channels.testing import WebsocketCommunicator
+from channels.layers import get_channel_layer
+from flowforce.asgi import application
+from django.contrib.auth import SESSION_KEY, BACKEND_SESSION_KEY, HASH_SESSION_KEY
+from importlib import import_module
+from django.conf import settings
+from asgiref.sync import sync_to_async
+
+
+@override_settings(
+    CHANNEL_LAYERS={
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        }
+    }
+)
+class TableWebSocketConsumerTestCase(TransactionTestCase):
+    """
+    PHASE REALTIME-2: Verifies TableEventConsumer WebSocket connection and authorization.
+    1. authenticated user with VIEW permission can connect
+    2. unauthenticated user cannot establish an authorized connection
+    3. user without table VIEW access is rejected
+    4. invalid/nonexistent table ID is rejected
+    5. authorized connection joins correct group (table_<table_id>)
+    6. table 27 connection does not join table 28 group
+    7. disconnect cleans up the group membership
+    """
+
+    def setUp(self):
+        self.dept_a = Department.objects.create(name="WS Dept A", slug="ws-dept-a")
+        self.dept_b = Department.objects.create(name="WS Dept B", slug="ws-dept-b")
+
+        self.admin = EmployeeUser.objects.create_user(
+            email="ws_admin_t2@example.com",
+            password="testpassword",
+            role="ADMIN",
+            department=self.dept_a,
+        )
+        self.user_a = EmployeeUser.objects.create_user(
+            email="ws_user_a_t2@example.com",
+            password="testpassword",
+            role="EMPLOYEE",
+            department=self.dept_a,
+        )
+        self.user_b = EmployeeUser.objects.create_user(
+            email="ws_user_b_t2@example.com",
+            password="testpassword",
+            role="EMPLOYEE",
+            department=self.dept_b,
+        )
+
+        self.table_a = Table.objects.create(
+            name="WS Test Table A",
+            created_by=self.admin,
+            department=self.dept_a,
+        )
+        self.table_b = Table.objects.create(
+            name="WS Test Table B",
+            created_by=self.admin,
+            department=self.dept_b,
+        )
+
+    @sync_to_async
+    def _create_user_session(self, user):
+        SessionStore = import_module(settings.SESSION_ENGINE).SessionStore
+        session = SessionStore()
+        session[SESSION_KEY] = str(user.pk)
+        session[BACKEND_SESSION_KEY] = "django.contrib.auth.backends.ModelBackend"
+        session[HASH_SESSION_KEY] = user.get_session_auth_hash()
+        session.save()
+        return session.session_key
+
+    async def test_1_authenticated_user_with_view_permission_can_connect(self):
+        """1. Authenticated user with VIEW permission establishes a successful WebSocket connection."""
+        session_key = await self._create_user_session(self.user_a)
+        communicator = WebsocketCommunicator(
+            application,
+            f"/ws/tables/{self.table_a.id}/",
+            headers=[(b"cookie", f"sessionid={session_key}".encode("ascii"))],
+        )
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+        await communicator.disconnect()
+
+    async def test_2_unauthenticated_user_cannot_connect(self):
+        """2. Unauthenticated user without valid session cannot establish a connection."""
+        communicator = WebsocketCommunicator(
+            application,
+            f"/ws/tables/{self.table_a.id}/",
+        )
+        connected, _ = await communicator.connect()
+        self.assertFalse(connected)
+        await communicator.disconnect()
+
+    async def test_3_user_without_view_access_is_rejected(self):
+        """3. User from another department without VIEW permission is rejected."""
+        session_key = await self._create_user_session(self.user_b)
+        communicator = WebsocketCommunicator(
+            application,
+            f"/ws/tables/{self.table_a.id}/",
+            headers=[(b"cookie", f"sessionid={session_key}".encode("ascii"))],
+        )
+        connected, _ = await communicator.connect()
+        self.assertFalse(connected)
+        await communicator.disconnect()
+
+    async def test_4_invalid_or_nonexistent_table_id_is_rejected(self):
+        """4. Connection to a nonexistent table ID is rejected safely without data leaks."""
+        session_key = await self._create_user_session(self.user_a)
+        communicator = WebsocketCommunicator(
+            application,
+            "/ws/tables/999999/",
+            headers=[(b"cookie", f"sessionid={session_key}".encode("ascii"))],
+        )
+        connected, _ = await communicator.connect()
+        self.assertFalse(connected)
+        await communicator.disconnect()
+
+    async def test_5_authorized_connection_joins_correct_table_group(self):
+        """5. Authorized connection joins the specific group table_<table_id>."""
+        session_key = await self._create_user_session(self.user_a)
+        communicator = WebsocketCommunicator(
+            application,
+            f"/ws/tables/{self.table_a.id}/",
+            headers=[(b"cookie", f"sessionid={session_key}".encode("ascii"))],
+        )
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+
+        layer = get_channel_layer()
+        group_name = f"table_{self.table_a.id}"
+        self.assertIn(group_name, layer.groups)
+        self.assertEqual(len(layer.groups[group_name]), 1)
+
+        await communicator.disconnect()
+
+    async def test_6_table_connection_does_not_join_different_table_group(self):
+        """6. Connecting to Table A does not join Table B's group (isolation)."""
+        session_key = await self._create_user_session(self.user_a)
+        communicator = WebsocketCommunicator(
+            application,
+            f"/ws/tables/{self.table_a.id}/",
+            headers=[(b"cookie", f"sessionid={session_key}".encode("ascii"))],
+        )
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+
+        layer = get_channel_layer()
+        group_b = f"table_{self.table_b.id}"
+        self.assertEqual(len(layer.groups.get(group_b, {})), 0)
+
+        await communicator.disconnect()
+
+    async def test_7_disconnect_cleans_up_group_membership(self):
+        """7. Disconnecting cleans up channel group membership."""
+        session_key = await self._create_user_session(self.user_a)
+        communicator = WebsocketCommunicator(
+            application,
+            f"/ws/tables/{self.table_a.id}/",
+            headers=[(b"cookie", f"sessionid={session_key}".encode("ascii"))],
+        )
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+
+        layer = get_channel_layer()
+        group_name = f"table_{self.table_a.id}"
+        self.assertEqual(len(layer.groups.get(group_name, {})), 1)
+
+        await communicator.disconnect()
+        self.assertEqual(len(layer.groups.get(group_name, {})), 0)
