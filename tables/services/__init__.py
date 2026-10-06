@@ -17,6 +17,12 @@ from .row_mutation_service import (
     RowValidationError,
 )
 from .duplicate_service import TableDuplicateService, TableDuplicateError
+from .delete_service import (
+    TableDeleteService,
+    DeleteError,
+    DeleteValidationError,
+    DeletePermissionDeniedError,
+)
 
 __all__ = [
     "TableStatisticsService",
@@ -33,4 +39,8 @@ __all__ = [
     "RowValidationError",
     "TableDuplicateService",
     "TableDuplicateError",
+    "TableDeleteService",
+    "DeleteError",
+    "DeleteValidationError",
+    "DeletePermissionDeniedError",
 ]

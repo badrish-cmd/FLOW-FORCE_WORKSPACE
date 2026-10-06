@@ -4381,3 +4381,127 @@ class RowMutationServiceTestCase(TestCase):
             user=self.admin
         )
         self.assertEqual(count, 1)
+
+
+class TableDeleteServiceTestCase(TestCase):
+    def setUp(self):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        self.factory = APIRequestFactory()
+        self.dept = Department.objects.create(name="Delete Svc Dept", slug="delete-svc-dept")
+        self.admin = User.objects.create_user(
+            email="del_admin@flow-force.com",
+            password="testpassword",
+            full_name="Delete Admin",
+            role="ADMIN",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.employee = User.objects.create_user(
+            email="del_emp@flow-force.com",
+            password="testpassword",
+            full_name="Delete Employee",
+            role="EMPLOYEE",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.table = Table.objects.create(name="Delete Service Table", created_by=self.admin, job_type="STANDARD")
+        TableAccess.objects.create(table=self.table, user=self.admin, access_level="ADMIN")
+        TableAccess.objects.create(table=self.table, user=self.employee, access_level="VIEW")
+
+        self.custom_col = Column.objects.create(
+            table=self.table,
+            name="CUSTOM_FIELD",
+            data_type="TEXT",
+            is_system_column=False
+        )
+        self.sys_col = self.table.columns.get(name="TASK_NAME")
+
+        self.row1 = Row.objects.create(table=self.table, created_by=self.admin)
+        self.row2 = Row.objects.create(table=self.table, created_by=self.admin)
+        CellValue.objects.create(row=self.row1, column=self.custom_col, value="Value 1")
+        CellValue.objects.create(row=self.row1, column=self.sys_col, value="Task 1")
+        CellValue.objects.create(row=self.row2, column=self.sys_col, value="Task 2")
+        self.task1 = Task.objects.create(row=self.row1, status="PENDING", priority="HIGH", assigned_by=self.admin)
+
+    def test_delete_row_service_cascades_and_invalidates_cache(self):
+        from tables.services.delete_service import TableDeleteService
+        from django.core.cache import cache
+        from tables.services.statistics_service import TableStatisticsService
+
+        TableStatisticsService.get_table_statistics(self.table)
+        cache_key = TableStatisticsService.get_cache_key(self.table.id)
+        cache.set(cache_key, {"cached": True}, 300)
+        self.assertIsNotNone(cache.get(cache_key))
+
+        TableDeleteService.delete_row(self.row1, self.admin)
+        self.assertFalse(Row.objects.filter(id=self.row1.id).exists())
+        self.assertFalse(CellValue.objects.filter(row_id=self.row1.id).exists())
+        self.assertFalse(Task.objects.filter(id=self.task1.id).exists())
+        self.assertIsNone(cache.get(cache_key))
+
+    def test_bulk_delete_rows_service(self):
+        from tables.services.delete_service import TableDeleteService, DeleteValidationError
+        # Non-list row_ids raises DeleteValidationError
+        with self.assertRaises(DeleteValidationError):
+            TableDeleteService.bulk_delete_rows(self.table, self.admin, row_ids="invalid")
+
+        # Specific row_ids deletion
+        count = TableDeleteService.bulk_delete_rows(self.table, self.admin, row_ids=[self.row1.id])
+        self.assertEqual(count, 1)
+        self.assertFalse(Row.objects.filter(id=self.row1.id).exists())
+        self.assertTrue(Row.objects.filter(id=self.row2.id).exists())
+
+        # Bulk delete all remaining rows
+        count_all = TableDeleteService.bulk_delete_rows(self.table, self.admin, row_ids=None)
+        self.assertEqual(count_all, 1)
+        self.assertFalse(Row.objects.filter(table=self.table).exists())
+
+    def test_delete_rows_by_column_service_and_system_protection(self):
+        from tables.services.delete_service import TableDeleteService, DeleteValidationError
+        # System column protection
+        with self.assertRaises(DeleteValidationError):
+            TableDeleteService.delete_rows_by_column(self.sys_col, self.admin)
+
+        # Custom column deletes rows with values in that column
+        count = TableDeleteService.delete_rows_by_column(self.custom_col, self.admin)
+        self.assertEqual(count, 1)
+        self.assertFalse(Row.objects.filter(id=self.row1.id).exists())
+        self.assertTrue(Row.objects.filter(id=self.row2.id).exists())
+
+    def test_clear_column_values_service_and_system_protection(self):
+        from tables.services.delete_service import TableDeleteService, DeleteValidationError
+        # System column protection
+        with self.assertRaises(DeleteValidationError):
+            TableDeleteService.clear_column_values(self.sys_col, self.admin)
+
+        # Custom column clears values
+        TableDeleteService.clear_column_values(self.custom_col, self.admin)
+        self.assertEqual(CellValue.objects.get(row=self.row1, column=self.custom_col).value, None)
+
+    def test_view_system_column_and_invalid_row_ids_error_responses(self):
+        from tables.views import TableViewSet, ColumnViewSet
+        from rest_framework.test import force_authenticate
+
+        # 1. bulk_delete_rows with non-list row_ids returns 400
+        view_tbl = TableViewSet.as_view({"post": "bulk_delete_rows"})
+        req1 = self.factory.post(f"/tables/api/tables/{self.table.id}/bulk-delete-rows/", {"row_ids": "not-a-list"}, format="json")
+        force_authenticate(req1, user=self.admin)
+        resp1 = view_tbl(req1, pk=self.table.id)
+        self.assertEqual(resp1.status_code, 400)
+        self.assertEqual(resp1.data.get("error"), "row_ids must be a list")
+
+        # 2. clear_values on system column returns 400
+        view_col = ColumnViewSet.as_view({"post": "clear_values"})
+        req2 = self.factory.post(f"/tables/api/columns/{self.sys_col.id}/clear-values/")
+        force_authenticate(req2, user=self.admin)
+        resp2 = view_col(req2, pk=self.sys_col.id)
+        self.assertEqual(resp2.status_code, 400)
+        self.assertEqual(resp2.data.get("error"), "Cannot clear system columns")
+
+        # 3. delete_rows on system column returns 400
+        view_del_col = ColumnViewSet.as_view({"post": "delete_rows"})
+        req3 = self.factory.post(f"/tables/api/columns/{self.sys_col.id}/delete-rows/")
+        force_authenticate(req3, user=self.admin)
+        resp3 = view_del_col(req3, pk=self.sys_col.id)
+        self.assertEqual(resp3.status_code, 400)
+        self.assertEqual(resp3.data.get("error"), "Cannot delete rows using system column filter")

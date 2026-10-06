@@ -33,6 +33,7 @@ from .services.row_mutation_service import (
     RowValidationError,
 )
 from .services.duplicate_service import TableDuplicateService
+from .services.delete_service import TableDeleteService, DeleteValidationError
 
 def get_table_statistics(table, today_date=None, use_cache=True):
     """
@@ -374,18 +375,11 @@ class TableViewSet(viewsets.ModelViewSet):
             return Response({"error": "No edit access to this table"}, status=status.HTTP_403_FORBIDDEN)
         
         row_ids = request.data.get("row_ids")
-        if row_ids is not None:
-            if not isinstance(row_ids, list):
-                return Response({"error": "row_ids must be a list"}, status=status.HTTP_400_BAD_REQUEST)
-            rows = Row.objects.filter(table=table, id__in=row_ids)
-            count = rows.count()
-            rows.delete()
+        try:
+            count = TableDeleteService.bulk_delete_rows(table, request.user, row_ids=row_ids)
             return Response({"message": f"Successfully deleted {count} rows"}, status=status.HTTP_200_OK)
-        else:
-            rows = Row.objects.filter(table=table)
-            count = rows.count()
-            rows.delete()
-            return Response({"message": f"Successfully deleted {count} rows"}, status=status.HTTP_200_OK)
+        except DeleteValidationError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=["post"], url_path="send-escalation")
     @transaction.atomic
@@ -1386,11 +1380,12 @@ class ColumnViewSet(viewsets.ModelViewSet):
         column = self.get_object()
         if not has_table_access(request.user, column.table, "EDIT"):
             return Response({"error": "No edit access to this table"}, status=status.HTTP_403_FORBIDDEN)
-        if column.is_system_column:
-            return Response({"error": "Cannot clear system columns"}, status=status.HTTP_400_BAD_REQUEST)
         
-        CellValue.objects.filter(column=column).update(value=None)
-        return Response({"message": f"Successfully cleared all values in column {column.name}"}, status=status.HTTP_200_OK)
+        try:
+            TableDeleteService.clear_column_values(column, request.user)
+            return Response({"message": f"Successfully cleared all values in column {column.name}"}, status=status.HTTP_200_OK)
+        except DeleteValidationError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=["post"], url_path="delete-rows")
     @transaction.atomic
@@ -1398,19 +1393,12 @@ class ColumnViewSet(viewsets.ModelViewSet):
         column = self.get_object()
         if not has_table_access(request.user, column.table, "EDIT"):
             return Response({"error": "No edit access to this table"}, status=status.HTTP_403_FORBIDDEN)
-        if column.is_system_column:
-            return Response({"error": "Cannot delete rows using system column filter"}, status=status.HTTP_400_BAD_REQUEST)
         
-        from django.db.models import Q
-        rows = Row.objects.filter(
-            table=column.table,
-            cells__column=column
-        ).exclude(
-            Q(cells__value__isnull=True) | Q(cells__value="")
-        )
-        count = rows.count()
-        rows.delete()
-        return Response({"message": f"Successfully deleted {count} rows containing values in column {column.name}"}, status=status.HTTP_200_OK)
+        try:
+            count = TableDeleteService.delete_rows_by_column(column, request.user)
+            return Response({"message": f"Successfully deleted {count} rows containing values in column {column.name}"}, status=status.HTTP_200_OK)
+        except DeleteValidationError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
     def perform_create(self, serializer):
@@ -1518,7 +1506,7 @@ class RowViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         if not has_table_access(request.user, instance.table, "EDIT"):
             return Response({"error": "No edit access to this table"}, status=status.HTTP_403_FORBIDDEN)
-        self.perform_destroy(instance)
+        TableDeleteService.delete_row(instance, request.user)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @transaction.atomic
