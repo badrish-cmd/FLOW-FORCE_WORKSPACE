@@ -30,7 +30,7 @@
          </button>
     </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <div class="container-fluid pt-1 pb-6 max-w-7xl mx-auto" x-data="spreadsheetApp({{ table.id }})">
     <!-- Global Loading Spinner Overlay -->
     <div x-show="isLoading" 
@@ -468,18 +468,22 @@
                     <i class="fas fa-chevron-down text-[9px] text-slate-400"></i>
                 </button>
                 <div x-show="open" x-transition class="origin-top-left absolute left-0 mt-1 w-56 rounded-xl shadow-xl bg-white border border-slate-200 z-50 p-2 space-y-2" style="display: none;">
-                    <div class="relative">
-                        <input type="text" x-model="search" placeholder="Search PID..." class="w-full bg-slate-50 border border-slate-200 rounded-lg py-1 px-2.5 text-xs focus:ring-1 focus:ring-blue-500">
-                        <i class="fas fa-search absolute right-2.5 top-2 text-slate-400 text-[10px]"></i>
-                    </div>
-                    <ul class="max-h-48 overflow-y-auto divide-y divide-slate-100 text-xs">
-                        <li @click="selectedPidFilter = ''; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-slate-50 cursor-pointer rounded font-medium text-slate-500">
-                            -- All Projects --
-                        </li>
-                        <template x-for="pid in getUniquePids().filter(p => !search || String(p).toLowerCase().includes(search.toLowerCase()))" :key="pid">
-                            <li @click="selectedPidFilter = pid; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-blue-50 cursor-pointer rounded font-medium text-slate-700" x-text="pid"></li>
-                        </template>
-                    </ul>
+                    <template x-if="open">
+                        <div>
+                            <div class="relative mb-2">
+                                <input type="text" x-model="search" placeholder="Search PID..." class="w-full bg-slate-50 border border-slate-200 rounded-lg py-1 px-2.5 text-xs focus:ring-1 focus:ring-blue-500">
+                                <i class="fas fa-search absolute right-2.5 top-2 text-slate-400 text-[10px]"></i>
+                            </div>
+                            <ul class="max-h-48 overflow-y-auto divide-y divide-slate-100 text-xs">
+                                <li @click="selectedPidFilter = ''; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-slate-50 cursor-pointer rounded font-medium text-slate-500">
+                                    -- All Projects --
+                                </li>
+                                <template x-for="pid in getUniquePids().filter(p => !search || String(p).toLowerCase().includes(search.toLowerCase())).slice(0, 100)" :key="pid">
+                                    <li @click="selectedPidFilter = pid; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-blue-50 cursor-pointer rounded font-medium text-slate-700" x-text="pid"></li>
+                                </template>
+                            </ul>
+                        </div>
+                    </template>
                 </div>
             </div>
             {% endif %}
@@ -582,17 +586,21 @@
                         <i class="fas fa-chevron-down text-[9px] text-slate-400"></i>
                     </button>
                     <div x-show="open" x-transition class="origin-top-left absolute left-0 mt-1 w-52 rounded-xl shadow-xl bg-white border border-slate-200 z-50 p-2 space-y-2" style="display: none;">
-                        <div class="relative">
-                            <input type="text" x-model="search" :placeholder="'Search ' + col.name + '...'" class="w-full bg-slate-50 border border-slate-200 rounded-lg py-1 px-2.5 text-xs focus:ring-1 focus:ring-blue-500">
-                            <i class="fas fa-search absolute right-2.5 top-2 text-slate-400 text-[10px]"></i>
-                        </div>
-                        <ul class="max-h-48 overflow-y-auto divide-y divide-slate-100 text-xs">
-                            <li @click="columnFilters[col.id] = ''; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-slate-50 cursor-pointer rounded font-medium text-slate-500" x-text="'-- All ' + col.name + ' --'">
-                            </li>
-                            <template x-for="opt in (uniqueColumnValues[col.id] || []).filter(o => !search || String(o).toLowerCase().includes(search.toLowerCase()))" :key="opt">
-                                <li @click="columnFilters[col.id] = opt; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-blue-50 cursor-pointer rounded font-medium text-slate-700" x-text="opt"></li>
-                            </template>
-                        </ul>
+                        <template x-if="open">
+                            <div>
+                                <div class="relative mb-2">
+                                    <input type="text" x-model="search" :placeholder="'Search ' + col.name + '...'" class="w-full bg-slate-50 border border-slate-200 rounded-lg py-1 px-2.5 text-xs focus:ring-1 focus:ring-blue-500">
+                                    <i class="fas fa-search absolute right-2.5 top-2 text-slate-400 text-[10px]"></i>
+                                </div>
+                                <ul class="max-h-48 overflow-y-auto divide-y divide-slate-100 text-xs">
+                                    <li @click="columnFilters[col.id] = ''; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-slate-50 cursor-pointer rounded font-medium text-slate-500" x-text="'-- All ' + col.name + ' --'">
+                                    </li>
+                                    <template x-for="opt in (uniqueColumnValues[col.id] || []).filter(o => !search || String(o).toLowerCase().includes(search.toLowerCase())).slice(0, 100)" :key="opt">
+                                        <li @click="columnFilters[col.id] = opt; changeFilter(); open = false; search = ''" class="py-1.5 px-2 hover:bg-blue-50 cursor-pointer rounded font-medium text-slate-700" x-text="opt"></li>
+                                    </template>
+                                </ul>
+                            </div>
+                        </template>
                     </div>
                 </div>
             </template>
@@ -2221,6 +2229,10 @@ comments: [],
             },
 
             init() {
+                try {
+                    performance.mark('ff-init-start');
+                } catch(e){}
+
                 // Restore persisted spreadsheet zoom level
                 try {
                     const savedZoom = localStorage.getItem('flowforce_spreadsheet_zoom');
@@ -2240,12 +2252,23 @@ comments: [],
                     this.autoOpenTaskId = parseInt(openTaskId);
                 }
 
+                // 1. CRITICAL PATH: Fetch table rows first (minimal payload, instant usability)
                 this.fetchRows();
-                this.fetchRecipients();
+
+                // 2. NON-CRITICAL PATH: Load statistics, filter options, and secondary metadata asynchronously
+                // Without blocking spreadsheet rendering or user interaction
+                setTimeout(() => {
+                    this.fetchTableStats();
+                    this.fetchRecipients();
+                }, 50);
 
                 this.$watch('showDashboard', value => {
                     if (value) {
-                        this.renderCharts();
+                        if (!this.dashboardStats || !Object.keys(this.dashboardStats).length) {
+                            this.fetchTableStats();
+                        } else {
+                            this.renderCharts();
+                        }
                     }
                 });
 
@@ -2580,8 +2603,9 @@ comments: [],
                     page_size: this.pageSize
                 });
                 
-                const isPaginatingOnly = this.currentPage > 1 && !this.showDashboard;
-                if (!isPaginatingOnly) {
+                // CRITICAL PATH OPTIMIZATION: Do not bundle heavy table-wide statistics with page rows.
+                // Statistics are fetched independently via fetchTableStats() in background.
+                if (this.showDashboard && (!this.dashboardStats || !Object.keys(this.dashboardStats).length)) {
                     params.append('include_stats', 'true');
                 }
                 
@@ -2619,9 +2643,15 @@ comments: [],
                 this.isLoading = true;
                 this._lastFetchQuery = queryStr;
 
+                try { performance.mark('ff-rows-req-start'); } catch(e){}
+
                 fetch(`/tables/api/rows/?${queryStr}`, { signal })
-                    .then(res => res.json())
+                    .then(res => {
+                        try { performance.mark('ff-rows-req-end'); } catch(e){}
+                        return res.json();
+                    })
                     .then(data => {
+                        try { performance.mark('ff-json-parse-end'); } catch(e){}
                         const results = data.results || [];
                         this.totalRows = data.count || 0;
                         
@@ -2632,10 +2662,10 @@ comments: [],
                             return;
                         }
 
-                        this.uniquePids = data.unique_pids || [];
-                        this.uniqueYears = data.unique_years || [];
-                        this.uniqueColumnValues = data.unique_column_values || {};
-                        this.dashboardStats = data.stats || {};
+                        if (data.unique_pids) this.uniquePids = data.unique_pids;
+                        if (data.unique_years) this.uniqueYears = data.unique_years;
+                        if (data.unique_column_values) this.uniqueColumnValues = data.unique_column_values;
+                        if (data.stats) this.dashboardStats = data.stats;
 
                         // Optimize: pre-map cells to a cells_dict lookup and memoize row completion
                         results.forEach(row => {
@@ -2647,8 +2677,22 @@ comments: [],
                             }
                             row._isCompleted = this.isRowCompleted(row);
                         });
+                        try { performance.mark('ff-row-transform-end'); } catch(e){}
+
+                        // Pre-compute job grouping on the new rows BEFORE updating reactive state
+                        this.updateJobGroups(results);
+                        try { performance.mark('ff-job-grouping-end'); } catch(e){}
+
+                        try { performance.mark('ff-render-start'); } catch(e){}
                         this.rows = results;
-                        this.updateJobGroups();
+
+                        this.$nextTick(() => {
+                            try {
+                                performance.mark('ff-render-end');
+                                performance.mark('ff-loading-removed');
+                                this._logPerformanceReport();
+                            } catch(e){}
+                        });
                         
                         if (this.autoOpenTaskId) {
                             const matchingRow = this.rows.find(r => r.task_details && r.task_details.id === this.autoOpenTaskId);
@@ -2690,12 +2734,93 @@ comments: [],
                     });
             },
 
+            fetchTableStats() {
+                if (this._statsFetched) return;
+                this._statsFetched = true;
+
+                fetch(`/tables/api/tables/${this.tableId}/stats/`)
+                    .then(res => {
+                        if (!res.ok) throw new Error('Stats endpoint returned ' + res.status);
+                        return res.json();
+                    })
+                    .then(data => {
+                        if (data.unique_pids) this.uniquePids = data.unique_pids;
+                        if (data.unique_years) this.uniqueYears = data.unique_years;
+                        if (data.unique_column_values) this.uniqueColumnValues = data.unique_column_values;
+                        if (data.dashboard_stats) this.dashboardStats = data.dashboard_stats;
+                        if (this.showDashboard) {
+                            this.renderCharts();
+                        }
+                    })
+                    .catch(err => {
+                        // Fallback: fetch via rows API with page_size=1
+                        fetch(`/tables/api/rows/?table=${this.tableId}&page=1&page_size=1&include_stats=true`)
+                            .then(res => res.json())
+                            .then(data => {
+                                if (data.unique_pids) this.uniquePids = data.unique_pids;
+                                if (data.unique_years) this.uniqueYears = data.unique_years;
+                                if (data.unique_column_values) this.uniqueColumnValues = data.unique_column_values;
+                                if (data.stats) this.dashboardStats = data.stats;
+                                if (this.showDashboard) {
+                                    this.renderCharts();
+                                }
+                            })
+                            .catch(e => console.warn('Secondary stats load failed:', e));
+                    });
+            },
+
             fetchRecipients() {
+                if (this.recipients && this.recipients.length > 0) return;
                 fetch('/tasks/api/tasks/recipients/')
                     .then(res => res.json())
                     .then(data => {
                         this.recipients = data;
-                    });
+                    })
+                    .catch(e => console.warn('Recipients fetch failed:', e));
+            },
+
+            _logPerformanceReport() {
+                try {
+                    const navEntry = (typeof performance !== 'undefined' && performance.getEntriesByType)
+                        ? performance.getEntriesByType('navigation')[0]
+                        : null;
+                    const navStart = navEntry ? navEntry.startTime : 0;
+                    const getMark = (name) => {
+                        const entries = performance.getEntriesByName(name);
+                        return entries.length ? entries[entries.length - 1].startTime : null;
+                    };
+                    const initStart = getMark('ff-init-start');
+                    const reqStart = getMark('ff-rows-req-start');
+                    const reqEnd = getMark('ff-rows-req-end');
+                    const jsonEnd = getMark('ff-json-parse-end');
+                    const transformEnd = getMark('ff-row-transform-end');
+                    const groupEnd = getMark('ff-job-grouping-end');
+                    const renderStart = getMark('ff-render-start');
+                    const renderEnd = getMark('ff-render-end');
+                    const loadingRemoved = getMark('ff-loading-removed');
+
+                    if (reqStart && renderEnd) {
+                        const initSec = initStart !== null ? ((initStart - navStart) / 1000).toFixed(2) : '0.00';
+                        const reqSec = ((reqEnd - reqStart) / 1000).toFixed(2);
+                        const jsonSec = ((jsonEnd - reqEnd) / 1000).toFixed(2);
+                        const transformSec = ((transformEnd - jsonEnd) / 1000).toFixed(2);
+                        const groupSec = ((groupEnd - transformEnd) / 1000).toFixed(2);
+                        const renderSec = ((renderEnd - renderStart) / 1000).toFixed(2);
+                        const totalSec = ((loadingRemoved - navStart) / 1000).toFixed(2);
+
+                        console.log('=== FLOWFORCE SPREADSHEET PERFORMANCE METRICS ===');
+                        console.log(`Navigation to Init:     ${initSec}s`);
+                        console.log(`Rows API:               ${reqSec}s`);
+                        console.log(`JSON processing:        ${jsonSec}s`);
+                        console.log(`Row transformation:     ${transformSec}s`);
+                        console.log(`Grouping:               ${groupSec}s`);
+                        console.log(`Rendering:              ${renderSec}s`);
+                        console.log(`TOTAL usable:           ${totalSec}s`);
+                        console.log('=================================================');
+                    }
+                } catch(e) {
+                    console.debug('Performance report log error:', e);
+                }
             },
 
             submitFlagIssue() {
@@ -2875,10 +3000,10 @@ comments: [],
                 return String(val).trim();
             },
 
-            updateJobGroups() {
+            updateJobGroups(candidateRows = null) {
                 this._jobGroups = {};
                 const jobCol = this.getJobColumnName();
-                const visibleRows = this.filteredRows() || [];
+                const visibleRows = candidateRows || this.filteredRows() || [];
                 const n = visibleRows.length;
                 if (!jobCol || n === 0) return;
 

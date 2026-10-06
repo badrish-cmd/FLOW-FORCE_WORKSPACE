@@ -367,6 +367,28 @@ class TableViewSet(viewsets.ModelViewSet):
             )
 
 
+    @action(detail=True, methods=["get"], url_path="stats")
+    def stats(self, request, pk=None):
+        table = self.get_object_or_404(pk)
+        if not has_table_access(request.user, table, "VIEW"):
+            return Response({"error": "No view access to this table"}, status=status.HTTP_403_FORBIDDEN)
+        stats_data = TableStatisticsService.get_table_statistics(table)
+        return Response({
+            'unique_pids': stats_data['unique_pids'],
+            'unique_years': stats_data['unique_years'],
+            'unique_column_values': stats_data['unique_column_values'],
+            'stats': {
+                'status_counts': stats_data['status_counts'],
+                'priority_counts': stats_data['priority_counts'],
+                'project_counts': stats_data['project_counts'],
+                'due_today_count': stats_data['due_today_count'],
+                'overdue_count': stats_data['overdue_count'],
+                'total_qty': stats_data['total_qty'],
+                'completion_stats': stats_data['completion_stats'],
+                'week_actuals': stats_data['week_actuals'],
+            }
+        }, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=["post"], url_path="bulk-delete-rows")
     @transaction.atomic
     def bulk_delete_rows(self, request, pk=None):
