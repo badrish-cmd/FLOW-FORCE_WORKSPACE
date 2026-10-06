@@ -3292,6 +3292,88 @@ class SpreadsheetFrontendPerformanceRegressionTestCase(TestCase):
         self.assertEqual(len(data["results"]), 2)
         self.assertEqual(data["count"], 4)
 
+    def test_spreadsheet_html_loading_overlay_and_submission_guards(self):
+        """Verifies table_spreadsheet.html contains robust loading overlay cleanup, fetchRows force support, and submission guards."""
+        self.client.force_login(self.admin)
+        response = self.client.get(f"/tables/{self.table.id}/")
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode("utf-8")
+
+        # Verify state guards exist
+        self.assertIn("isSubmittingRow: false", html)
+        self.assertIn("_isFetchingRows: false", html)
+
+        # Verify button is disabled during submission to prevent duplicates
+        self.assertIn(':disabled="isSubmittingRow"', html)
+
+        # Verify fetchRows supports forced refreshes and decouples _isFetchingRows
+        self.assertIn("fetchRows(force = false)", html)
+        self.assertIn("!force && this._isFetchingRows && this._lastFetchQuery === queryStr", html)
+
+        # Verify try/finally cleanup exists in submitInlineRow, saveRecordModal, and saveRowEdit
+        self.assertIn("this.isSubmittingRow = false;", html)
+        self.assertIn("this.isLoading = false;", html)
+
+    def test_row_create_api_success_and_immediate_persistence(self):
+        """Verifies POST /tables/api/rows/ successfully saves the row and task without requiring a page refresh."""
+        self.client.force_login(self.admin)
+        create_resp = self.client.post(
+            "/tables/api/rows/",
+            data={
+                "table": self.table.id,
+                "cells": {
+                    "TASK_NAME": "Brand New Submitted Task",
+                    "DUE_DATE": "2026-10-30",
+                    "JOB_NUMBER": "JOB-999"
+                }
+            },
+            content_type="application/json"
+        )
+        self.assertEqual(create_resp.status_code, 201)
+        created_data = create_resp.json()
+        new_row_id = created_data["id"]
+
+        # Verify row immediately exists in DB and is retrievable via GET /tables/api/rows/
+        fetch_resp = self.client.get(f"/tables/api/rows/?table={self.table.id}")
+        self.assertEqual(fetch_resp.status_code, 200)
+        fetch_data = fetch_resp.json()
+        saved_row = next((r for r in fetch_data["results"] if r["id"] == new_row_id), None)
+        self.assertIsNotNone(saved_row, "Newly created row must be retrievable via rows API immediately")
+
+    def test_row_create_api_validation_and_permission_failure(self):
+        """Verifies validation and permission failures return 400 and 403 respectively with descriptive errors."""
+        # Permission failure: user without edit permissions
+        unauth_user = User.objects.create_user(
+            email="noaccess@flow-force.com",
+            password="testpassword",
+            full_name="No Access User",
+            role="EMPLOYEE",
+            status="APPROVED"
+        )
+        self.client.force_login(unauth_user)
+        perm_resp = self.client.post(
+            "/tables/api/rows/",
+            data={"table": self.table.id, "cells": {"TASK_NAME": "Fail Task"}},
+            content_type="application/json"
+        )
+        self.assertEqual(perm_resp.status_code, 403)
+        self.assertIn("error", perm_resp.json())
+
+        # Validation failure: invalid date format on GENERAL table
+        general_table = Table.objects.create(name="General Test Table", job_type="GENERAL", created_by=self.admin)
+        TableAccess.objects.create(table=general_table, user=self.admin, access_level="ADMIN")
+        Column.objects.create(table=general_table, name="DUE_DATE", data_type="DATE", position=1)
+        Column.objects.create(table=general_table, name="TASK_NAME", data_type="TEXT", position=2)
+
+        self.client.force_login(self.admin)
+        val_resp = self.client.post(
+            "/tables/api/rows/",
+            data={"table": general_table.id, "cells": {"TASK_NAME": "Invalid Date Task", "DUE_DATE": "invalid-date"}},
+            content_type="application/json"
+        )
+        self.assertEqual(val_resp.status_code, 400)
+        self.assertIn("error", val_resp.json())
+
 
 class TableStatisticsServiceTestCase(TestCase):
     def setUp(self):

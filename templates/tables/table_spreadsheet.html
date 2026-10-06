@@ -1039,8 +1039,10 @@
                           </td>
                           {% endfor %}
                           <td class="px-4 py-2 whitespace-nowrap text-xs">
-                              <button @click="submitInlineRow" class="h-8 inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-3.5 text-xs font-semibold shadow-xs transition-all">
-                                  <i class="fas fa-check text-[11px]"></i> Save
+                              <button @click="submitInlineRow" :disabled="isSubmittingRow" :class="isSubmittingRow ? 'opacity-50 cursor-not-allowed' : ''" class="h-8 inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-3.5 text-xs font-semibold shadow-xs transition-all">
+                                  <i class="fas fa-check text-[11px]" x-show="!isSubmittingRow"></i>
+                                  <i class="fas fa-spinner fa-spin text-[11px]" x-show="isSubmittingRow"></i>
+                                  <span>Save</span>
                               </button>
                           </td>
                       </tr>
@@ -2024,6 +2026,7 @@
             recordFormValues: {},
             recordModalErrors: {},
             isSubmittingRecord: false,
+            isSubmittingRow: false,
             isEditTableModalOpen: false,
             activeDrawerTab: 'properties',
             editTableName: '{{ table.name|escapejs }}',
@@ -2039,6 +2042,7 @@
             autoOpenTaskId: null,
             isSavingCell: false,
             isLoading: false,
+            _isFetchingRows: false,
             _cachedJobColName: undefined,
             _colConfigs: {},
             _dateColMap: {},
@@ -2596,7 +2600,7 @@ comments: [],
                  });
              },
 
-            fetchRows() {
+            fetchRows(force = false) {
                 const params = new URLSearchParams({
                     table: this.tableId,
                     page: this.currentPage,
@@ -2628,9 +2632,9 @@ comments: [],
                 });
 
                 const queryStr = params.toString();
-                // Deduplicate if identical request is currently active
-                if (this.isLoading && this._lastFetchQuery === queryStr) {
-                    return;
+                // Deduplicate if identical fetch is actively in flight and not forced
+                if (!force && this._isFetchingRows && this._lastFetchQuery === queryStr) {
+                    return Promise.resolve();
                 }
 
                 // Abort any pending fetch to prevent race conditions and redundant work
@@ -2640,12 +2644,13 @@ comments: [],
                 this._fetchAbortController = new AbortController();
                 const signal = this._fetchAbortController.signal;
 
+                this._isFetchingRows = true;
                 this.isLoading = true;
                 this._lastFetchQuery = queryStr;
 
                 try { performance.mark('ff-rows-req-start'); } catch(e){}
 
-                fetch(`/tables/api/rows/?${queryStr}`, { signal })
+                return fetch(`/tables/api/rows/?${queryStr}`, { signal })
                     .then(res => {
                         try { performance.mark('ff-rows-req-end'); } catch(e){}
                         return res.json();
@@ -2658,8 +2663,7 @@ comments: [],
                         // Self-healing: if current page is out of bounds due to deletion, redirect to new last page
                         if (results.length === 0 && this.totalRows > 0 && this.currentPage > this.totalPages()) {
                             this.currentPage = this.totalPages();
-                            this.fetchRows();
-                            return;
+                            return this.fetchRows(true);
                         }
 
                         if (data.unique_pids) this.uniquePids = data.unique_pids;
@@ -2728,6 +2732,7 @@ comments: [],
                         console.error('Failed to fetch rows:', err);
                     })
                     .finally(() => {
+                        this._isFetchingRows = false;
                         if (this._lastFetchQuery === queryStr) {
                             this.isLoading = false;
                         }
@@ -3109,13 +3114,15 @@ comments: [],
                  })
                  .then(res => {
                      if (res.ok) {
-                         this.fetchRows();
+                         this.fetchRows(true);
                      } else {
                          alert("Error updating checkbox.");
-                         this.isLoading = false;
                      }
                  })
                  .catch(err => {
+                     console.error("Error updating checkbox:", err);
+                 })
+                 .finally(() => {
                      this.isLoading = false;
                  });
              },
@@ -3140,38 +3147,39 @@ comments: [],
                 this.updateJobGroups();
             },
 
-            saveRowEdit() {
+            async saveRowEdit() {
                 if (this.rowEditingRowId === null) return;
                 const rowId = this.rowEditingRowId;
                 this.isLoading = true;
                 
-                fetch(`/tables/api/rows/${rowId}/edit-row/`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': '{{ csrf_token }}'
-                    },
-                    body: JSON.stringify({
-                        cells: this.editingRowValues
-                    })
-                })
-                .then(res => {
+                try {
+                    const res = await fetch(`/tables/api/rows/${rowId}/edit-row/`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': '{{ csrf_token }}'
+                        },
+                        body: JSON.stringify({
+                            cells: this.editingRowValues
+                        })
+                    });
+
                     if (res.ok) {
-                        this.fetchRows();
+                        await this.fetchRows(true);
                     } else {
-                        alert("Error saving row changes.");
-                        this.isLoading = false;
+                        const data = await res.json().catch(() => ({}));
+                        alert(data.error || "Error saving row changes.");
                     }
-                })
-                .catch(err => {
-                    this.isLoading = false;
-                })
-                .finally(() => {
+                } catch (err) {
+                    console.error("Error saving row changes:", err);
+                    alert("An error occurred while saving row changes.");
+                } finally {
                     this.cancelRowEdit();
-                });
+                    this.isLoading = false;
+                }
             },
 
-            saveCell() {
+            async saveCell() {
                 if (this.editingRowId === null || this.isSavingCell) return;
                 this.isSavingCell = true;
                 this.isLoading = true;
@@ -3180,31 +3188,32 @@ comments: [],
                 const colId = this.editingColumnId;
                 const val = this.editingValue;
 
-                fetch(`/tables/api/rows/${rowId}/edit-cell/`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': '{{ csrf_token }}'
-                    },
-                    body: JSON.stringify({
-                        column: colId,
-                        value: val
-                    })
-                })
-                .then(res => {
+                try {
+                    const res = await fetch(`/tables/api/rows/${rowId}/edit-cell/`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': '{{ csrf_token }}'
+                        },
+                        body: JSON.stringify({
+                            column: colId,
+                            value: val
+                        })
+                    });
+
                     if (res.ok) {
-                        this.fetchRows();
+                        await this.fetchRows(true);
                     } else {
-                        this.isLoading = false;
+                        const data = await res.json().catch(() => ({}));
+                        console.error("Error updating cell:", data.error);
                     }
-                })
-                .catch(err => {
-                    this.isLoading = false;
-                })
-                .finally(() => {
+                } catch (err) {
+                    console.error("Network error updating cell:", err);
+                } finally {
                     this.isSavingCell = false;
                     this.cancelEdit();
-                });
+                    this.isLoading = false;
+                }
             },
 
             // Drag and Fill Methods
@@ -3246,9 +3255,11 @@ comments: [],
                          });
                      });
  
-                     Promise.all(promises).then(() => {
-                         this.fetchRows();
-                     }).catch(() => {
+                     Promise.all(promises).then(async () => {
+                         await this.fetchRows(true);
+                     }).catch(err => {
+                         console.error("Error in bulk edit range:", err);
+                     }).finally(() => {
                          this.isLoading = false;
                      });
                  }
@@ -3267,7 +3278,8 @@ comments: [],
                 return currentIdx >= Math.min(startIdx, endIdx) && currentIdx <= Math.max(startIdx, endIdx);
             },
 
-            submitInlineRow() {
+            async submitInlineRow() {
+                if (this.isSubmittingRow) return;
                 const isSales = '{{ table.job_type }}' === 'SALES';
                 const isListPid = '{{ table.job_type }}' === 'LIST_PID';
                 const isPersonal = '{{ table.job_type }}' === 'PERSONAL';
@@ -3314,21 +3326,23 @@ comments: [],
                     this.newRowCells['PID'] = this.selectedPidFilter;
                 }
 
+                this.isSubmittingRow = true;
                 this.isLoading = true;
-                fetch('/tables/api/rows/', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': '{{ csrf_token }}'
-                    },
-                    body: JSON.stringify({
-                        table: this.tableId,
-                        cells: this.newRowCells
-                    })
-                })
-                .then(res => {
+
+                try {
+                    const res = await fetch('/tables/api/rows/', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': '{{ csrf_token }}'
+                        },
+                        body: JSON.stringify({
+                            table: this.tableId,
+                            cells: this.newRowCells
+                        })
+                    });
+
                     if (res.ok) {
-                        this.fetchRows();
                         // Reset form fields
                         if (isSales) {
                             this.newRowCells = {
@@ -3372,41 +3386,42 @@ comments: [],
                                 DUE_DATE: ''
                             };
                         }
+                        await this.fetchRows(true);
                     } else {
-                        alert("Error saving row. Verify inputs.");
-                        this.isLoading = false;
+                        const data = await res.json().catch(() => ({}));
+                        alert(data.error || "Error saving row. Verify inputs.");
                     }
-                })
-                .catch(err => {
+                } catch (err) {
+                    console.error("Error submitting row:", err);
+                    alert("An error occurred while saving row.");
+                } finally {
+                    this.isSubmittingRow = false;
                     this.isLoading = false;
-                });
+                }
             },
 
-            deleteRow(rowId) {
+            async deleteRow(rowId) {
                 if (!confirm("Are you sure you want to delete this row?")) return;
                 this.isLoading = true;
-                fetch(`/tables/api/rows/${rowId}/`, {
-                    method: 'DELETE',
-                    headers: {
-                        'X-CSRFToken': '{{ csrf_token }}'
-                    }
-                })
-                .then(res => {
+                try {
+                    const res = await fetch(`/tables/api/rows/${rowId}/`, {
+                        method: 'DELETE',
+                        headers: {
+                            'X-CSRFToken': '{{ csrf_token }}'
+                        }
+                    });
+
                     if (res.ok) {
-                        this.fetchRows();
+                        await this.fetchRows(true);
                     } else {
-                        res.json().then(data => {
-                            alert(data.error || "Failed to delete row.");
-                        }).catch(() => {
-                            alert("Failed to delete row (Permission Denied).");
-                        });
-                        this.isLoading = false;
+                        const data = await res.json().catch(() => ({}));
+                        alert(data.error || "Failed to delete row (Permission Denied).");
                     }
-                })
-                .catch(err => {
+                } catch (err) {
                     alert("An error occurred: " + err);
+                } finally {
                     this.isLoading = false;
-                });
+                }
             },
 
             // Helper methods for Text Box / Multiline columns
@@ -3647,14 +3662,16 @@ comments: [],
                 .then(res => {
                     if (res.ok) {
                         this.isEditColumnModalOpen = false;
-                        this.fetchRows();
+                        this.fetchRows(true);
                         alert("Column data cleared successfully!");
                     } else {
                         res.json().then(data => alert(data.error || "Error clearing column values."));
-                        this.isLoading = false;
                     }
                 })
                 .catch(err => {
+                    console.error("Error clearing column values:", err);
+                })
+                .finally(() => {
                     this.isLoading = false;
                 });
             },
@@ -3673,14 +3690,16 @@ comments: [],
                 .then(res => {
                     if (res.ok) {
                         this.isEditColumnModalOpen = false;
-                        this.fetchRows();
+                        this.fetchRows(true);
                         alert("Rows deleted successfully!");
                     } else {
                         res.json().then(data => alert(data.error || "Error deleting rows."));
-                        this.isLoading = false;
                     }
                 })
                 .catch(err => {
+                    console.error("Error deleting rows by column:", err);
+                })
+                .finally(() => {
                     this.isLoading = false;
                 });
             },
@@ -3759,14 +3778,15 @@ comments: [],
                     if (result.status === 200) {
                         alert(result.data.message);
                         this.selectedRowIds = [];
-                        this.fetchRows();
+                        this.fetchRows(true);
                     } else {
                         alert(result.data.error || "Failed to bulk update status.");
-                        this.isLoading = false;
                     }
                 })
                 .catch(err => {
                     alert("An error occurred: " + err);
+                })
+                .finally(() => {
                     this.isLoading = false;
                 });
             },
@@ -3848,17 +3868,19 @@ comments: [],
                     if (res.ok) {
                         alert("Bulk delete completed successfully!");
                         this.selectedRowIds = [];
-                        this.fetchRows();
+                        this.fetchRows(true);
                     } else {
                         res.json().then(data => {
                             alert(data.error || "Failed to perform bulk delete.");
                         }).catch(() => {
                             alert("Failed to perform bulk delete.");
                         });
-                        this.isLoading = false;
                     }
                 })
                 .catch(err => {
+                    console.error("Error in bulk delete rows:", err);
+                })
+                .finally(() => {
                     this.isLoading = false;
                 });
             },
@@ -3896,17 +3918,19 @@ comments: [],
                 .then(res => {
                     if (res.ok) {
                         alert("Bulk update completed successfully!");
-                        this.fetchRows();
+                        this.fetchRows(true);
                     } else {
                         res.json().then(data => {
                             alert(data.error || "Failed to perform bulk update.");
                         }).catch(() => {
                             alert("Failed to perform bulk update.");
                         });
-                        this.isLoading = false;
                     }
                 })
                 .catch(err => {
+                    console.error("Error in bulk update:", err);
+                })
+                .finally(() => {
                     this.isLoading = false;
                 });
             },
@@ -3953,18 +3977,17 @@ comments: [],
                     if (result.status === 201) {
                         alert(result.data.message);
                         this.isImportModalOpen = false;
-                        this.fetchRows();
+                        this.fetchRows(true);
                     } else {
                         alert(result.data.error || "Failed to import CSV");
-                        this.isLoading = false;
                     }
                 })
                 .catch(err => {
                     alert("An error occurred: " + err);
-                    this.isLoading = false;
                 })
                 .finally(() => {
                     this.isImporting = false;
+                    this.isLoading = false;
                 });
             },
 
@@ -4000,18 +4023,17 @@ comments: [],
                     if (result.status === 201) {
                         alert(result.data.message);
                         this.isImportModalOpen = false;
-                        this.fetchRows();
+                        this.fetchRows(true);
                     } else {
                         alert(result.data.error || "Failed to import Google Sheet");
-                        this.isLoading = false;
                     }
                 })
                 .catch(err => {
                     alert("An error occurred: " + err);
-                    this.isLoading = false;
                 })
                 .finally(() => {
                     this.isImporting = false;
+                    this.isLoading = false;
                 });
             },
 
@@ -4171,7 +4193,7 @@ comments: [],
                             this.salesDiscussedPoints = '';
                             this.salesNextFollowUpDate = '';
                             this.salesStatus = 'IN_PROGRESS';
-                            this.fetchRows();
+                            this.fetchRows(true);
                             res.json().then(updatedTask => {
                                 this.activeRow.task_details = updatedTask;
                                 this.activeTaskStatus = updatedTask.status;
@@ -4233,7 +4255,7 @@ comments: [],
                 })
                 .then(res => {
                     if (res.ok) {
-                        this.fetchRows();
+                        this.fetchRows(true);
                     }
                 });
             },
@@ -4264,7 +4286,7 @@ comments: [],
                                 this.activeRow = updatedRow;
                                 this.activeTaskStatus = updatedRow.task_details ? updatedRow.task_details.status : newStatus;
                             }
-                            this.fetchRows();
+                            this.fetchRows(true);
                         });
                     } else {
                         // Fallback to task update-status if available
@@ -4278,7 +4300,7 @@ comments: [],
                                 body: JSON.stringify({ status: newStatus })
                             }).then(r => {
                                 if (r.ok) {
-                                    this.fetchRows();
+                                    this.fetchRows(true);
                                 } else {
                                     alert("Failed to update completion status.");
                                 }
@@ -4366,18 +4388,19 @@ comments: [],
                             alert(data.message || "Escalation emails queued successfully!");
                         });
                         this.selectedRowIds = [];
-                        this.fetchRows();
+                        this.fetchRows(true);
                     } else {
                         res.json().then(data => {
                             alert(data.error || "Failed to send escalation emails.");
                         }).catch(() => {
                             alert("Failed to send escalation emails.");
                         });
-                        this.isLoading = false;
                     }
                 })
                 .catch(err => {
                     alert("An error occurred: " + err);
+                })
+                .finally(() => {
                     this.isLoading = false;
                 });
             },
@@ -4451,7 +4474,7 @@ comments: [],
                 this.recordModalErrors = {};
             },
 
-            saveRecordModal() {
+            async saveRecordModal() {
                 const isSales = '{{ table.job_type }}' === 'SALES';
                 const isListPid = '{{ table.job_type }}' === 'LIST_PID';
                 const isPersonal = '{{ table.job_type }}' === 'PERSONAL';
@@ -4495,74 +4518,59 @@ comments: [],
                 this.isSubmittingRecord = true;
                 this.isLoading = true;
 
-                if (this.recordModalMode === 'CREATE') {
-                    if (this.selectedPidFilter && !this.recordFormValues['PID']) {
-                        this.recordFormValues['PID'] = this.selectedPidFilter;
+                try {
+                    if (this.recordModalMode === 'CREATE') {
+                        if (this.selectedPidFilter && !this.recordFormValues['PID']) {
+                            this.recordFormValues['PID'] = this.selectedPidFilter;
+                        }
+
+                        const res = await fetch('/tables/api/rows/', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRFToken': '{{ csrf_token }}'
+                            },
+                            body: JSON.stringify({
+                                table: this.tableId,
+                                cells: this.recordFormValues
+                            })
+                        });
+
+                        if (res.ok) {
+                            this.closeRecordModal();
+                            await this.fetchRows(true);
+                        } else {
+                            const data = await res.json().catch(() => ({}));
+                            alert(data.error || 'Failed to create record. Please check inputs.');
+                        }
+                    } else if (this.recordModalMode === 'EDIT') {
+                        if (!this.activeModalRow) return;
+                        const rowId = this.activeModalRow.id;
+
+                        const res = await fetch(`/tables/api/rows/${rowId}/edit-row/`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRFToken': '{{ csrf_token }}'
+                            },
+                            body: JSON.stringify({
+                                cells: this.recordFormValues
+                            })
+                        });
+
+                        if (res.ok) {
+                            this.closeRecordModal();
+                            await this.fetchRows(true);
+                        } else {
+                            const data = await res.json().catch(() => ({}));
+                            alert(data.error || 'Failed to update record.');
+                        }
                     }
-
-                    fetch('/tables/api/rows/', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRFToken': '{{ csrf_token }}'
-                        },
-                        body: JSON.stringify({
-                            table: this.tableId,
-                            cells: this.recordFormValues
-                        })
-                    })
-                    .then(res => {
-                        if (res.ok) {
-                            this.closeRecordModal();
-                            this.fetchRows();
-                        } else {
-                            res.json().then(data => {
-                                alert(data.error || 'Failed to create record. Please check inputs.');
-                            }).catch(() => {
-                                alert('Error creating record.');
-                            });
-                        }
-                    })
-                    .catch(err => {
-                        alert('Network error: ' + err);
-                    })
-                    .finally(() => {
-                        this.isSubmittingRecord = false;
-                        this.isLoading = false;
-                    });
-                } else if (this.recordModalMode === 'EDIT') {
-                    if (!this.activeModalRow) return;
-                    const rowId = this.activeModalRow.id;
-
-                    fetch(`/tables/api/rows/${rowId}/edit-row/`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRFToken': '{{ csrf_token }}'
-                        },
-                        body: JSON.stringify({
-                            cells: this.recordFormValues
-                        })
-                    })
-                    .then(res => {
-                        if (res.ok) {
-                            this.closeRecordModal();
-                            this.fetchRows();
-                        } else {
-                            res.json().then(data => {
-                                alert(data.error || 'Failed to update record.');
-                            }).catch(() => {
-                                alert('Error updating record.');
-                            });
-                        }
-                    })
-                    .catch(err => {
-                        alert('Network error: ' + err);
-                    })
-                    .finally(() => {
-                        this.isSubmittingRecord = false;
-                        this.isLoading = false;
-                    });
+                } catch (err) {
+                    alert('Network error: ' + err);
+                } finally {
+                    this.isSubmittingRecord = false;
+                    this.isLoading = false;
                 }
             },
         };
