@@ -23,6 +23,12 @@ from .delete_service import (
     DeleteValidationError,
     DeletePermissionDeniedError,
 )
+from .import_service import (
+    TableImportService,
+    TableImportError,
+    TableImportValidationError,
+    TableImportPermissionDeniedError,
+)
 
 __all__ = [
     "TableStatisticsService",
@@ -43,4 +49,8 @@ __all__ = [
     "DeleteError",
     "DeleteValidationError",
     "DeletePermissionDeniedError",
+    "TableImportService",
+    "TableImportError",
+    "TableImportValidationError",
+    "TableImportPermissionDeniedError",
 ]

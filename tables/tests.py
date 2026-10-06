@@ -4505,3 +4505,329 @@ class TableDeleteServiceTestCase(TestCase):
         resp3 = view_del_col(req3, pk=self.sys_col.id)
         self.assertEqual(resp3.status_code, 400)
         self.assertEqual(resp3.data.get("error"), "Cannot delete rows using system column filter")
+
+
+class TableImportServiceTest(TestCase):
+    """
+    Dedicated test suite for TableImportService extraction (Phase 3E-3).
+    Verifies header normalization, strict PID mapping, date parsing,
+    multiline parsing, atomic rollback, and API equivalence.
+    """
+
+    def setUp(self):
+        from rest_framework.test import APIRequestFactory
+        self.factory = APIRequestFactory()
+        self.dept = Department.objects.create(name="Import Test Dept", slug="import-test-dept")
+        self.admin = User.objects.create_user(
+            email="importadmin@flow-force.com",
+            password="testpassword",
+            full_name="Import Admin",
+            role="ADMIN",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.employee = User.objects.create_user(
+            email="importemp@flow-force.com",
+            password="testpassword",
+            full_name="Import Employee",
+            role="EMPLOYEE",
+            department=self.dept,
+            status="APPROVED"
+        )
+        self.table = Table.objects.create(name="Standard Tasks Table", created_by=self.admin)
+        TableAccess.objects.create(table=self.table, user=self.admin, access_level="ADMIN")
+
+    def test_normal_csv_import(self):
+        from tables.services.import_service import TableImportService
+        csv_data = (
+            "S_NO,DATE,DUE_DATE,TASK_NAME,INITIAL_MAIL,ALERT_MAIL\n"
+            "1,2026-06-22,2026-06-30,Normal Task Alpha,NO,NO\n"
+            "2,2026-06-23,2026-07-01,Normal Task Beta,YES,NO\n"
+        )
+        created_rows, err = TableImportService.import_rows_from_csv_data(
+            file_data=csv_data,
+            table=self.table,
+            user=self.admin,
+        )
+        self.assertIsNone(err)
+        self.assertEqual(len(created_rows), 2)
+        self.assertEqual(Row.objects.filter(table=self.table).count(), 2)
+
+        tasks = list(Task.objects.filter(row__table=self.table).order_by('id'))
+        self.assertEqual(len(tasks), 2)
+        self.assertEqual(tasks[0].task_name, "Normal Task Alpha")
+        self.assertEqual(tasks[1].task_name, "Normal Task Beta")
+        self.assertEqual(tasks[0].due_date, datetime.date(2026, 6, 30))
+        self.assertFalse(tasks[0].initial_mail_sent)
+        self.assertTrue(tasks[1].initial_mail_sent)
+
+    def test_quoted_multiline_csv(self):
+        from tables.services.import_service import TableImportService
+        csv_data = (
+            'S_NO,DATE,DUE_DATE,TASK_NAME,INITIAL_MAIL,ALERT_MAIL\n'
+            '1,2026-06-22,2026-06-30,"First line task\nSecond line details",NO,NO\n'
+            '2,2026-06-23,2026-07-01,"Single line",NO,NO\n'
+        )
+        created_rows, err = TableImportService.import_rows_from_csv_data(
+            file_data=csv_data,
+            table=self.table,
+            user=self.admin,
+        )
+        self.assertIsNone(err)
+        self.assertEqual(len(created_rows), 2)
+
+        tasks = list(Task.objects.filter(row__table=self.table).order_by('id'))
+        self.assertEqual(len(tasks), 2)
+        self.assertEqual(tasks[0].task_name, "First line task\nSecond line details")
+        self.assertEqual(tasks[1].task_name, "Single line")
+
+    def test_normalized_headers(self):
+        from tables.services.import_service import TableImportService
+        csv_data = (
+            "  S. No.  , Date , Due-Date ,  Task Name  , Initial Mail , Alert Mail \n"
+            "1,2026-06-22,2026-06-30,Spaced Header Task,NO,NO\n"
+        )
+        created_rows, err = TableImportService.import_rows_from_csv_data(
+            file_data=csv_data,
+            table=self.table,
+            user=self.admin,
+        )
+        self.assertIsNone(err)
+        self.assertEqual(len(created_rows), 1)
+
+        task = Task.objects.filter(row__table=self.table).first()
+        self.assertIsNotNone(task)
+        self.assertEqual(task.task_name, "Spaced Header Task")
+        self.assertEqual(task.due_date, datetime.date(2026, 6, 30))
+
+    def test_strict_pid_mapping_and_blank_enquiry(self):
+        from tables.services.import_service import TableImportService
+        pid_table = Table.objects.create(
+            name="PID Specific Table",
+            created_by=self.admin,
+            job_type="LIST_PID"
+        )
+        TableAccess.objects.create(table=pid_table, user=self.admin, access_level="ADMIN")
+
+        # CSV with PID column but NO enquiry column
+        csv_data = (
+            "PID,COMPANY_NAME,DUE_DATE_FLOW_FORCE\n"
+            "PID-9999,Acme Industrial,2026-08-15\n"
+        )
+        created_rows, err = TableImportService.import_rows_from_csv_data(
+            file_data=csv_data,
+            table=pid_table,
+            user=self.admin,
+        )
+        self.assertIsNone(err)
+        self.assertEqual(len(created_rows), 1)
+
+        row = created_rows[0]
+        col_pid = pid_table.columns.get(name="PID")
+        col_enq = pid_table.columns.get(name="ENQUIRY_NO/QUOTATION_NO")
+
+        cell_pid = CellValue.objects.filter(row=row, column=col_pid).first()
+        cell_enq = CellValue.objects.filter(row=row, column=col_enq).first()
+
+        # PID must strictly map to PID
+        self.assertIsNotNone(cell_pid)
+        self.assertEqual(cell_pid.value, "PID-9999")
+
+        # Enquiry must NOT take the PID value
+        enquiry_val = cell_enq.value if cell_enq else ""
+        self.assertNotEqual(enquiry_val, "PID-9999")
+        self.assertEqual(enquiry_val, "")
+
+    def test_extra_source_columns_ignored(self):
+        from tables.services.import_service import TableImportService
+        csv_data = (
+            "S_NO,TASK_NAME,DUE_DATE,EXTRA_COL_1,EXTRA_COL_2\n"
+            "1,Extra Column Task,2026-06-30,IgnoredValue1,IgnoredValue2\n"
+        )
+        created_rows, err = TableImportService.import_rows_from_csv_data(
+            file_data=csv_data,
+            table=self.table,
+            user=self.admin,
+        )
+        self.assertIsNone(err)
+        self.assertEqual(len(created_rows), 1)
+        task = Task.objects.filter(row__table=self.table).first()
+        self.assertEqual(task.task_name, "Extra Column Task")
+
+    def test_missing_destination_columns_remain_empty(self):
+        from tables.services.import_service import TableImportService
+        # Add a custom column to the table that is absent in the CSV
+        custom_col = Column.objects.create(table=self.table, name="REMARKS", data_type="TEXT")
+
+        csv_data = (
+            "S_NO,TASK_NAME,DUE_DATE\n"
+            "1,Missing Dest Task,2026-06-30\n"
+        )
+        created_rows, err = TableImportService.import_rows_from_csv_data(
+            file_data=csv_data,
+            table=self.table,
+            user=self.admin,
+        )
+        self.assertIsNone(err)
+        self.assertEqual(len(created_rows), 1)
+
+        cell = CellValue.objects.filter(row=created_rows[0], column=custom_col).first()
+        self.assertIsNone(cell)
+
+    def test_safe_parse_date(self):
+        from tables.services.import_service import TableImportService
+        # 1. Excel serial date
+        d1 = TableImportService.safe_parse_date("45443")
+        self.assertEqual(d1, datetime.date(2024, 5, 31))
+
+        # 2. 8-digit numeric date YYYYMMDD
+        d2 = TableImportService.safe_parse_date("20260715")
+        self.assertEqual(d2, datetime.date(2026, 7, 15))
+
+        # 3. ISO format
+        d3 = TableImportService.safe_parse_date("2026-10-06")
+        self.assertEqual(d3, datetime.date(2026, 10, 6))
+
+        # 4. Regional dayfirst
+        d4 = TableImportService.safe_parse_date("25/12/2026")
+        self.assertEqual(d4, datetime.date(2026, 12, 25))
+
+        # 5. Invalid / empty returns None
+        self.assertIsNone(TableImportService.safe_parse_date(""))
+        self.assertIsNone(TableImportService.safe_parse_date(None))
+        self.assertIsNone(TableImportService.safe_parse_date("invalid-date-string"))
+
+    def test_s_no_generation_continuity(self):
+        from tables.services.import_service import TableImportService
+        # Create an existing row with S_NO = 10
+        s_no_col = self.table.columns.get(name="S_NO")
+        existing_row = Row.objects.create(table=self.table, created_by=self.admin)
+        CellValue.objects.create(row=existing_row, column=s_no_col, value=10, updated_by=self.admin)
+
+        csv_data = (
+            "TASK_NAME,DUE_DATE\n"
+            "Continued S_NO Task 1,2026-06-30\n"
+            "Continued S_NO Task 2,2026-07-01\n"
+        )
+        created_rows, err = TableImportService.import_rows_from_csv_data(
+            file_data=csv_data,
+            table=self.table,
+            user=self.admin,
+        )
+        self.assertIsNone(err)
+        self.assertEqual(len(created_rows), 2)
+
+        s_no_1 = CellValue.objects.get(row=created_rows[0], column=s_no_col).value
+        s_no_2 = CellValue.objects.get(row=created_rows[1], column=s_no_col).value
+        self.assertEqual(s_no_1, 11)
+        self.assertEqual(s_no_2, 12)
+
+    def test_assignee_resolution(self):
+        from tables.services.import_service import TableImportService
+        # Create an ASSIGNED_TO column
+        col_assign = Column.objects.create(table=self.table, name="ASSIGNED_TO", data_type="USER")
+
+        csv_data = (
+            f"S_NO,TASK_NAME,ASSIGNED_TO\n"
+            f"1,Assigned Task,{self.employee.email}\n"
+        )
+        created_rows, err = TableImportService.import_rows_from_csv_data(
+            file_data=csv_data,
+            table=self.table,
+            user=self.admin,
+        )
+        self.assertIsNone(err)
+        task = Task.objects.filter(row=created_rows[0]).first()
+        self.assertIsNotNone(task)
+        self.assertIn(self.employee, task.assigned_to.all())
+
+    def test_list_pid_import_auto_assignees_and_filter(self):
+        from tables.services.import_service import TableImportService
+        pid_table = Table.objects.create(
+            name="PID Filter Table",
+            created_by=self.admin,
+            job_type="LIST_PID"
+        )
+        TableAccess.objects.create(table=pid_table, user=self.admin, access_level="ADMIN")
+        TableAccess.objects.create(table=pid_table, user=self.employee, access_level="EDIT")
+
+        csv_data = (
+            "PID,COMPANY_NAME,DUE_DATE_FLOW_FORCE\n"
+            "PID-101,Global Tech,2026-08-15\n"
+            "PID-102,Apex Corp,2026-08-16\n"
+        )
+        created_rows, err = TableImportService.import_rows_from_csv_data(
+            file_data=csv_data,
+            table=pid_table,
+            user=self.admin,
+        )
+        self.assertIsNone(err)
+        self.assertEqual(len(created_rows), 2)
+
+        # In LIST_PID, employees with table access are assigned to all rows
+        task = Task.objects.filter(row=created_rows[0]).first()
+        assignees = list(task.assigned_to.all())
+        self.assertIn(self.employee, assignees)
+
+        # COMPANY_NAME column should be converted to DROPDOWN with filter options
+        company_col = pid_table.columns.get(name="COMPANY_NAME")
+        self.assertEqual(company_col.data_type, "DROPDOWN")
+        self.assertTrue(company_col.is_filterable)
+        self.assertIn("Global Tech", company_col.options)
+        self.assertIn("Apex Corp", company_col.options)
+
+    def test_atomic_rollback_on_failure(self):
+        from tables.services.import_service import TableImportService
+        from unittest.mock import patch
+
+        csv_data = (
+            "S_NO,TASK_NAME,DUE_DATE\n"
+            "1,Fail Task 1,2026-06-30\n"
+            "2,Fail Task 2,2026-07-01\n"
+        )
+
+        with patch("tables.models.CellValue.objects.bulk_create", side_effect=RuntimeError("Simulated DB Crash")):
+            with self.assertRaises(RuntimeError):
+                TableImportService.import_rows_from_csv_data(
+                    file_data=csv_data,
+                    table=self.table,
+                    user=self.admin,
+                )
+
+        # Clean rollback: zero rows created
+        self.assertEqual(Row.objects.filter(table=self.table).count(), 0)
+
+    def test_existing_api_behavior_preserved(self):
+        from tables.views import TableViewSet
+        from rest_framework.test import force_authenticate
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        view = TableViewSet.as_view({"post": "import_csv"})
+
+        # 1. Success case
+        csv_content = (
+            "S_NO,DATE,DUE_DATE,TASK_NAME,INITIAL_MAIL,ALERT_MAIL\n"
+            "1,2026-06-22,2026-06-30,API Imported Task,NO,NO\n"
+        )
+        csv_file = SimpleUploadedFile("test.csv", csv_content.encode("utf-8"), content_type="text/csv")
+        req = self.factory.post(
+            f"/tables/api/tables/{self.table.id}/import-csv/",
+            {"file": csv_file},
+            format="multipart"
+        )
+        force_authenticate(req, user=self.admin)
+        resp = view(req, pk=self.table.id)
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertIn("Successfully imported 1 rows", resp.data.get("message"))
+
+        # 2. No file provided error case
+        req_empty = self.factory.post(
+            f"/tables/api/tables/{self.table.id}/import-csv/",
+            {},
+            format="multipart"
+        )
+        force_authenticate(req_empty, user=self.admin)
+        resp_empty = view(req_empty, pk=self.table.id)
+        self.assertEqual(resp_empty.status_code, 400)
+        self.assertEqual(resp_empty.data.get("error"), "No CSV file provided")
