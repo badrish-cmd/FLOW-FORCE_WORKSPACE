@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load static %}
 
 {% block title %}{{ table.name }} - Flow-Force Workspace{% endblock %}
 
@@ -31,6 +32,7 @@
     </div>
 
 <script defer src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="{% static 'js/table_websocket.js' %}"></script>
 <div class="container-fluid pt-1 pb-6 max-w-7xl mx-auto" x-data="spreadsheetApp({{ table.id }})">
     <!-- Global Loading Spinner Overlay -->
     <div x-show="isLoading" 
@@ -70,6 +72,22 @@
             </span>
             <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
                 {{ table.job_type }}
+            </span>
+            <!-- Real-time Live Connection Indicator -->
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium transition-all"
+                  :class="{
+                      'bg-emerald-50 text-emerald-700 border border-emerald-200/80': wsStatus === 'connected',
+                      'bg-amber-50 text-amber-700 border border-amber-200/80': wsStatus === 'reconnecting' || wsStatus === 'connecting',
+                      'bg-slate-100 text-slate-500 border border-slate-200': wsStatus === 'offline'
+                  }"
+                  :title="wsStatus === 'connected' ? 'Real-time live updates connected' : (wsStatus === 'reconnecting' ? 'Reconnecting to real-time updates...' : (wsStatus === 'connecting' ? 'Connecting to real-time updates...' : 'Real-time updates offline'))">
+                <span class="w-1.5 h-1.5 rounded-full"
+                      :class="{
+                          'bg-emerald-500 animate-pulse': wsStatus === 'connected',
+                          'bg-amber-500 animate-ping': wsStatus === 'reconnecting' || wsStatus === 'connecting',
+                          'bg-slate-400': wsStatus === 'offline'
+                      }"></span>
+                <span x-text="wsStatus === 'connected' ? 'Live' : (wsStatus === 'reconnecting' ? 'Reconnecting...' : (wsStatus === 'connecting' ? 'Connecting...' : 'Offline'))"></span>
             </span>
         </div>
 
@@ -2042,6 +2060,8 @@
             autoOpenTaskId: null,
             isSavingCell: false,
             isLoading: false,
+            wsClient: null,
+            wsStatus: 'offline',
             _isFetchingRows: false,
             _cachedJobColName: undefined,
             _colConfigs: {},
@@ -2264,6 +2284,7 @@ comments: [],
                 setTimeout(() => {
                     this.fetchTableStats();
                     this.fetchRecipients();
+                    this.initWebSocket();
                 }, 50);
 
                 this.$watch('showDashboard', value => {
@@ -4572,6 +4593,291 @@ comments: [],
                     this.isSubmittingRecord = false;
                     this.isLoading = false;
                 }
+            },
+
+            // -----------------------------------------------------------------
+            // Real-Time WebSocket Handlers (PHASE REALTIME-4)
+            // -----------------------------------------------------------------
+            initWebSocket() {
+                if (this.wsClient) return;
+
+                if (typeof TableWebSocketClient === 'undefined') {
+                    console.warn('[TableWebSocket] TableWebSocketClient class not found; skipping WebSocket init.');
+                    return;
+                }
+
+                this.wsClient = new TableWebSocketClient({
+                    tableId: this.tableId,
+                    onStatusChange: (status) => {
+                        this.wsStatus = status;
+                    },
+                    onEvent: (payload) => {
+                        this.handleWebSocketEvent(payload);
+                    }
+                });
+
+                this.wsClient.connect();
+
+                window.addEventListener('beforeunload', () => {
+                    if (this.wsClient) {
+                        this.wsClient.destroy();
+                    }
+                });
+            },
+
+            handleWebSocketEvent(payload) {
+                if (!payload || !payload.event) return;
+                if (payload.table_id && parseInt(payload.table_id) !== parseInt(this.tableId)) return;
+
+                switch (payload.event) {
+                    case 'cell_updated':
+                        this._handleCellUpdated(payload);
+                        break;
+                    case 'task_status_changed':
+                        this._handleTaskStatusChanged(payload);
+                        break;
+                    case 'task_reassigned':
+                        this._handleTaskReassigned(payload);
+                        break;
+                    case 'row_updated':
+                    case 'task_updated':
+                        this._handleRowUpdated(payload);
+                        break;
+                    case 'row_created':
+                    case 'task_created':
+                        this._handleRowCreated(payload);
+                        break;
+                    case 'row_deleted':
+                    case 'task_deleted':
+                        this._handleRowDeleted(payload);
+                        break;
+                    case 'rows_updated':
+                    case 'rows_deleted':
+                    case 'table_import_completed':
+                        this._handleBatchUpdated(payload);
+                        break;
+                    default:
+                        break;
+                }
+            },
+
+            _handleCellUpdated(payload) {
+                const row = this.rows.find(r => r.id === payload.row_id);
+                if (!row) return;
+
+                // Handle stale out-of-order events
+                if (row._lastEventTimestamp && payload.timestamp && payload.timestamp < row._lastEventTimestamp) {
+                    return;
+                }
+                row._lastEventTimestamp = payload.timestamp;
+
+                // Do not overwrite cell if actively edited by user in inline cell editor
+                if (this.editingRowId === row.id && this.editingColumnId === payload.column_id) {
+                    return;
+                }
+
+                if (!row.cells_dict) row.cells_dict = {};
+                row.cells_dict[payload.column_name] = payload.value;
+
+                if (row.cells) {
+                    const c = row.cells.find(cell => cell.column_id === payload.column_id || cell.column_name === payload.column_name);
+                    if (c) {
+                        c.value = payload.value;
+                    } else {
+                        row.cells.push({
+                            column_id: payload.column_id,
+                            column_name: payload.column_name,
+                            value: payload.value
+                        });
+                    }
+                }
+
+                if (payload.column_name && payload.column_name.toUpperCase() === 'STATUS') {
+                    if (row.task_details) row.task_details.status = payload.value;
+                    row._isCompleted = this.isRowCompleted(row);
+                    if (this.activeRow && this.activeRow.id === row.id) {
+                        this.activeTaskStatus = payload.value;
+                    }
+                }
+
+                if (this.activeRow && this.activeRow.id === row.id) {
+                    this.activeRow = row;
+                }
+
+                this.updateJobGroups();
+            },
+
+            _handleTaskStatusChanged(payload) {
+                const row = this.rows.find(r => (payload.row_id && r.id === payload.row_id) || (r.task_details && r.task_details.id === payload.task_id));
+                if (!row) return;
+
+                if (row._lastEventTimestamp && payload.timestamp && payload.timestamp < row._lastEventTimestamp) {
+                    return;
+                }
+                row._lastEventTimestamp = payload.timestamp;
+
+                if (!row.cells_dict) row.cells_dict = {};
+                row.cells_dict['STATUS'] = payload.new_status;
+
+                if (row.cells) {
+                    const c = row.cells.find(cell => cell.column_name && cell.column_name.toUpperCase() === 'STATUS');
+                    if (c) c.value = payload.new_status;
+                }
+
+                if (row.task_details) {
+                    row.task_details.status = payload.new_status;
+                }
+
+                row._isCompleted = this.isRowCompleted(row);
+
+                if (this.activeRow && (this.activeRow.id === row.id || (this.activeRow.task_details && this.activeRow.task_details.id === payload.task_id))) {
+                    this.activeTaskStatus = payload.new_status;
+                }
+
+                this.updateJobGroups();
+            },
+
+            _handleTaskReassigned(payload) {
+                const row = this.rows.find(r => (payload.row_id && r.id === payload.row_id) || (r.task_details && r.task_details.id === payload.task_id));
+                if (!row) return;
+
+                if (row._lastEventTimestamp && payload.timestamp && payload.timestamp < row._lastEventTimestamp) {
+                    return;
+                }
+                row._lastEventTimestamp = payload.timestamp;
+
+                if (row.task_details) {
+                    row.task_details.assigned_to = payload.assigned_to || [];
+                }
+
+                if (this.activeRow && this.activeRow.id === row.id && this.activeRow.task_details) {
+                    this.activeRow.task_details.assigned_to = payload.assigned_to || [];
+                }
+            },
+
+            _handleRowDeleted(payload) {
+                const idx = this.rows.findIndex(r => (payload.row_id && r.id === payload.row_id) || (payload.task_id && r.task_details && r.task_details.id === payload.task_id));
+                if (idx === -1) return;
+
+                if (payload.event === 'row_deleted') {
+                    const deletedRow = this.rows.splice(idx, 1)[0];
+                    this.totalRows = Math.max(0, (this.totalRows || 1) - 1);
+                    if (this.activeRow && this.activeRow.id === deletedRow.id) {
+                        this.activeRow = null;
+                    }
+                    if (this.selectedRowIds && this.selectedRowIds.includes(deletedRow.id)) {
+                        this.selectedRowIds = this.selectedRowIds.filter(id => id !== deletedRow.id);
+                    }
+                    this.updateJobGroups();
+                } else if (payload.event === 'task_deleted') {
+                    if (this.rows[idx]) {
+                        this.rows[idx].task_details = null;
+                    }
+                    if (this.activeRow && this.activeRow.id === payload.row_id) {
+                        this.activeRow.task_details = null;
+                    }
+                }
+            },
+
+            _handleRowUpdated(payload) {
+                const row = this.rows.find(r => (payload.row_id && r.id === payload.row_id) || (payload.task_id && r.task_details && r.task_details.id === payload.task_id));
+                if (!row) return;
+
+                // Skip background overwrite if user is actively editing this row in inline editor
+                if (this.editingRowId === row.id || this.rowEditingRowId === row.id) {
+                    return;
+                }
+
+                const targetRowId = row.id;
+                fetch(`/tables/api/rows/${targetRowId}/`)
+                    .then(res => {
+                        if (!res.ok) return null;
+                        return res.json();
+                    })
+                    .then(updatedRow => {
+                        if (!updatedRow) return;
+                        const currentIdx = this.rows.findIndex(r => r.id === targetRowId);
+                        if (currentIdx !== -1) {
+                            this._prepareRowData(updatedRow);
+                            this.rows[currentIdx] = updatedRow;
+                            if (this.activeRow && this.activeRow.id === targetRowId) {
+                                this.activeRow = updatedRow;
+                                if (updatedRow.task_details) {
+                                    this.activeTaskStatus = updatedRow.task_details.status;
+                                }
+                            }
+                            this.updateJobGroups();
+                        }
+                    })
+                    .catch(() => {});
+            },
+
+            _handleRowCreated(payload) {
+                const targetRowId = payload.row_id;
+                if (!targetRowId) return;
+
+                // Duplicate prevention: never add if already present in state
+                if (this.rows.some(r => r.id === targetRowId || (payload.task_id && r.task_details && r.task_details.id === payload.task_id))) {
+                    return;
+                }
+
+                this.totalRows = (this.totalRows || 0) + 1;
+
+                // Only insert into visible DOM list if viewing page 1 without heavy pagination offset
+                if (this.currentPage === 1) {
+                    fetch(`/tables/api/rows/${targetRowId}/`)
+                        .then(res => {
+                            if (!res.ok) return null;
+                            return res.json();
+                        })
+                        .then(newRow => {
+                            if (!newRow) return;
+                            // Re-verify duplicate check
+                            if (this.rows.some(r => r.id === newRow.id)) return;
+                            this._prepareRowData(newRow);
+                            if (this._rowMatchesFilters(newRow)) {
+                                this.rows.unshift(newRow);
+                                if (this.pageSize && this.rows.length > this.pageSize) {
+                                    this.rows.pop();
+                                }
+                                this.updateJobGroups();
+                            }
+                        })
+                        .catch(() => {});
+                }
+            },
+
+            _handleBatchUpdated(payload) {
+                // If user is actively editing, don't interrupt with batch refresh
+                if (this.editingRowId !== null || this.rowEditingRowId !== null || this.isSubmittingRecord || this.isSubmittingRow) {
+                    return;
+                }
+                this.fetchRows(true);
+                this.fetchTableStats();
+            },
+
+            _prepareRowData(row) {
+                row.cells_dict = {};
+                if (row.cells) {
+                    row.cells.forEach(c => {
+                        row.cells_dict[c.column_name] = c.value;
+                    });
+                }
+                row._isCompleted = this.isRowCompleted(row);
+                return row;
+            },
+
+            _rowMatchesFilters(row) {
+                if (this.selectedPidFilter && row.cells_dict && row.cells_dict['PID'] !== this.selectedPidFilter) {
+                    return false;
+                }
+                if (this.searchQuery) {
+                    const q = this.searchQuery.toLowerCase();
+                    const matchCell = row.cells && row.cells.some(c => c.value && String(c.value).toLowerCase().includes(q));
+                    const matchTask = row.task_details && row.task_details.title && row.task_details.title.toLowerCase().includes(q);
+                    if (!matchCell && !matchTask) return false;
+                }
+                return true;
             },
         };
     }
