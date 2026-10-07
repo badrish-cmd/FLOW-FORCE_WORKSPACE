@@ -176,3 +176,14 @@ class HelpViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "help.html")
         self.assertContains(response, "Help & User Guide")
+
+    def test_help_page_contains_support_contacts(self):
+        self.client.login(username="help.tester@flow-force.com", password="testpassword123")
+        response = self.client.get(self.help_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'href="mailto:automation@flow-force.com"')
+        self.assertContains(response, 'href="mailto:operations@flow-force.com"')
+        self.assertContains(response, "Automation Support")
+        self.assertContains(response, "Operations Support")
+        self.assertContains(response, "Dukungan Otomasi")
+        self.assertContains(response, "Dukungan Operasional")
