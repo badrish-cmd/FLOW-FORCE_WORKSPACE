@@ -13,6 +13,7 @@ from tasks.models import Task
 from auth_app.models import EmployeeUser
 from tables.permissions import has_table_access, get_employees_with_table_access
 from tables.services.statistics_service import TableStatisticsService
+from .broadcaster import TableEventBroadcaster
 
 logger = logging.getLogger(__name__)
 
@@ -651,6 +652,13 @@ class TableImportService:
 
         # Invalidate table statistics cache
         TableStatisticsService.invalidate_cache(table.id)
+
+        # Broadcast batch table import completed event on transaction commit
+        TableEventBroadcaster.broadcast_table_import_completed(
+            table_id=table.id,
+            imported_rows=len(created_rows),
+            user=user
+        )
 
         return created_rows, None
 

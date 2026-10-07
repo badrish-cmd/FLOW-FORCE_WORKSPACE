@@ -65,10 +65,12 @@ class TableEventConsumer(AsyncWebsocketConsumer):
 
     async def table_event(self, event):
         """
-        Minimal safe group event handler for future phases.
-        Forwards the event payload to the connected client.
+        Receives table group messages dispatched by broadcast publishers.
+        Forwards the event payload to the connected WebSocket client.
         """
-        payload = event.get("data", event.get("payload", {}))
+        payload = event.get("data", event.get("payload"))
+        if payload is None:
+            payload = {k: v for k, v in event.items() if k != "type"}
         if isinstance(payload, str):
             await self.send(text_data=payload)
         else:

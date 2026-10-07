@@ -29,6 +29,7 @@ from .import_service import (
     TableImportValidationError,
     TableImportPermissionDeniedError,
 )
+from .broadcaster import TableEventBroadcaster
 
 __all__ = [
     "TableStatisticsService",
@@ -53,4 +54,5 @@ __all__ = [
     "TableImportError",
     "TableImportValidationError",
     "TableImportPermissionDeniedError",
+    "TableEventBroadcaster",
 ]

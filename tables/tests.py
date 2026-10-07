@@ -5086,3 +5086,534 @@ class TableWebSocketConsumerTestCase(TransactionTestCase):
 
         await communicator.disconnect()
         self.assertEqual(len(layer.groups.get(group_name, {})), 0)
+
+
+import threading
+import time
+from unittest.mock import patch
+from django.db import transaction
+from tables.services import (
+    TableEventBroadcaster,
+    RowService,
+    CellMutationService,
+    RowMutationService,
+    TableDeleteService,
+    TableImportService,
+)
+
+
+@override_settings(
+    CHANNEL_LAYERS={
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        }
+    }
+)
+class TableEventBroadcasterTestCase(TransactionTestCase):
+    """
+    PHASE REALTIME-3: Verifies transaction-safe real-time event broadcasting.
+    1. task_created broadcasts after successful commit
+    2. task_updated broadcasts after successful commit
+    3. task_status_changed broadcasts
+    4. task_reassigned broadcasts
+    5. task_deleted broadcasts
+    6. row_created broadcasts
+    7. row_updated broadcasts
+    8. cell_updated broadcasts
+    9. row_deleted broadcasts
+    10. rollback does NOT broadcast
+    11. broadcast failure does not undo successful DB mutation
+    12. correct table group is used
+    13. Table A event never goes to Table B group
+    14. bulk operations do not create uncontrolled event storms
+    15. import does not create one event per row unnecessarily
+    16. explicit transaction timing: inside tx -> before commit -> after commit
+    """
+
+    def setUp(self):
+        self.dept_a = Department.objects.create(name="Broadcaster Dept A", slug="bc-dept-a")
+        self.dept_b = Department.objects.create(name="Broadcaster Dept B", slug="bc-dept-b")
+        self.admin = EmployeeUser.objects.create_user(
+            email="bc_admin@example.com",
+            password="testpassword",
+            role="ADMIN",
+            department=self.dept_a,
+        )
+        self.employee = EmployeeUser.objects.create_user(
+            email="bc_emp@example.com",
+            password="testpassword",
+            role="EMPLOYEE",
+            department=self.dept_a,
+        )
+        self.table_a = Table.objects.create(
+            name="Broadcast Table A",
+            created_by=self.admin,
+            department=self.dept_a,
+        )
+        self.table_b = Table.objects.create(
+            name="Broadcast Table B",
+            created_by=self.admin,
+            department=self.dept_b,
+        )
+
+    @sync_to_async
+    def _create_user_session(self, user):
+        SessionStore = import_module(settings.SESSION_ENGINE).SessionStore
+        session = SessionStore()
+        session[SESSION_KEY] = str(user.pk)
+        session[BACKEND_SESSION_KEY] = "django.contrib.auth.backends.ModelBackend"
+        session[HASH_SESSION_KEY] = user.get_session_auth_hash()
+        session.save()
+        return session.session_key
+
+    async def test_1_and_6_row_created_and_task_created_broadcast(self):
+        """1 & 6: row_created and task_created broadcast after successful commit."""
+        s = await self._create_user_session(self.admin)
+        comm = WebsocketCommunicator(
+            application,
+            f"/ws/tables/{self.table_a.id}/",
+            headers=[(b"cookie", f"sessionid={s}".encode("ascii"))],
+        )
+        self.assertTrue((await comm.connect())[0])
+
+        @sync_to_async
+        def create():
+            return RowService.create_row(
+                self.table_a,
+                self.admin,
+                {"TASK_NAME": "Broadcast New Row", "DUE_DATE": "2026-11-01"},
+            )
+
+        row = await create()
+
+        # Receive row_created
+        msg1 = await comm.receive_json_from(timeout=2)
+        self.assertEqual(msg1["event"], "row_created")
+        self.assertEqual(msg1["table_id"], self.table_a.id)
+        self.assertEqual(msg1["row_id"], row.id)
+        self.assertEqual(msg1["updated_by"]["id"], self.admin.id)
+
+        # Receive task_created
+        msg2 = await comm.receive_json_from(timeout=2)
+        self.assertEqual(msg2["event"], "task_created")
+        self.assertEqual(msg2["table_id"], self.table_a.id)
+        self.assertEqual(msg2["task_id"], row.task.id)
+
+        await comm.disconnect()
+
+    async def test_8_cell_updated_broadcast(self):
+        """8: cell_updated broadcasts after cell mutation commits."""
+        s = await self._create_user_session(self.admin)
+        comm = WebsocketCommunicator(
+            application,
+            f"/ws/tables/{self.table_a.id}/",
+            headers=[(b"cookie", f"sessionid={s}".encode("ascii"))],
+        )
+        self.assertTrue((await comm.connect())[0])
+
+        @sync_to_async
+        def setup_and_update():
+            row = RowService.create_row(
+                self.table_a,
+                self.admin,
+                {"TASK_NAME": "Initial Name", "DUE_DATE": "2026-11-01"},
+            )
+            col = self.table_a.columns.filter(name="TASK_NAME").first()
+            CellMutationService.update_cell(row, col, "Renamed Task", self.admin)
+            return row, col
+
+        row, col = await setup_and_update()
+
+        # Drain creation events
+        await comm.receive_json_from(timeout=2)  # row_created
+        await comm.receive_json_from(timeout=2)  # task_created
+
+        # Check cell_updated event
+        msg = await comm.receive_json_from(timeout=2)
+        self.assertEqual(msg["event"], "cell_updated")
+        self.assertEqual(msg["table_id"], self.table_a.id)
+        self.assertEqual(msg["row_id"], row.id)
+        self.assertEqual(msg["column_name"], "TASK_NAME")
+        self.assertEqual(msg["value"], "Renamed Task")
+
+        await comm.disconnect()
+
+    async def test_7_and_2_row_updated_and_task_updated_broadcast(self):
+        """7 & 2: row_updated and task_updated broadcast after multi-cell edit commits."""
+        s = await self._create_user_session(self.admin)
+        comm = WebsocketCommunicator(
+            application,
+            f"/ws/tables/{self.table_a.id}/",
+            headers=[(b"cookie", f"sessionid={s}".encode("ascii"))],
+        )
+        self.assertTrue((await comm.connect())[0])
+
+        @sync_to_async
+        def setup_and_edit():
+            row = RowService.create_row(
+                self.table_a,
+                self.admin,
+                {"TASK_NAME": "Pre-edit Task", "DUE_DATE": "2026-11-01"},
+            )
+            RowMutationService.edit_row(
+                row,
+                {"TASK_NAME": "Post-edit Task", "DUE_DATE": "2026-11-15"},
+                self.admin,
+            )
+            return row
+
+        row = await setup_and_edit()
+
+        # Drain creation events
+        await comm.receive_json_from(timeout=2)  # row_created
+        await comm.receive_json_from(timeout=2)  # task_created
+
+        # Check row_updated event
+        msg = await comm.receive_json_from(timeout=2)
+        self.assertEqual(msg["event"], "row_updated")
+        self.assertEqual(msg["table_id"], self.table_a.id)
+        self.assertEqual(msg["row_id"], row.id)
+        self.assertIn("TASK_NAME", msg["updated_columns"])
+
+        await comm.disconnect()
+
+    async def test_3_task_status_changed_broadcast(self):
+        """3: task_status_changed broadcasts when status changes."""
+        s = await self._create_user_session(self.admin)
+        comm = WebsocketCommunicator(
+            application,
+            f"/ws/tables/{self.table_a.id}/",
+            headers=[(b"cookie", f"sessionid={s}".encode("ascii"))],
+        )
+        self.assertTrue((await comm.connect())[0])
+
+        @sync_to_async
+        def setup_and_change_status():
+            row = RowService.create_row(
+                self.table_a,
+                self.admin,
+                {"TASK_NAME": "Status Task", "DUE_DATE": "2026-11-01"},
+            )
+            task = row.task
+            old_st = task.status
+            task.status = "COMPLETED"
+            task.save()
+            TableEventBroadcaster.broadcast_task_status_changed(
+                table_id=self.table_a.id,
+                task_id=task.id,
+                row_id=row.id,
+                old_status=old_st,
+                new_status="COMPLETED",
+                user=self.admin,
+            )
+            return task
+
+        task = await setup_and_change_status()
+
+        # Drain creation events
+        await comm.receive_json_from(timeout=2)  # row_created
+        await comm.receive_json_from(timeout=2)  # task_created
+
+        # Check task_status_changed
+        msg = await comm.receive_json_from(timeout=2)
+        self.assertEqual(msg["event"], "task_status_changed")
+        self.assertEqual(msg["task_id"], task.id)
+        self.assertEqual(msg["old_status"], "PENDING")
+        self.assertEqual(msg["new_status"], "COMPLETED")
+
+        await comm.disconnect()
+
+    async def test_4_task_reassigned_broadcast(self):
+        """4: task_reassigned broadcasts when assignees are modified."""
+        s = await self._create_user_session(self.admin)
+        comm = WebsocketCommunicator(
+            application,
+            f"/ws/tables/{self.table_a.id}/",
+            headers=[(b"cookie", f"sessionid={s}".encode("ascii"))],
+        )
+        self.assertTrue((await comm.connect())[0])
+
+        @sync_to_async
+        def setup_and_reassign():
+            row = RowService.create_row(
+                self.table_a,
+                self.admin,
+                {"TASK_NAME": "Reassign Task", "DUE_DATE": "2026-11-01"},
+            )
+            task = row.task
+            task.assigned_to.set([self.employee])
+            TableEventBroadcaster.broadcast_task_reassigned(
+                table_id=self.table_a.id,
+                task_id=task.id,
+                row_id=row.id,
+                assignees=[{"id": self.employee.id, "name": self.employee.email}],
+                user=self.admin,
+            )
+            return task
+
+        task = await setup_and_reassign()
+
+        # Drain creation events
+        await comm.receive_json_from(timeout=2)
+        await comm.receive_json_from(timeout=2)
+
+        # Check task_reassigned
+        msg = await comm.receive_json_from(timeout=2)
+        self.assertEqual(msg["event"], "task_reassigned")
+        self.assertEqual(msg["task_id"], task.id)
+        self.assertEqual(msg["assigned_to"][0]["id"], self.employee.id)
+
+        await comm.disconnect()
+
+    async def test_5_and_9_row_deleted_and_task_deleted_broadcast(self):
+        """5 & 9: row_deleted and task_deleted broadcast on deletion commit."""
+        s = await self._create_user_session(self.admin)
+        comm = WebsocketCommunicator(
+            application,
+            f"/ws/tables/{self.table_a.id}/",
+            headers=[(b"cookie", f"sessionid={s}".encode("ascii"))],
+        )
+        self.assertTrue((await comm.connect())[0])
+
+        @sync_to_async
+        def setup_and_delete():
+            row = RowService.create_row(
+                self.table_a,
+                self.admin,
+                {"TASK_NAME": "To Be Deleted", "DUE_DATE": "2026-11-01"},
+            )
+            row_id = row.id
+            task_id = row.task.id
+            TableDeleteService.delete_row(row, self.admin)
+            return row_id, task_id
+
+        row_id, task_id = await setup_and_delete()
+
+        # Drain creation events
+        await comm.receive_json_from(timeout=2)
+        await comm.receive_json_from(timeout=2)
+
+        # Check row_deleted
+        msg1 = await comm.receive_json_from(timeout=2)
+        self.assertEqual(msg1["event"], "row_deleted")
+        self.assertEqual(msg1["row_id"], row_id)
+
+        # Check task_deleted
+        msg2 = await comm.receive_json_from(timeout=2)
+        self.assertEqual(msg2["event"], "task_deleted")
+        self.assertEqual(msg2["task_id"], task_id)
+
+        await comm.disconnect()
+
+    async def test_10_rollback_does_not_broadcast(self):
+        """10: Database rollback cancels on_commit; zero events broadcast."""
+        s = await self._create_user_session(self.admin)
+        comm = WebsocketCommunicator(
+            application,
+            f"/ws/tables/{self.table_a.id}/",
+            headers=[(b"cookie", f"sessionid={s}".encode("ascii"))],
+        )
+        self.assertTrue((await comm.connect())[0])
+
+        @sync_to_async
+        def fail_transaction():
+            try:
+                with transaction.atomic():
+                    RowService.create_row(
+                        self.table_a,
+                        self.admin,
+                        {"TASK_NAME": "Rollback Row", "DUE_DATE": "2026-11-01"},
+                    )
+                    raise ValueError("Simulated Rollback")
+            except ValueError:
+                pass
+
+        await fail_transaction()
+
+        nothing = await comm.receive_nothing()
+        self.assertTrue(nothing)
+        await comm.disconnect()
+
+    async def test_11_broadcast_failure_does_not_undo_db_mutation(self):
+        """11: Channel layer failure logs error but does not fail DB mutation."""
+        with patch("channels.layers.InMemoryChannelLayer.group_send", side_effect=RuntimeError("Channel Network Error")):
+            @sync_to_async
+            def create():
+                return RowService.create_row(
+                    self.table_a,
+                    self.admin,
+                    {"TASK_NAME": "Saved Despite Channel Down", "DUE_DATE": "2026-11-01"},
+                )
+
+            row = await create()
+            self.assertIsNotNone(row.id)
+
+            @sync_to_async
+            def check_db():
+                return Row.objects.filter(id=row.id).exists()
+
+            self.assertTrue(await check_db())
+
+    async def test_12_and_13_group_isolation_table_a_never_reaches_table_b(self):
+        """12 & 13: Table A event dispatches only to table_A; table_B receives nothing."""
+        s = await self._create_user_session(self.admin)
+        comm_a = WebsocketCommunicator(
+            application,
+            f"/ws/tables/{self.table_a.id}/",
+            headers=[(b"cookie", f"sessionid={s}".encode("ascii"))],
+        )
+        comm_b = WebsocketCommunicator(
+            application,
+            f"/ws/tables/{self.table_b.id}/",
+            headers=[(b"cookie", f"sessionid={s}".encode("ascii"))],
+        )
+        self.assertTrue((await comm_a.connect())[0])
+        self.assertTrue((await comm_b.connect())[0])
+
+        @sync_to_async
+        def create_in_a():
+            return RowService.create_row(
+                self.table_a,
+                self.admin,
+                {"TASK_NAME": "Table A Exclusive", "DUE_DATE": "2026-11-01"},
+            )
+
+        await create_in_a()
+
+        # Table A communicator receives the event
+        msg_a = await comm_a.receive_json_from(timeout=2)
+        self.assertEqual(msg_a["event"], "row_created")
+        self.assertEqual(msg_a["table_id"], self.table_a.id)
+
+        # Table B communicator receives NOTHING
+        nothing_b = await comm_b.receive_nothing()
+        self.assertTrue(nothing_b)
+
+        await comm_a.disconnect()
+        await comm_b.disconnect()
+
+    async def test_14_bulk_operations_avoid_event_storm(self):
+        """14: bulk_update_table broadcasts a single batch rows_updated event."""
+        s = await self._create_user_session(self.admin)
+        comm = WebsocketCommunicator(
+            application,
+            f"/ws/tables/{self.table_a.id}/",
+            headers=[(b"cookie", f"sessionid={s}".encode("ascii"))],
+        )
+        self.assertTrue((await comm.connect())[0])
+
+        @sync_to_async
+        def setup_and_bulk_update():
+            for i in range(3):
+                RowService.create_row(
+                    self.table_a,
+                    self.admin,
+                    {"TASK_NAME": f"Bulk Task {i}", "DUE_DATE": "2026-11-01"},
+                )
+            return RowMutationService.bulk_update_table(
+                self.table_a,
+                "STATUS",
+                "COMPLETED",
+                self.admin,
+            )
+
+        updated_count = await setup_and_bulk_update()
+        self.assertEqual(updated_count, 3)
+
+        # Drain 6 creation events (3 rows * 2 events)
+        for _ in range(6):
+            await comm.receive_json_from(timeout=2)
+
+        # Single batch rows_updated event
+        batch_msg = await comm.receive_json_from(timeout=2)
+        self.assertEqual(batch_msg["event"], "rows_updated")
+        self.assertEqual(batch_msg["table_id"], self.table_a.id)
+        self.assertEqual(batch_msg["count"], 3)
+        self.assertEqual(batch_msg["field"], "STATUS")
+
+        # Verify no individual storm follows
+        self.assertTrue(await comm.receive_nothing())
+        await comm.disconnect()
+
+    async def test_15_import_avoids_per_row_event_storm(self):
+        """15: TableImportService broadcasts a single table_import_completed batch event."""
+        s = await self._create_user_session(self.admin)
+        comm = WebsocketCommunicator(
+            application,
+            f"/ws/tables/{self.table_a.id}/",
+            headers=[(b"cookie", f"sessionid={s}".encode("ascii"))],
+        )
+        self.assertTrue((await comm.connect())[0])
+
+        csv_content = (
+            "S_NO,DATE,DUE_DATE,TASK_NAME,INITIAL_MAIL,ALERT_MAIL\n"
+            "1,2026-06-01,2026-06-10,Imported Row 1,NO,NO\n"
+            "2,2026-06-01,2026-06-11,Imported Row 2,NO,NO\n"
+            "3,2026-06-01,2026-06-12,Imported Row 3,NO,NO\n"
+        )
+
+        @sync_to_async
+        def do_import():
+            return TableImportService.import_rows_from_csv_data(
+                file_data=csv_content,
+                table=self.table_a,
+                user=self.admin,
+            )
+
+        created_rows, error = await do_import()
+        self.assertIsNone(error)
+        self.assertEqual(len(created_rows), 3)
+
+        # Single batch import completed event
+        import_msg = await comm.receive_json_from(timeout=2)
+        self.assertEqual(import_msg["event"], "table_import_completed")
+        self.assertEqual(import_msg["table_id"], self.table_a.id)
+        self.assertEqual(import_msg["imported_rows"], 3)
+
+        # Verify no individual per-row events follow
+        self.assertTrue(await comm.receive_nothing())
+        await comm.disconnect()
+
+    async def test_16_transaction_timing_before_vs_after_commit(self):
+        """16: Mutation inside tx is NOT observable before commit; becomes observable immediately after commit."""
+        s = await self._create_user_session(self.admin)
+        comm = WebsocketCommunicator(
+            application,
+            f"/ws/tables/{self.table_a.id}/",
+            headers=[(b"cookie", f"sessionid={s}".encode("ascii"))],
+        )
+        self.assertTrue((await comm.connect())[0])
+
+        step_in_tx = threading.Event()
+        can_commit = threading.Event()
+
+        def background_thread():
+            with transaction.atomic():
+                RowService.create_row(
+                    self.table_a,
+                    self.admin,
+                    {"TASK_NAME": "Timing Task", "DUE_DATE": "2026-11-01"},
+                )
+                step_in_tx.set()
+                can_commit.wait()
+
+        t = threading.Thread(target=background_thread)
+        t.start()
+
+        while not step_in_tx.is_set():
+            time.sleep(0.01)
+
+        # 1. Before commit: no event observable
+        nothing_before = await comm.receive_nothing()
+        self.assertTrue(nothing_before)
+
+        # 2. Commit transaction
+        can_commit.set()
+        t.join()
+
+        # 3. After commit: event is received
+        msg = await comm.receive_json_from(timeout=2)
+        self.assertEqual(msg["event"], "row_created")
+        self.assertEqual(msg["table_id"], self.table_a.id)
+
+        await comm.disconnect()

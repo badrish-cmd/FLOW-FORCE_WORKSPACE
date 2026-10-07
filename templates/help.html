@@ -1,0 +1,688 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Help & User Guide - Flow-Force Workspace{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="breadcrumb-nav">
+    <ol class="breadcrumb mb-0">
+        <li class="breadcrumb-item"><a href="/"><i class="fas fa-home"></i></a></li>
+        <li class="breadcrumb-item active" aria-current="page">
+            <span class="lang-en">Help & User Guide</span>
+            <span class="lang-id">Panduan & Bantuan Pengguna</span>
+        </li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Bilingual Display Management */
+    .lang-id { display: none; }
+    .lang-en { display: inline; }
+    .lang-block-id { display: none; }
+    .lang-block-en { display: block; }
+
+    body.lang-mode-id .lang-en { display: none !important; }
+    body.lang-mode-id .lang-id { display: inline !important; }
+    body.lang-mode-id .lang-block-en { display: none !important; }
+    body.lang-mode-id .lang-block-id { display: block !important; }
+
+    /* Help Section Styling */
+    .help-header-card {
+        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        color: #fff;
+        border-radius: 12px;
+        padding: 2.2rem 2rem;
+        margin-bottom: 2rem;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    }
+    .help-search-input {
+        background: #fff;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        padding: 0.75rem 1rem 0.75rem 2.75rem;
+        font-size: 0.95rem;
+        width: 100%;
+        transition: all 0.2s;
+    }
+    .help-search-input:focus {
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+        outline: none;
+    }
+    .help-nav-pill {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        padding: 0.75rem 1rem;
+        color: #475569;
+        font-weight: 500;
+        font-size: 0.9rem;
+        border-radius: 8px;
+        text-decoration: none;
+        transition: all 0.15s;
+        margin-bottom: 0.25rem;
+    }
+    .help-nav-pill:hover {
+        background-color: #f1f5f9;
+        color: #1e293b;
+    }
+    .help-nav-pill.active {
+        background-color: #eff6ff;
+        color: #2563eb;
+        font-weight: 600;
+    }
+    .help-card {
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        background: #fff;
+        margin-bottom: 1.5rem;
+        transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .help-card:hover {
+        box-shadow: 0 6px 16px rgba(0,0,0,0.05);
+    }
+    .help-card-header {
+        background: #f8fafc;
+        border-bottom: 1px solid #e2e8f0;
+        padding: 1rem 1.25rem;
+        font-weight: 600;
+        font-size: 1.05rem;
+        color: #1e293b;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        border-radius: 10px 10px 0 0;
+    }
+    .help-step-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background-color: #3b82f6;
+        color: #fff;
+        font-size: 0.75rem;
+        font-weight: 700;
+        margin-right: 0.5rem;
+    }
+    .help-lang-btn {
+        border-radius: 6px;
+        padding: 0.35rem 0.75rem;
+        font-size: 0.85rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+    .badge-status {
+        padding: 0.3rem 0.6rem;
+        border-radius: 6px;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-3">
+
+    <!-- Top Banner & Language Selector -->
+    <div class="help-header-card">
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-3">
+            <div>
+                <h1 class="h3 mb-1 text-white">
+                    <span class="lang-en"><i class="fas fa-book-open me-2 text-primary"></i>Flow-Force User Guide & Help</span>
+                    <span class="lang-id"><i class="fas fa-book-open me-2 text-primary"></i>Panduan & Bantuan Flow-Force</span>
+                </h1>
+                <p class="text-slate-300 mb-0 opacity-75" style="font-size: 0.95rem;">
+                    <span class="lang-en">Learn how to manage tables, track tasks in real time, explore engineering drawings, and navigate the workspace.</span>
+                    <span class="lang-id">Pelajari cara mengelola tabel, melacak tugas secara real-time, melihat gambar teknik, dan mengoperasikan workspace.</span>
+                </p>
+            </div>
+            <!-- Language Switcher -->
+            <div class="d-flex align-items-center bg-dark bg-opacity-50 p-1 rounded-3 border border-secondary border-opacity-25">
+                <button type="button" class="btn help-lang-btn text-white btn-sm" id="btnLangEn" onclick="setHelpLanguage('en')">
+                    🇬🇧 English
+                </button>
+                <button type="button" class="btn help-lang-btn text-white-50 btn-sm" id="btnLangId" onclick="setHelpLanguage('id')">
+                    🇮🇩 Bahasa Indonesia
+                </button>
+            </div>
+        </div>
+
+        <!-- Real-Time Search Box -->
+        <div class="position-relative mt-4" style="max-width: 650px;">
+            <i class="fas fa-search position-absolute text-muted" style="top: 14px; left: 16px; font-size: 1rem;"></i>
+            <input type="text" id="helpSearchInput" class="help-search-input" 
+                   placeholder="Search help topics (e.g., spreadsheet, edit cell, status, drawings, import)..."
+                   oninput="filterHelpTopics()">
+        </div>
+    </div>
+
+    <!-- Main Grid: Navigation & Content -->
+    <div class="row">
+        <!-- Sidebar Navigation Pills -->
+        <div class="col-lg-3 mb-4">
+            <div class="card border-0 shadow-sm sticky-top" style="top: 80px; z-index: 10;">
+                <div class="card-body p-3">
+                    <div class="text-xs text-uppercase text-muted fw-bold px-2 mb-2">
+                        <span class="lang-en">Documentation Topics</span>
+                        <span class="lang-id">Topik Dokumentasi</span>
+                    </div>
+                    <nav class="nav flex-column">
+                        <a href="#getting-started" class="help-nav-pill active">
+                            <i class="fas fa-rocket text-primary"></i>
+                            <span class="lang-en">Getting Started</span>
+                            <span class="lang-id">Memulai</span>
+                        </a>
+                        <a href="#tables-spreadsheet" class="help-nav-pill">
+                            <i class="fas fa-table text-success"></i>
+                            <span class="lang-en">Tables & Spreadsheet</span>
+                            <span class="lang-id">Tabel & Spreadsheet</span>
+                        </a>
+                        <a href="#realtime-updates" class="help-nav-pill">
+                            <i class="fas fa-bolt text-warning"></i>
+                            <span class="lang-en">Real-Time Sync</span>
+                            <span class="lang-id">Sinkronisasi Real-Time</span>
+                        </a>
+                        <a href="#task-tracker" class="help-nav-pill">
+                            <i class="fas fa-tasks text-info"></i>
+                            <span class="lang-en">Task Tracker</span>
+                            <span class="lang-id">Pelacak Tugas</span>
+                        </a>
+                        <a href="#drawing-library" class="help-nav-pill">
+                            <i class="fas fa-drafting-compass text-danger"></i>
+                            <span class="lang-en">Drawing Library</span>
+                            <span class="lang-id">Perpustakaan Gambar</span>
+                        </a>
+                        <a href="#imports-exports" class="help-nav-pill">
+                            <i class="fas fa-file-import text-secondary"></i>
+                            <span class="lang-en">Imports & Exports</span>
+                            <span class="lang-id">Impor & Ekspor</span>
+                        </a>
+                        <a href="#notifications-announcements" class="help-nav-pill">
+                            <i class="fas fa-bullhorn text-purple"></i>
+                            <span class="lang-en">Announcements & Alerts</span>
+                            <span class="lang-id">Pengumuman & Notifikasi</span>
+                        </a>
+                        <a href="#faq-troubleshooting" class="help-nav-pill">
+                            <i class="fas fa-question-circle text-primary"></i>
+                            <span class="lang-en">FAQ & Troubleshooting</span>
+                            <span class="lang-id">FAQ & Solusi Masalah</span>
+                        </a>
+                    </nav>
+                </div>
+            </div>
+        </div>
+
+        <!-- Documentation Content Panels -->
+        <div class="col-lg-9" id="helpContentArea">
+
+            <!-- Section 1: Getting Started -->
+            <section id="getting-started" class="help-section mb-4">
+                <div class="help-card">
+                    <div class="help-card-header">
+                        <i class="fas fa-rocket text-primary"></i>
+                        <span class="lang-en">1. Getting Started & User Roles</span>
+                        <span class="lang-id">1. Memulai & Peran Pengguna</span>
+                    </div>
+                    <div class="card-body p-4">
+                        <div class="lang-block-en">
+                            <p class="text-muted">
+                                Flow-Force Workspace is an all-in-one productivity suite for task tracking, collaborative spreadsheets, and engineering drawings.
+                            </p>
+                            <h6 class="fw-bold mt-3 mb-2">User Roles & Permissions:</h6>
+                            <ul class="list-group list-group-flush mb-3">
+                                <li class="list-group-item px-0">
+                                    <strong>Super Admin & Admin:</strong> Full access to all department tables, user approvals, table creation, deletion, activity logs, and system settings.
+                                </li>
+                                <li class="list-group-item px-0">
+                                    <strong>Department Admin:</strong> Administrative oversight within their assigned department (e.g. Sales, Engineering, Assembly). Can assign tasks and manage department tables.
+                                </li>
+                                <li class="list-group-item px-0">
+                                    <strong>Employee:</strong> Access to department tables and specifically assigned tasks. Can update cell values and mark assigned tasks for review or completion.
+                                </li>
+                            </ul>
+                        </div>
+                        <div class="lang-block-id">
+                            <p class="text-muted">
+                                Flow-Force Workspace adalah aplikasi produktivitas terpadu untuk pelacakan tugas, spreadsheet kolaboratif, dan manajemen gambar teknik.
+                            </p>
+                            <h6 class="fw-bold mt-3 mb-2">Peran Pengguna & Hak Akses:</h6>
+                            <ul class="list-group list-group-flush mb-3">
+                                <li class="list-group-item px-0">
+                                    <strong>Super Admin & Admin:</strong> Memiliki akses penuh ke seluruh tabel departemen, persetujuan pengguna, pembuatan tabel, penghapusan, log aktivitas, dan pengaturan sistem.
+                                </li>
+                                <li class="list-group-item px-0">
+                                    <strong>Department Admin:</strong> Pengawasan administratif dalam departemen yang ditentukan (contoh: Sales, Engineering, Assembly). Dapat menugaskan tugas dan mengelola tabel departemen.
+                                </li>
+                                <li class="list-group-item px-0">
+                                    <strong>Employee (Karyawan):</strong> Mengakses tabel departemen dan tugas yang ditugaskan kepada mereka. Dapat memperbarui nilai sel dan menandai tugas yang selesai/siap ditinjau.
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Section 2: Tables & Spreadsheet -->
+            <section id="tables-spreadsheet" class="help-section mb-4">
+                <div class="help-card">
+                    <div class="help-card-header">
+                        <i class="fas fa-table text-success"></i>
+                        <span class="lang-en">2. Tables & Spreadsheet Usage</span>
+                        <span class="lang-id">2. Penggunaan Tabel & Spreadsheet</span>
+                    </div>
+                    <div class="card-body p-4">
+                        <div class="lang-block-en">
+                            <p class="text-muted">The interactive spreadsheet allows team members to view, edit, and filter table data seamlessly.</p>
+                            
+                            <h6 class="fw-bold mt-3 mb-2">Key Operations:</h6>
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-6">
+                                    <div class="p-3 bg-light rounded border h-100">
+                                        <div class="fw-bold mb-1"><span class="help-step-badge">1</span> Editing Cells</div>
+                                        <p class="small text-muted mb-0">Double-click or click directly on any editable cell (Task Name, Date, Dropdown, Text). Press Enter or click outside to save automatically.</p>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="p-3 bg-light rounded border h-100">
+                                        <div class="fw-bold mb-1"><span class="help-step-badge">2</span> Adding New Rows</div>
+                                        <p class="small text-muted mb-0">Click the <strong>"+ Add Row"</strong> button above the spreadsheet. Enter the required Task Name and Due Date, then click Create.</p>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="p-3 bg-light rounded border h-100">
+                                        <div class="fw-bold mb-1"><span class="help-step-badge">3</span> Sequential S_NO</div>
+                                        <p class="small text-muted mb-0">Serial numbers (S_NO) are automatically computed sequentially and protected against duplicate numbers during simultaneous edits.</p>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="p-3 bg-light rounded border h-100">
+                                        <div class="fw-bold mb-1"><span class="help-step-badge">4</span> Filters & Search</div>
+                                        <p class="small text-muted mb-0">Use the search box above the grid to find rows instantly, or click column headers to sort by date, priority, or status.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="lang-block-id">
+                            <p class="text-muted">Spreadsheet interaktif memungkinkan anggota tim melihat, mengedit, dan memfilter data tabel secara mudah dan cepat.</p>
+                            
+                            <h6 class="fw-bold mt-3 mb-2">Operasi Utama:</h6>
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-6">
+                                    <div class="p-3 bg-light rounded border h-100">
+                                        <div class="fw-bold mb-1"><span class="help-step-badge">1</span> Mengedit Sel</div>
+                                        <p class="small text-muted mb-0">Klik dua kali atau klik langsung pada sel yang dapat diedit (Nama Tugas, Tanggal, Pilihan Dropdown, Teks). Tekan Enter atau klik di luar sel untuk menyimpan secara otomatis.</p>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="p-3 bg-light rounded border h-100">
+                                        <div class="fw-bold mb-1"><span class="help-step-badge">2</span> Menambah Baris Baru</div>
+                                        <p class="small text-muted mb-0">Klik tombol <strong>"+ Tambah Baris"</strong> di atas spreadsheet. Masukkan Nama Tugas dan Tenggat Waktu (Due Date), lalu klik Buat.</p>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="p-3 bg-light rounded border h-100">
+                                        <div class="fw-bold mb-1"><span class="help-step-badge">3</span> Nomor Urut (S_NO)</div>
+                                        <p class="small text-muted mb-0">Nomor urut baris dihitung secara otomatis berurutan dan dilindungi agar tidak terjadi nomor ganda saat beberapa pengguna bekerja bersamaan.</p>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="p-3 bg-light rounded border h-100">
+                                        <div class="fw-bold mb-1"><span class="help-step-badge">4</span> Pencarian & Filter</div>
+                                        <p class="small text-muted mb-0">Gunakan kotak pencarian di atas spreadsheet untuk mencari baris secara instan, atau klik judul kolom untuk mengurutkan data.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Section 3: Real-Time Sync -->
+            <section id="realtime-updates" class="help-section mb-4">
+                <div class="help-card border-warning border-opacity-50">
+                    <div class="help-card-header bg-warning bg-opacity-10 text-dark">
+                        <i class="fas fa-bolt text-warning"></i>
+                        <span class="lang-en">3. Real-Time Synchronization (Live Updates)</span>
+                        <span class="lang-id">3. Sinkronisasi Real-Time (Pembaruan Otomatis)</span>
+                    </div>
+                    <div class="card-body p-4">
+                        <div class="lang-block-en">
+                            <p class="fw-medium text-dark mb-2">
+                                <i class="fas fa-check-circle text-success me-1"></i> No manual browser refresh is needed!
+                            </p>
+                            <p class="text-muted">
+                                When a coworker in your department adds a row, updates a cell, or changes a task status, Flow-Force automatically dispatches real-time events over a secure connection. The data on your screen updates immediately without requiring you to reload the page.
+                            </p>
+                            <div class="alert alert-info py-2 px-3 small mb-0">
+                                <i class="fas fa-info-circle me-1"></i>
+                                <strong>Safety Guarantee:</strong> Events are only broadcast after updates are safely committed to the database. If any database operation fails, phantom updates will never appear.
+                            </div>
+                        </div>
+                        <div class="lang-block-id">
+                            <p class="fw-medium text-dark mb-2">
+                                <i class="fas fa-check-circle text-success me-1"></i> Tidak perlu me-refresh halaman peramban secara manual!
+                            </p>
+                            <p class="text-muted">
+                                Saat rekan kerja di departemen Anda menambahkan baris, memperbarui nilai sel, atau mengubah status tugas, Flow-Force secara otomatis mengirimkan pembaruan real-time melalui koneksi aman. Data di layar Anda diperbarui langsung tanpa perlu memuat ulang halaman web.
+                            </p>
+                            <div class="alert alert-info py-2 px-3 small mb-0">
+                                <i class="fas fa-info-circle me-1"></i>
+                                <strong>Jaminan Keamanan:</strong> Pembaruan hanya dikirimkan setelah data berhasil tersimpan ke basis data. Jika terjadi kegagalan jaringan atau server, data semu tidak akan ditampilkan.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Section 4: Task Tracker -->
+            <section id="task-tracker" class="help-section mb-4">
+                <div class="help-card">
+                    <div class="help-card-header">
+                        <i class="fas fa-tasks text-info"></i>
+                        <span class="lang-en">4. Task Tracker & Workflows</span>
+                        <span class="lang-id">4. Pelacak Tugas & Alur Kerja</span>
+                    </div>
+                    <div class="card-body p-4">
+                        <div class="lang-block-en">
+                            <p class="text-muted">Every row in an operational table represents a trackable task with deadlines, assignees, and progress stages.</p>
+                            
+                            <h6 class="fw-bold mt-3 mb-2">Task Status Lifecycle:</h6>
+                            <div class="d-flex flex-wrap gap-2 mb-3">
+                                <span class="badge bg-secondary badge-status">PENDING</span>
+                                <i class="fas fa-arrow-right text-muted align-self-center small"></i>
+                                <span class="badge bg-primary badge-status">IN_PROGRESS</span>
+                                <i class="fas fa-arrow-right text-muted align-self-center small"></i>
+                                <span class="badge bg-warning text-dark badge-status">READY_FOR_REVIEW</span>
+                                <i class="fas fa-arrow-right text-muted align-self-center small"></i>
+                                <span class="badge bg-success badge-status">COMPLETED</span>
+                                <i class="fas fa-arrow-right text-muted align-self-center small"></i>
+                                <span class="badge bg-info text-dark badge-status">APPROVED</span>
+                            </div>
+                            
+                            <ul class="list-unstyled mb-0">
+                                <li class="mb-2"><i class="fas fa-user-check text-primary me-2"></i><strong>Task Assignment:</strong> Admins can assign tasks to one or more employees from the task details or user dropdown column.</li>
+                                <li class="mb-2"><i class="fas fa-flag text-danger me-2"></i><strong>Flagging Issues:</strong> If an obstacle arises, click "Flag Issue" on the task to notify managers and document the issue in the activity log.</li>
+                                <li class="mb-0"><i class="fas fa-comments text-info me-2"></i><strong>Comments & History:</strong> View timestamps, status changes, and teammate comments in the Task Details panel.</li>
+                            </ul>
+                        </div>
+                        <div class="lang-block-id">
+                            <p class="text-muted">Setiap baris dalam tabel operasional mewakili tugas yang dapat dilacak dengan tenggat waktu, penanggung jawab, dan tahapan kemajuan.</p>
+                            
+                            <h6 class="fw-bold mt-3 mb-2">Tahapan Status Tugas:</h6>
+                            <div class="d-flex flex-wrap gap-2 mb-3">
+                                <span class="badge bg-secondary badge-status">PENDING (Menunggu)</span>
+                                <i class="fas fa-arrow-right text-muted align-self-center small"></i>
+                                <span class="badge bg-primary badge-status">IN_PROGRESS (Dikerjakan)</span>
+                                <i class="fas fa-arrow-right text-muted align-self-center small"></i>
+                                <span class="badge bg-warning text-dark badge-status">READY_FOR_REVIEW (Siap Ditinjau)</span>
+                                <i class="fas fa-arrow-right text-muted align-self-center small"></i>
+                                <span class="badge bg-success badge-status">COMPLETED (Selesai)</span>
+                                <i class="fas fa-arrow-right text-muted align-self-center small"></i>
+                                <span class="badge bg-info text-dark badge-status">APPROVED (Disetujui)</span>
+                            </div>
+                            
+                            <ul class="list-unstyled mb-0">
+                                <li class="mb-2"><i class="fas fa-user-check text-primary me-2"></i><strong>Penugasan Tugas:</strong> Admin dapat menugaskan tugas kepada satu atau beberapa karyawan melalui rincian tugas atau kolom penanggung jawab.</li>
+                                <li class="mb-2"><i class="fas fa-flag text-danger me-2"></i><strong>Tandai Kendala (Flag Issue):</strong> Jika menemui hambatan, klik tombol "Flag Issue" untuk memberi tahu atasan dan mencatatnya ke log aktivitas.</li>
+                                <li class="mb-0"><i class="fas fa-comments text-info me-2"></i><strong>Komentar & Riwayat:</strong> Lihat catatan waktu, riwayat perubahan status, dan komentar rekan kerja di panel Rincian Tugas.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Section 5: Drawing Library -->
+            <section id="drawing-library" class="help-section mb-4">
+                <div class="help-card">
+                    <div class="help-card-header">
+                        <i class="fas fa-drafting-compass text-danger"></i>
+                        <span class="lang-en">5. Engineering Drawing Library</span>
+                        <span class="lang-id">5. Perpustakaan Gambar Teknik</span>
+                    </div>
+                    <div class="card-body p-4">
+                        <div class="lang-block-en">
+                            <p class="text-muted">The Drawing Library provides secure access to technical engineering blueprints, schematics, and PDF documents.</p>
+                            <ul>
+                                <li><strong>In-Browser PDF Viewer:</strong> Open and review technical drawings directly inside your browser without needing to download external files.</li>
+                                <li><strong>Access Control:</strong> Drawings are strictly access-controlled. Employees only see drawings authorized for their department or individual account.</li>
+                                <li><strong>Search by Code or Tag:</strong> Quickly locate blueprints using drawing IDs, revision numbers, or customer names.</li>
+                            </ul>
+                        </div>
+                        <div class="lang-block-id">
+                            <p class="text-muted">Perpustakaan Gambar menyediakan akses aman ke cetak biru teknik, skema teknis, dan dokumen PDF proyek.</p>
+                            <ul>
+                                <li><strong>Pratinjau PDF di Peramban:</strong> Buka dan tinjau gambar teknis langsung di dalam peramban web tanpa harus mengunduh file ke komputer lokal.</li>
+                                <li><strong>Kontrol Akses:</strong> Akses gambar dikontrol secara ketat. Karyawan hanya dapat melihat gambar yang telah diberi izin akses untuk departemen atau akun mereka.</li>
+                                <li><strong>Pencarian Kode atau Tag:</strong> Temukan gambar teknik secara cepat menggunakan nomor identifikasi gambar, nomor revisi, atau nama pelanggan.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Section 6: Imports & Exports -->
+            <section id="imports-exports" class="help-section mb-4">
+                <div class="help-card">
+                    <div class="help-card-header">
+                        <i class="fas fa-file-import text-secondary"></i>
+                        <span class="lang-en">6. Data Imports & Exports</span>
+                        <span class="lang-id">6. Impor & Ekspor Data</span>
+                    </div>
+                    <div class="card-body p-4">
+                        <div class="lang-block-en">
+                            <p class="text-muted">Authorized users can populate tables rapidly using bulk import tools:</p>
+                            <ul>
+                                <li><strong>CSV Import:</strong> Upload standard CSV files containing columns such as <code>TASK_NAME</code>, <code>DUE_DATE</code>, <code>S_NO</code>. The system automatically maps headers and creates rows and task records.</li>
+                                <li><strong>Google Sheets Import:</strong> Paste a public or shareable Google Sheets URL to import rows directly into the table.</li>
+                                <li><strong>Atomic Transaction:</strong> Large imports are processed safely in batches. If invalid data is detected, changes roll back cleanly.</li>
+                            </ul>
+                        </div>
+                        <div class="lang-block-id">
+                            <p class="text-muted">Pengguna yang memiliki hak akses dapat mengisi data tabel dengan cepat menggunakan fitur impor massal:</p>
+                            <ul>
+                                <li><strong>Impor File CSV:</strong> Unggah file CSV standar yang memiliki kolom seperti <code>TASK_NAME</code>, <code>DUE_DATE</code>, <code>S_NO</code>. Sistem akan mencocokkan judul kolom dan membuat baris serta tugas secara otomatis.</li>
+                                <li><strong>Impor Google Sheets:</strong> Tempelkan tautan (link) Google Sheets yang dibagikan untuk mengimpor data secara langsung ke dalam tabel.</li>
+                                <li><strong>Transaksi Aman:</strong> Impor dalam jumlah besar diproses secara terstruktur. Jika terdapat kesalahan format, sistem akan membatalkan perubahan untuk menjaga keutuhan data.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Section 7: Announcements & Alerts -->
+            <section id="notifications-announcements" class="help-section mb-4">
+                <div class="help-card">
+                    <div class="help-card-header">
+                        <i class="fas fa-bullhorn text-purple"></i>
+                        <span class="lang-en">7. Announcements & Notifications</span>
+                        <span class="lang-id">7. Pengumuman & Pemberitahuan</span>
+                    </div>
+                    <div class="card-body p-4">
+                        <div class="lang-block-en">
+                            <ul>
+                                <li><strong>Notification Bell:</strong> Click the bell icon in the top navigation bar to view recent task updates, reviews, and assignments. Unread counts are highlighted with a badge.</li>
+                                <li><strong>What's New:</strong> View company-wide system updates and release announcements anytime via the announcements section.</li>
+                                <li><strong>Dismissing Announcements:</strong> When an announcement is published, you can mark it as read or dismiss it once reviewed.</li>
+                            </ul>
+                        </div>
+                        <div class="lang-block-id">
+                            <ul>
+                                <li><strong>Lonceng Notifikasi:</strong> Klik ikon lonceng di bilah navigasi atas untuk melihat pembaruan tugas terbaru, tinjauan, dan tugas baru. Jumlah notifikasi belum dibaca ditandai dengan lencana angka.</li>
+                                <li><strong>What's New (Pembaruan Sistem):</strong> Lihat pengumuman dan catatan rilis sistem perusahaan kapan saja melalui menu pengumuman.</li>
+                                <li><strong>Menandai Dibaca:</strong> Setelah membaca pengumuman penting, Anda dapat menandainya sebagai telah dibaca untuk membersihkan tampilan.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Section 8: FAQ & Troubleshooting -->
+            <section id="faq-troubleshooting" class="help-section mb-4">
+                <div class="help-card">
+                    <div class="help-card-header">
+                        <i class="fas fa-question-circle text-primary"></i>
+                        <span class="lang-en">8. Frequently Asked Questions (FAQ) & Troubleshooting</span>
+                        <span class="lang-id">8. Pertanyaan Umum (FAQ) & Solusi Masalah</span>
+                    </div>
+                    <div class="card-body p-4">
+                        
+                        <!-- FAQ Item 1 -->
+                        <div class="mb-4 pb-3 border-bottom">
+                            <h6 class="fw-bold text-dark mb-1">
+                                <span class="lang-en">Q: Why are some columns or cells grayed out / cannot be edited?</span>
+                                <span class="lang-id">T: Mengapa beberapa kolom atau sel berwarna abu-abu / tidak dapat diedit?</span>
+                            </h6>
+                            <p class="text-muted small mb-0">
+                                <span class="lang-en">Columns such as <code>S_NO</code> (Serial Number) and auto-calculated mail flags are system-managed. Other custom columns may be set to Read-Only by your department admin. Contact your department administrator if you require edit permissions.</span>
+                                <span class="lang-id">Kolom seperti <code>S_NO</code> (Nomor Urut) dan penanda otomatis email dikelola oleh sistem. Kolom tertentu lainnya mungkin disetel sebagai 'Hanya Baca' oleh admin departemen. Hubungi admin departemen Anda jika memerlukan izin edit.</span>
+                            </p>
+                        </div>
+
+                        <!-- FAQ Item 2 -->
+                        <div class="mb-4 pb-3 border-bottom">
+                            <h6 class="fw-bold text-dark mb-1">
+                                <span class="lang-en">Q: Do I need to manually refresh the page to see changes made by others?</span>
+                                <span class="lang-id">T: Apakah saya perlu memuat ulang (refresh) halaman untuk melihat perubahan dari rekan kerja?</span>
+                            </h6>
+                            <p class="text-muted small mb-0">
+                                <span class="lang-en">No. The spreadsheet and task lists feature real-time WebSocket connectivity. Any cell edits, newly created rows, or status transitions appear automatically on all connected team members' screens.</span>
+                                <span class="lang-id">Tidak. Spreadsheet dan pelacak tugas dilengkapi fitur sinkronisasi real-time. Setiap pengeditan sel, baris baru, atau perubahan status akan langsung tampil secara otomatis pada layar rekan kerja yang sedang membuka tabel yang sama.</span>
+                            </p>
+                        </div>
+
+                        <!-- FAQ Item 3 -->
+                        <div class="mb-4 pb-3 border-bottom">
+                            <h6 class="fw-bold text-dark mb-1">
+                                <span class="lang-en">Q: How do I change my account password?</span>
+                                <span class="lang-id">T: Bagaimana cara mengubah kata sandi akun saya?</span>
+                            </h6>
+                            <p class="text-muted small mb-0">
+                                <span class="lang-en">If you forgot your password or need a reset, use the "Forgot Password" link on the login screen to verify via email OTP and choose a new secure password.</span>
+                                <span class="lang-id">Jika Anda lupa kata sandi atau ingin meresetnya, gunakan tautan "Lupa Kata Sandi" di halaman login untuk verifikasi kode OTP email dan membuat kata sandi baru.</span>
+                            </p>
+                        </div>
+
+                        <!-- FAQ Item 4 -->
+                        <div class="mb-0">
+                            <h6 class="fw-bold text-dark mb-1">
+                                <span class="lang-en">Q: Who should I contact if I cannot access my department's table?</span>
+                                <span class="lang-id">T: Siapa yang harus dihubungi jika saya tidak dapat mengakses tabel departemen saya?</span>
+                            </h6>
+                            <p class="text-muted small mb-0">
+                                <span class="lang-en">Ensure your employee account is assigned to the correct Department in Co-workers/Employees. If you recently joined, an Admin or Department Admin can grant you explicit Table Access.</span>
+                                <span class="lang-id">Pastikan akun karyawan Anda telah ditetapkan ke Departemen yang sesuai. Jika Anda baru bergabung, Admin atau Department Admin dapat memberikan hak akses tabel kepada akun Anda.</span>
+                            </p>
+                        </div>
+
+                    </div>
+                </div>
+            </section>
+
+            <!-- Search No Results Box -->
+            <div id="noResultsBox" class="alert alert-warning text-center p-4 d-none">
+                <i class="fas fa-search me-2 fs-4 text-warning"></i>
+                <div class="fw-bold mt-2">
+                    <span class="lang-en">No topics found matching your search.</span>
+                    <span class="lang-id">Tidak ada topik bantuan yang cocok dengan pencarian Anda.</span>
+                </div>
+                <small class="text-muted">
+                    <span class="lang-en">Try searching for keywords like "table", "task", "status", "edit", or "drawings".</span>
+                    <span class="lang-id">Coba gunakan kata kunci seperti "tabel", "tugas", "status", "edit", atau "gambar".</span>
+                </small>
+            </div>
+
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // -------------------------------------------------------------
+    // Language Preference Management (localStorage + Body Class)
+    // -------------------------------------------------------------
+    function setHelpLanguage(lang) {
+        const body = document.body;
+        const btnEn = document.getElementById('btnLangEn');
+        const btnId = document.getElementById('btnLangId');
+
+        if (lang === 'id') {
+            body.classList.add('lang-mode-id');
+            if (btnEn && btnId) {
+                btnEn.classList.remove('text-white');
+                btnEn.classList.add('text-white-50');
+                btnId.classList.remove('text-white-50');
+                btnId.classList.add('text-white');
+            }
+            localStorage.setItem('flowforce_help_lang', 'id');
+        } else {
+            body.classList.remove('lang-mode-id');
+            if (btnEn && btnId) {
+                btnId.classList.remove('text-white');
+                btnId.classList.add('text-white-50');
+                btnEn.classList.remove('text-white-50');
+                btnEn.classList.add('text-white');
+            }
+            localStorage.setItem('flowforce_help_lang', 'en');
+        }
+    }
+
+    // Initialize Language from localStorage
+    document.addEventListener('DOMContentLoaded', function() {
+        const savedLang = localStorage.getItem('flowforce_help_lang') || 'en';
+        setHelpLanguage(savedLang);
+
+        // Highlight active nav item on scroll
+        const sections = document.querySelectorAll('.help-section');
+        const navPills = document.querySelectorAll('.help-nav-pill');
+
+        window.addEventListener('scroll', function() {
+            let current = '';
+            sections.forEach(section => {
+                const sectionTop = section.offsetTop - 120;
+                if (pageYOffset >= sectionTop) {
+                    current = section.getAttribute('id');
+                }
+            });
+
+            navPills.forEach(pill => {
+                pill.classList.remove('active');
+                if (pill.getAttribute('href') === '#' + current) {
+                    pill.classList.add('active');
+                }
+            });
+        });
+    });
+
+    // -------------------------------------------------------------
+    // Real-Time Search Filtering
+    // -------------------------------------------------------------
+    function filterHelpTopics() {
+        const query = document.getElementById('helpSearchInput').value.toLowerCase().trim();
+        const sections = document.querySelectorAll('.help-section');
+        const noResults = document.getElementById('noResultsBox');
+        let matchedCount = 0;
+
+        sections.forEach(section => {
+            const text = section.innerText.toLowerCase();
+            if (!query || text.includes(query)) {
+                section.style.display = 'block';
+                matchedCount++;
+            } else {
+                section.style.display = 'none';
+            }
+        });
+
+        if (matchedCount === 0 && query) {
+            noResults.classList.remove('d-none');
+        } else {
+            noResults.classList.add('d-none');
+        }
+    }
+</script>
+{% endblock %}

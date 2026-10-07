@@ -6,6 +6,7 @@ from django.utils import timezone
 from tables.models import Table, Row, CellValue
 from tasks.models import Task, ActivityLog
 from auth_app.models import EmployeeUser
+from .broadcaster import TableEventBroadcaster
 
 
 class RowCreationValidationError(Exception):
@@ -227,5 +228,20 @@ class RowService:
             )
         except Exception:
             pass
+
+        # Broadcast real-time events on transaction commit
+        TableEventBroadcaster.broadcast_row_created(
+            table_id=table.id,
+            row_id=row.id,
+            task_id=task.id if task else None,
+            user=user
+        )
+        if task:
+            TableEventBroadcaster.broadcast_task_created(
+                table_id=table.id,
+                task_id=task.id,
+                row_id=row.id,
+                user=user
+            )
 
         return row

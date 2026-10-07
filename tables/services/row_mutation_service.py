@@ -7,6 +7,7 @@ from tasks.models import Task, ActivityLog
 from auth_app.models import EmployeeUser
 from tables.permissions import has_table_access, get_column_access_level
 from tables.services.cell_service import sync_logs_row_overdue
+from .broadcaster import TableEventBroadcaster
 
 
 class RowMutationError(Exception):
@@ -189,6 +190,41 @@ class RowMutationService:
         if table.job_type == "LOGS":
             sync_logs_row_overdue(row, request_user=user)
 
+        # Broadcast real-time row_updated and task sync events on transaction commit
+        TableEventBroadcaster.broadcast_row_updated(
+            table_id=table.id,
+            row_id=row.id,
+            updated_columns=updated_columns,
+            task_id=task.id if task else None,
+            user=user
+        )
+        if task and updated_columns:
+            col_names_upper = [c.upper() for c in updated_columns]
+            if "STATUS" in col_names_upper:
+                TableEventBroadcaster.broadcast_task_status_changed(
+                    table_id=table.id,
+                    task_id=task.id,
+                    row_id=row.id,
+                    new_status=task.status,
+                    user=user
+                )
+            elif any(c in col_names_upper for c in ["ASSIGNED_TO", "ASSIGNED TO", "ASSIGNEE"]):
+                assignees = [{"id": u.id, "name": u.full_name or u.email} for u in task.assigned_to.all()]
+                TableEventBroadcaster.broadcast_task_reassigned(
+                    table_id=table.id,
+                    task_id=task.id,
+                    row_id=row.id,
+                    assignees=assignees,
+                    user=user
+                )
+            else:
+                TableEventBroadcaster.broadcast_task_updated(
+                    table_id=table.id,
+                    task_id=task.id,
+                    row_id=row.id,
+                    user=user
+                )
+
         return row, updated_columns
 
     @classmethod
@@ -266,5 +302,15 @@ class RowMutationService:
                         details={"column": "STATUS", "value": "COMPLETED"}
                     )
                 updated_count += 1
+
+        # Broadcast single batch rows_updated event on transaction commit to avoid event storm
+        if updated_count > 0:
+            TableEventBroadcaster.broadcast_rows_updated(
+                table_id=table.id,
+                count=updated_count,
+                field=field,
+                value=value,
+                user=user
+            )
 
         return updated_count

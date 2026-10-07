@@ -7,6 +7,7 @@ from tables.models import Table, Row, Column, CellValue
 from tasks.models import Task, ActivityLog
 from auth_app.models import EmployeeUser
 from tables.permissions import has_table_access, get_column_access_level
+from .broadcaster import TableEventBroadcaster
 
 
 class CellMutationError(Exception):
@@ -262,5 +263,43 @@ class CellMutationService:
 
         if table.job_type == "LOGS":
             sync_logs_row_overdue(row, request_user=user)
+
+        # Broadcast cell_updated and task sync events on transaction commit
+        task_id = task.id if task else None
+        TableEventBroadcaster.broadcast_cell_updated(
+            table_id=table.id,
+            row_id=row.id,
+            column_id=column.id,
+            column_name=column.name,
+            value=value,
+            task_id=task_id,
+            user=user
+        )
+
+        if task:
+            if col_name_upper == "STATUS":
+                TableEventBroadcaster.broadcast_task_status_changed(
+                    table_id=table.id,
+                    task_id=task.id,
+                    row_id=row.id,
+                    new_status=task.status,
+                    user=user
+                )
+            elif column.data_type == "USER" or col_name_upper in ["ASSIGNED_TO", "ASSIGNED TO", "ASSIGNEE"]:
+                assignees = [{"id": u.id, "name": u.full_name or u.email} for u in task.assigned_to.all()]
+                TableEventBroadcaster.broadcast_task_reassigned(
+                    table_id=table.id,
+                    task_id=task.id,
+                    row_id=row.id,
+                    assignees=assignees,
+                    user=user
+                )
+            elif column.is_system_column:
+                TableEventBroadcaster.broadcast_task_updated(
+                    table_id=table.id,
+                    task_id=task.id,
+                    row_id=row.id,
+                    user=user
+                )
 
         return cell

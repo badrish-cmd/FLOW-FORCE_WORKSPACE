@@ -11,6 +11,7 @@ from django.db.models import Q
 
 from tables.models import Table, Column, Row, CellValue
 from .statistics_service import TableStatisticsService
+from .broadcaster import TableEventBroadcaster
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +40,26 @@ class TableDeleteService:
         Row.delete() automatically invalidates table statistics cache.
         """
         table_id = row.table_id
-        row.delete()
-        TableStatisticsService.invalidate_cache(table_id)
+        row_id = row.id
+        task = getattr(row, "task", None)
+        task_id = task.id if task else None
+
+        with transaction.atomic():
+            row.delete()
+            TableStatisticsService.invalidate_cache(table_id)
+            TableEventBroadcaster.broadcast_row_deleted(
+                table_id=table_id,
+                row_id=row_id,
+                task_id=task_id,
+                user=user
+            )
+            if task_id:
+                TableEventBroadcaster.broadcast_task_deleted(
+                    table_id=table_id,
+                    task_id=task_id,
+                    row_id=row_id,
+                    user=user
+                )
 
     @staticmethod
     def bulk_delete_rows(table: Table, user, row_ids: Optional[List[int]] = None) -> int:
@@ -71,6 +90,13 @@ class TableDeleteService:
             count = rows.count()
             rows.delete()
             TableStatisticsService.invalidate_cache(table.id)
+            if count > 0:
+                TableEventBroadcaster.broadcast_rows_deleted(
+                    table_id=table.id,
+                    count=count,
+                    row_ids=row_ids,
+                    user=user
+                )
 
         return count
 
@@ -103,6 +129,12 @@ class TableDeleteService:
             count = rows.count()
             rows.delete()
             TableStatisticsService.invalidate_cache(column.table_id)
+            if count > 0:
+                TableEventBroadcaster.broadcast_rows_deleted(
+                    table_id=column.table_id,
+                    count=count,
+                    user=user
+                )
 
         return count
 
@@ -123,5 +155,12 @@ class TableDeleteService:
             raise DeleteValidationError("Cannot clear system columns")
 
         with transaction.atomic():
-            CellValue.objects.filter(column=column).update(value=None)
+            count = CellValue.objects.filter(column=column).update(value=None)
             TableStatisticsService.invalidate_cache(column.table_id)
+            TableEventBroadcaster.broadcast_rows_updated(
+                table_id=column.table_id,
+                count=count,
+                field=column.name,
+                value=None,
+                user=user
+            )

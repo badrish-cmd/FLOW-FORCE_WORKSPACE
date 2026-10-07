@@ -152,3 +152,27 @@ class RegistrationTests(TestCase):
         # It should redirect back to register with error
         self.assertEqual(response3.status_code, 302)
         self.assertFalse(EmployeeUser.objects.filter(email="hacker@gmail.com").exists())
+
+
+class HelpViewTests(TestCase):
+    def setUp(self):
+        self.user = EmployeeUser.objects.create_user(
+            email="help.tester@flow-force.com",
+            password="testpassword123",
+            full_name="Help Tester",
+            role="EMPLOYEE",
+            status="APPROVED",
+        )
+        self.help_url = reverse("help")
+
+    def test_unauthenticated_user_redirected_to_login(self):
+        response = self.client.get(self.help_url)
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.url.startswith(reverse("login")))
+
+    def test_authenticated_user_can_access_help(self):
+        self.client.login(username="help.tester@flow-force.com", password="testpassword123")
+        response = self.client.get(self.help_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "help.html")
+        self.assertContains(response, "Help & User Guide")

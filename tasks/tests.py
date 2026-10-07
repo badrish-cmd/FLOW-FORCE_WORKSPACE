@@ -1575,3 +1575,43 @@ class AnnouncementTestCase(TestCase):
         req.user = self.super_admin
         ctx = global_context(req)
         self.assertEqual(ctx["active_announcement"], ann)
+
+
+class ChannelsFoundationRegressionTestCase(TestCase):
+    """
+    PHASE REALTIME-1: Verifies Django Channels foundation infrastructure.
+    - Daphne and channels in INSTALLED_APPS
+    - ASGI application imports and initializes ProtocolTypeRouter
+    - WSGI application remains unchanged
+    - Channel layer resolves and initializes correctly with Redis DB 2
+    """
+    def test_channels_and_daphne_installed(self):
+        from django.conf import settings
+        self.assertIn('daphne', settings.INSTALLED_APPS)
+        self.assertIn('channels', settings.INSTALLED_APPS)
+        self.assertEqual(settings.INSTALLED_APPS[0], 'daphne')
+
+    def test_asgi_and_wsgi_settings(self):
+        from django.conf import settings
+        self.assertEqual(settings.ASGI_APPLICATION, 'flowforce.asgi.application')
+        self.assertEqual(settings.WSGI_APPLICATION, 'flowforce.wsgi.application')
+
+    def test_asgi_application_initialization(self):
+        from flowforce.asgi import application
+        from channels.routing import ProtocolTypeRouter
+        self.assertIsInstance(application, ProtocolTypeRouter)
+        self.assertIn('http', application.application_mapping)
+        self.assertIn('websocket', application.application_mapping)
+
+    def test_channel_layer_configuration(self):
+        from django.conf import settings
+        from channels.layers import get_channel_layer
+        from channels_redis.core import RedisChannelLayer
+        layer = get_channel_layer()
+        self.assertIsInstance(layer, RedisChannelLayer)
+        self.assertIn('redis://127.0.0.1:6379/2', settings.CHANNELS_REDIS_URL)
+
+    def test_wsgi_application_functional(self):
+        from flowforce.wsgi import application
+        from django.core.handlers.wsgi import WSGIHandler
+        self.assertIsInstance(application, WSGIHandler)

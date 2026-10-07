@@ -12,6 +12,7 @@ from .views import (
     reset_password_view,
     super_admin_dashboard,
     verify_otp_view,
+    help_view,
 )
 
 urlpatterns = [
@@ -74,6 +75,12 @@ urlpatterns = [
         "register/",
         register_view,
         name="register"
+    ),
+
+    path(
+        "help/",
+        help_view,
+        name="help"
     ),
 
     path(

@@ -11,6 +11,7 @@ from .serializers import (
     ActivityLogSerializer, NotificationSerializer, EmailLogSerializer
 )
 from tables.permissions import has_table_access
+from tables.services import TableEventBroadcaster
 
 class TaskViewSet(viewsets.ModelViewSet):
     serializer_class = TaskSerializer
@@ -34,6 +35,30 @@ class TaskViewSet(viewsets.ModelViewSet):
             "activity_logs", "activity_logs__user",
             "follow_ups", "follow_ups__entered_by"
         )
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        if instance.row:
+            TableEventBroadcaster.broadcast_task_updated(
+                table_id=instance.row.table_id,
+                task_id=instance.id,
+                row_id=instance.row_id,
+                user=self.request.user
+            )
+
+    def perform_destroy(self, instance):
+        table_id = instance.row.table_id if instance.row else None
+        row_id = instance.row_id
+        task_id = instance.id
+        user = self.request.user
+        super().perform_destroy(instance)
+        if table_id:
+            TableEventBroadcaster.broadcast_task_deleted(
+                table_id=table_id,
+                task_id=task_id,
+                row_id=row_id,
+                user=user
+            )
 
     @action(detail=True, methods=["post"], url_path="update-status")
     @transaction.atomic
@@ -107,6 +132,16 @@ class TaskViewSet(viewsets.ModelViewSet):
                     type="SYSTEM"
                 )
 
+        # Broadcast real-time status change event on transaction commit
+        TableEventBroadcaster.broadcast_task_status_changed(
+            table_id=task.row.table_id,
+            task_id=task.id,
+            row_id=task.row_id,
+            old_status=old_status,
+            new_status=new_status,
+            user=request.user
+        )
+
         return Response(TaskSerializer(task).data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["post"], url_path="bulk-update-status")
@@ -132,6 +167,7 @@ class TaskViewSet(viewsets.ModelViewSet):
             return Response({"message": "No matching tasks found to update"}, status=status.HTTP_200_OK)
 
         updated_count = 0
+        tables_updated = {}
         from tables.models import Column, CellValue
 
         for task in tasks:
@@ -156,7 +192,18 @@ class TaskViewSet(viewsets.ModelViewSet):
                 user=request.user,
                 details={"old_status": old_status, "new_status": new_status}
             )
+            tables_updated[task.row.table_id] = tables_updated.get(task.row.table_id, 0) + 1
             updated_count += 1
+
+        # Broadcast batch rows_updated event grouped by table on transaction commit
+        for tid, cnt in tables_updated.items():
+            TableEventBroadcaster.broadcast_rows_updated(
+                table_id=tid,
+                count=cnt,
+                field="STATUS",
+                value=new_status,
+                user=request.user
+            )
 
         return Response({"message": f"Successfully updated status to {new_status} for {updated_count} task(s)"}, status=status.HTTP_200_OK)
 
@@ -198,6 +245,16 @@ class TaskViewSet(viewsets.ModelViewSet):
                 description=f"You have been assigned a task by {request.user.full_name}",
                 type="ASSIGNED"
             )
+
+        # Broadcast real-time reassignment event on transaction commit
+        assignees_payload = [{"id": emp.id, "name": emp.full_name or emp.email} for emp in employees]
+        TableEventBroadcaster.broadcast_task_reassigned(
+            table_id=task.row.table_id,
+            task_id=task.id,
+            row_id=task.row_id,
+            assignees=assignees_payload,
+            user=request.user
+        )
 
         return Response(TaskSerializer(task).data, status=status.HTTP_200_OK)
 

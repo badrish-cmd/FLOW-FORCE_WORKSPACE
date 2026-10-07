@@ -566,3 +566,14 @@ def register_view(request):
         request,
         "auth/register.html"
     )
+
+
+@login_required
+def help_view(request):
+    """
+    Renders the Flow-Force User Guide and Help documentation.
+    Provides bilingual documentation (English and Bahasa Indonesia)
+    covering navigation, spreadsheet usage, real-time sync, task management,
+    drawings, and troubleshooting.
+    """
+    return render(request, "help.html", {"title": "Help & User Guide"})

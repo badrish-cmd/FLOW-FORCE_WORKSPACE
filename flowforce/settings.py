@@ -46,6 +46,7 @@ if sys.version_info >= (3, 14):
 # --------------------------------------------------
 
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -53,11 +54,14 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
 
+    # Third Party Apps
+    'channels',
+    'rest_framework',
+
     # Local Apps
     'auth_app',
     'employee_management',
     'drawing_library',
-    'rest_framework',
     'tables',
     'tasks',
 ]
@@ -113,10 +117,11 @@ TEMPLATES = [
 ]
 
 # --------------------------------------------------
-# WSGI
+# WSGI & ASGI
 # --------------------------------------------------
 
 WSGI_APPLICATION = 'flowforce.wsgi.application'
+ASGI_APPLICATION = 'flowforce.asgi.application'
 
 # --------------------------------------------------
 # DATABASE
@@ -350,6 +355,21 @@ CELERY_BEAT_SCHEDULE = {
     'retry-failed-emails': {
         'task': 'tasks.tasks.retry_failed_emails',
         'schedule': crontab(minute=0),  # Every hour
+    },
+}
+
+# --------------------------------------------------
+# CHANNELS (WEBSOCKET / REAL-TIME)
+# --------------------------------------------------
+
+CHANNELS_REDIS_URL = os.getenv('CHANNELS_REDIS_URL', 'redis://127.0.0.1:6379/2')
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            'hosts': [CHANNELS_REDIS_URL],
+        },
     },
 }
 
