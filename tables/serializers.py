@@ -66,6 +66,15 @@ class CellValueSerializer(serializers.ModelSerializer):
         model = CellValue
         fields = ["id", "row", "column", "column_name", "column_type", "value", "updated_by", "updated_at"]
 
+_DATETIME_FIELD = serializers.DateTimeField()
+
+def _format_datetime(dt):
+    if not dt:
+        return None
+    if isinstance(dt, str):
+        return dt
+    return _DATETIME_FIELD.to_representation(dt)
+
 class RowSerializer(serializers.ModelSerializer):
     cells = CellValueSerializer(many=True, read_only=True)
     task_details = serializers.SerializerMethodField()
@@ -73,6 +82,45 @@ class RowSerializer(serializers.ModelSerializer):
     class Meta:
         model = Row
         fields = ["id", "table", "created_by", "is_archived", "created_at", "updated_at", "cells", "task_details"]
+
+    def _format_dt(self, dt):
+        return _format_datetime(dt)
+
+    def _serialize_task(self, task, row_id):
+        if not task:
+            return None
+        assigned_by = task.assigned_by
+        assigned_by_detail = {
+            "id": assigned_by.id,
+            "full_name": assigned_by.full_name,
+            "email": assigned_by.email,
+            "role": assigned_by.role,
+        } if assigned_by else None
+
+        assigned_to_ids = []
+        assigned_to_details = []
+        for emp in task.assigned_to.all():
+            assigned_to_ids.append(emp.id)
+            assigned_to_details.append({
+                "id": emp.id,
+                "full_name": emp.full_name,
+                "email": emp.email,
+                "role": emp.role,
+            })
+
+        return {
+            "id": task.id,
+            "row": row_id,
+            "assigned_by": task.assigned_by_id,
+            "assigned_by_detail": assigned_by_detail,
+            "assigned_to": assigned_to_ids,
+            "assigned_to_details": assigned_to_details,
+            "status": task.status,
+            "due_date": task.due_date.isoformat() if task.due_date else None,
+            "priority": task.priority,
+            "created_at": self._format_dt(task.created_at),
+            "updated_at": self._format_dt(task.updated_at),
+        }
 
     def get_task_details(self, obj):
         task = getattr(obj, "task", None)
@@ -99,10 +147,41 @@ class RowSerializer(serializers.ModelSerializer):
             except Exception:
                 task = getattr(obj, "task", None)
 
-        if task:
-            from tasks.serializers import TaskMinSerializer
-            return TaskMinSerializer(task).data
-        return None
+        return self._serialize_task(task, obj.id)
+
+    def to_representation(self, instance):
+        # 1. Fast task serialization
+        task = getattr(instance, "task", None)
+        if task is None:
+            task_dict = self.get_task_details(instance)
+        else:
+            task_dict = self._serialize_task(task, instance.id)
+
+        # 2. Fast cells serialization
+        cells_list = []
+        for cell in instance.cells.all():
+            col = cell.column
+            cells_list.append({
+                "id": cell.id,
+                "row": cell.row_id,
+                "column": cell.column_id,
+                "column_name": col.name if col else None,
+                "column_type": col.data_type if col else None,
+                "value": cell.value,
+                "updated_by": cell.updated_by_id,
+                "updated_at": self._format_dt(cell.updated_at),
+            })
+
+        return {
+            "id": instance.id,
+            "table": instance.table_id,
+            "created_by": instance.created_by_id,
+            "is_archived": instance.is_archived,
+            "created_at": self._format_dt(instance.created_at),
+            "updated_at": self._format_dt(instance.updated_at),
+            "cells": cells_list,
+            "task_details": task_dict,
+        }
 
 class TableSerializer(serializers.ModelSerializer):
     columns = ColumnSerializer(many=True, read_only=True)

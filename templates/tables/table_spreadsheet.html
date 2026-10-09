@@ -748,7 +748,7 @@
 
                     <!-- Standard rows (Clean white surface, comfortable padding, subtle separators) -->
                     <template x-for="(row, rowIndex) in filteredRows()" :key="row.id">
-                        <tr :class="{'line-through text-slate-400 bg-slate-50/50 opacity-75': isRowCompleted(row)}" class="bg-white hover:bg-slate-50/70 transition-colors" @mouseenter="onRowHover(row.id)">
+                        <tr :class="{'line-through text-slate-400 bg-slate-50/50 opacity-75': isRowCompleted(row), 'bg-blue-50/40': selectedRowIds.includes(row.id)}" class="bg-white hover:bg-slate-50/80 transition-colors" @mouseenter="onRowHover(row.id)">
                             <td class="p-2 border-r border-slate-100/60 text-center align-middle w-12">
                                 <input type="checkbox" :value="row.id" x-model="selectedRowIds" class="rounded-md border-slate-300 text-blue-600 focus:ring-blue-500 h-4 w-4">
                             </td>
@@ -764,49 +764,51 @@
                                   @dblclick="if (rowEditingRowId !== row.id) editCell(row.id, {{ col.id }}, getCellValue(row, '{{ col.name }}'), '{{ col.data_type }}')">
                                   
                                   <!-- Row-Level Editing Inputs -->
-                                  <div x-show="rowEditingRowId === row.id" class="p-2">
-                                      <template x-if="'{{ col.data_type }}' === 'DATE' || '{{ col.data_type }}' === 'DATETIME'">
-                                          <input type="date" x-model="editingRowValues['{{ col.name }}']" 
-                                                 class="w-full bg-white border border-[#D1D5DB] hover:border-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 text-slate-900 rounded-lg p-1.5 text-xs outline-none shadow-2xs transition-all font-medium">
-                                      </template>
-                                      <template x-if="'{{ col.data_type }}' === 'DROPDOWN'">
-                                          <select x-model="editingRowValues['{{ col.name }}']" 
-                                                  class="w-full bg-white border border-[#D1D5DB] hover:border-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 text-slate-900 rounded-lg p-1.5 text-xs outline-none shadow-2xs transition-all font-medium">
-                                              <option value="">-- Select --</option>
-                                              <template x-for="opt in '{{ col.options|default:""|escapejs }}'.split(',').map(s => s.trim()).filter(Boolean)" :key="opt">
-                                                  <option :value="opt" x-text="opt" :selected="editingRowValues['{{ col.name }}'] === opt"></option>
-                                              </template>
-                                          </select>
-                                      </template>
-                                      <template x-if="'{{ col.data_type }}' === 'CHECKBOX'">
-                                          <input type="checkbox" 
-                                                 :checked="editingRowValues['{{ col.name }}'] === 'true' || editingRowValues['{{ col.name }}'] === true"
-                                                 @change="editingRowValues['{{ col.name }}'] = $event.target.checked ? 'true' : 'false'"
-                                                 class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300 rounded-md">
-                                      </template>
-                                      <template x-if="'{{ col.data_type }}' !== 'DATE' && '{{ col.data_type }}' !== 'DATETIME' && '{{ col.data_type }}' !== 'DROPDOWN' && '{{ col.data_type }}' !== 'CHECKBOX'">
-                                          <div>
-                                              <template x-if="isMultilineColumn('{{ col.name }}')">
-                                                  <textarea x-model="editingRowValues['{{ col.name }}']" 
-                                                            :rows="getColumnConfigByName('{{ col.name }}').rows || 2"
-                                                            :placeholder="getColumnConfigByName('{{ col.name }}').placeholder || 'Enter text...'"
-                                                            :maxlength="getColumnConfigByName('{{ col.name }}').maxLength"
-                                                            :class="getColumnConfigByName('{{ col.name }}').resizable ? 'resize-y' : 'resize-none'"
-                                                            class="w-full bg-white border border-[#D1D5DB] hover:border-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 text-slate-900 rounded-lg p-2 text-xs outline-none shadow-2xs transition-all font-medium min-h-[48px]"></textarea>
-                                              </template>
-                                              <template x-if="!isMultilineColumn('{{ col.name }}')">
-                                                  <input type="text" x-model="editingRowValues['{{ col.name }}']" 
-                                                         placeholder="Enter text..." 
-                                                         class="w-full bg-white border border-[#D1D5DB] hover:border-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 text-slate-900 rounded-lg p-1.5 text-xs outline-none shadow-2xs transition-all font-medium">
-                                              </template>
-                                          </div>
-                                      </template>
-                                  </div>
+                                  <template x-if="rowEditingRowId === row.id">
+                                      <div class="p-2">
+                                          <template x-if="'{{ col.data_type }}' === 'DATE' || '{{ col.data_type }}' === 'DATETIME'">
+                                              <input type="date" x-model="editingRowValues['{{ col.name }}']"
+                                                     class="w-full bg-white border border-[#D1D5DB] hover:border-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 text-slate-900 rounded-lg p-1.5 text-xs outline-none shadow-2xs transition-all font-medium">
+                                          </template>
+                                          <template x-if="'{{ col.data_type }}' === 'DROPDOWN'">
+                                              <select x-model="editingRowValues['{{ col.name }}']"
+                                                      class="w-full bg-white border border-[#D1D5DB] hover:border-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 text-slate-900 rounded-lg p-1.5 text-xs outline-none shadow-2xs transition-all font-medium">
+                                                  <option value="">-- Select --</option>
+                                                  <template x-for="opt in getDropdownOptions('{{ col.name }}')" :key="opt">
+                                                      <option :value="opt" x-text="opt" :selected="editingRowValues['{{ col.name }}'] === opt"></option>
+                                                  </template>
+                                              </select>
+                                          </template>
+                                          <template x-if="'{{ col.data_type }}' === 'CHECKBOX'">
+                                              <input type="checkbox"
+                                                     :checked="editingRowValues['{{ col.name }}'] === 'true' || editingRowValues['{{ col.name }}'] === true"
+                                                     @change="editingRowValues['{{ col.name }}'] = $event.target.checked ? 'true' : 'false'"
+                                                     class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300 rounded-md">
+                                          </template>
+                                          <template x-if="'{{ col.data_type }}' !== 'DATE' && '{{ col.data_type }}' !== 'DATETIME' && '{{ col.data_type }}' !== 'DROPDOWN' && '{{ col.data_type }}' !== 'CHECKBOX'">
+                                              <div>
+                                                  <template x-if="isMultilineColumn('{{ col.name }}')">
+                                                      <textarea x-model="editingRowValues['{{ col.name }}']"
+                                                                :rows="getColumnConfigByName('{{ col.name }}').rows || 2"
+                                                                :placeholder="getColumnConfigByName('{{ col.name }}').placeholder || 'Enter text...'"
+                                                                :maxlength="getColumnConfigByName('{{ col.name }}').maxLength"
+                                                                :class="getColumnConfigByName('{{ col.name }}').resizable ? 'resize-y' : 'resize-none'"
+                                                                class="w-full bg-white border border-[#D1D5DB] hover:border-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 text-slate-900 rounded-lg p-2 text-xs outline-none shadow-2xs transition-all font-medium min-h-[48px]"></textarea>
+                                                  </template>
+                                                  <template x-if="!isMultilineColumn('{{ col.name }}')">
+                                                      <input type="text" x-model="editingRowValues['{{ col.name }}']"
+                                                             placeholder="Enter text..."
+                                                             class="w-full bg-white border border-[#D1D5DB] hover:border-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 text-slate-900 rounded-lg p-1.5 text-xs outline-none shadow-2xs transition-all font-medium">
+                                                  </template>
+                                              </div>
+                                          </template>
+                                      </div>
+                                  </template>
 
                                   <!-- Cell Display / Single Cell Edit -->
                                   <div x-show="rowEditingRowId !== row.id">
                                       <div x-show="editingRowId !== row.id || editingColumnId !== {{ col.id }}"
-                                           class="px-4 py-2.5 min-h-[42px] flex items-center justify-between cursor-pointer">
+                                           class="px-3.5 py-1.5 min-h-[38px] flex items-center justify-between cursor-pointer">
                                            
                                            <!-- S_NO -->
                                            <template x-if="'{{ col.name }}' === 'S_NO'">
@@ -882,8 +884,8 @@
                                       </div>
 
                                       <!-- Single-cell Inline Editing inputs -->
-                                      <div x-show="editingRowId === row.id && editingColumnId === {{ col.id }}"
-                                           class="p-2">
+                                      <template x-if="editingRowId === row.id && editingColumnId === {{ col.id }}">
+                                          <div class="p-2">
                                           <template x-if="'{{ col.data_type }}' === 'DATE' || '{{ col.data_type }}' === 'DATETIME'">
                                               <input type="date" x-model="editingValue" 
                                                      @keydown.enter="$event.target.blur()" 
@@ -896,7 +898,7 @@
                                                       @change="saveCell" 
                                                       class="w-full bg-white border border-[#D1D5DB] hover:border-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 text-slate-900 rounded-lg p-1.5 text-xs font-medium outline-none shadow-2xs transition-all">
                                                   <option value="">-- Select --</option>
-                                                  <template x-for="opt in '{{ col.options|default:""|escapejs }}'.split(',').map(s => s.trim()).filter(Boolean)" :key="opt">
+                                                  <template x-for="opt in getDropdownOptions('{{ col.name }}')" :key="opt">
                                                       <option :value="opt" x-text="opt" :selected="editingValue === opt"></option>
                                                   </template>
                                               </select>
@@ -923,7 +925,8 @@
                                                   </template>
                                               </div>
                                           </template>
-                                      </div>
+                                          </div>
+                                      </template>
                                   </div>
                               </td>
                             </template>
@@ -2052,7 +2055,7 @@
             zoomLevel: 100,
             zoomLevels: [75, 80, 90, 100, 110, 120, 125],
             selectedRowIds: [],
-            columns: [{% for col in table.columns.all %}{id: {{ col.id }}, name: '{{ col.name }}', data_type: '{{ col.data_type }}', options: '{{ col.options|default:""|escapejs }}', is_filterable: {{ col.is_filterable|yesno:"true,false" }}}{% if not forloop.last %}, {% endif %}{% endfor %}],
+            columns: [{% for col in table.columns.all %}{id: {{ col.id }}, name: '{{ col.name }}', data_type: '{{ col.data_type }}', options: '{{ col.options|default:""|escapejs }}', is_filterable: {{ col.is_filterable|yesno:"true,false" }}, dropdownOptions: '{{ col.options|default:""|escapejs }}'.split(',').map(s => s.trim()).filter(Boolean)}{% if not forloop.last %}, {% endif %}{% endfor %}],
             rows: [],
             editingRowId: null,
             editingColumnId: null,
@@ -2975,6 +2978,16 @@ comments: [],
                 }
                 const cell = row.cells ? row.cells.find(c => c.column_name === columnName) : null;
                 return cell ? cell.value : '';
+            },
+
+            getDropdownOptions(colName) {
+                if (!this._dropdownMap) {
+                    this._dropdownMap = {};
+                    for (const col of this.columns) {
+                        this._dropdownMap[col.name] = col.dropdownOptions || [];
+                    }
+                }
+                return this._dropdownMap[colName] || [];
             },
 
             getJobColumnName() {
