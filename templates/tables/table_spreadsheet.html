@@ -73,22 +73,6 @@
             <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
                 {{ table.job_type }}
             </span>
-            <!-- Real-time Live Connection Indicator -->
-            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium transition-all"
-                  :class="{
-                      'bg-emerald-50 text-emerald-700 border border-emerald-200/80': wsStatus === 'connected',
-                      'bg-amber-50 text-amber-700 border border-amber-200/80': wsStatus === 'reconnecting' || wsStatus === 'connecting',
-                      'bg-slate-100 text-slate-500 border border-slate-200': wsStatus === 'offline'
-                  }"
-                  :title="wsStatus === 'connected' ? 'Real-time live updates connected' : (wsStatus === 'reconnecting' ? 'Reconnecting to real-time updates...' : (wsStatus === 'connecting' ? 'Connecting to real-time updates...' : 'Real-time updates offline'))">
-                <span class="w-1.5 h-1.5 rounded-full"
-                      :class="{
-                          'bg-emerald-500 animate-pulse': wsStatus === 'connected',
-                          'bg-amber-500 animate-ping': wsStatus === 'reconnecting' || wsStatus === 'connecting',
-                          'bg-slate-400': wsStatus === 'offline'
-                      }"></span>
-                <span x-text="wsStatus === 'connected' ? 'Live' : (wsStatus === 'reconnecting' ? 'Reconnecting...' : (wsStatus === 'connecting' ? 'Connecting...' : 'Offline'))"></span>
-            </span>
         </div>
 
         <!-- Main Title & Actions Row -->
