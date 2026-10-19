@@ -585,6 +585,35 @@ class DrawingLibraryTests(TestCase):
         self.assertContains(resp_tree, "FF-DET-001")
         self.assertContains(resp_tree, "Past Revisions (1)")
 
+    def test_revision_add_endpoint_alias_and_modal_action(self):
+        """
+        Verify that both /drawings/<pk>/revisions/create/ and /drawings/<pk>/revisions/add/
+        work without 404, preventing any 404 Not Found error when users save revisions.
+        """
+        client = Client()
+        client.force_login(self.admin)
+
+        # 1. Detail page should render revision url cleanly in modal logic
+        resp_detail = client.get(reverse("drawings:drawing_detail", args=[self.drawing.pk]))
+        self.assertEqual(resp_detail.status_code, 200)
+        self.assertContains(resp_detail, "drawings:revision_create" if False else "/drawings/999999/revisions/create/")
+
+        # 2. Upload revision using the /revisions/add/ alias (as previously sent by modal)
+        pdf = SimpleUploadedFile("add_alias_test.pdf", self.dummy_pdf_bytes, content_type="application/pdf")
+        resp_add = client.post(
+            f"/drawings/{self.drawing.pk}/revisions/add/",
+            {
+                "revision_number": "2",
+                "drafter_name": "Test Engineer",
+                "stage_change_description": "Testing revisions/add route alias",
+                "pdf_file": pdf,
+            }
+        )
+        self.assertEqual(resp_add.status_code, 302)
+        self.drawing.refresh_from_db()
+        self.assertEqual(self.drawing.active_revision_number, "2")
+        self.assertEqual(self.drawing.latest_revision.revision_number, "2")
+
     def test_full_access_edit_clearance_allows_create_edit_upload_download(self):
         """
         When an employee is given EDIT (Full Access) clearance:

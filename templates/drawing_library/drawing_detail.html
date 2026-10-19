@@ -1622,7 +1622,8 @@
     // Open Universal Revision Modal for any drawing node (Parent, Child, Grandchild)
     function openRevisionModal(drawingId, drawingNumber, drawingName, drafterName, currentRev) {
         var form = document.getElementById('universalRevisionForm');
-        form.action = '/drawings/' + drawingId + '/revisions/add/';
+        var createRevisionBaseUrl = "{% url 'drawings:revision_create' 999999 %}";
+        form.action = createRevisionBaseUrl.replace('999999', drawingId);
         document.getElementById('revisionModalTitle').innerText = 'Upload Revision: ' + drawingNumber;
         document.getElementById('revModalDwgDisplay').innerText = drawingNumber + ' - ' + drawingName;
         document.getElementById('revModalCurrentRev').innerText = 'Active: Rev ' + currentRev;
