@@ -14,8 +14,42 @@ from .views import (
     verify_otp_view,
     help_view,
 )
+from .device_views import (
+    device_register_view,
+    device_pending_view,
+    device_status_check_view,
+    device_unauthorized_view,
+)
 
 urlpatterns = [
+
+    # Device Authorization Gateway Routes
+    path(
+        "device/register/",
+        device_register_view,
+        name="device_register"
+    ),
+    path(
+        "device/pending/",
+        device_pending_view,
+        name="device_pending"
+    ),
+    path(
+        "device/status-check/",
+        device_status_check_view,
+        name="device_status_check"
+    ),
+    path(
+        "device/status/",
+        device_status_check_view,
+        name="device_status"
+    ),
+    path(
+        "device/unauthorized/",
+        device_unauthorized_view,
+        name="device_unauthorized"
+    ),
+
 
     path(
         "login/",

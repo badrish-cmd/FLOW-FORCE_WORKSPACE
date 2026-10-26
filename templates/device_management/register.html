@@ -1,0 +1,355 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Company Device Authorization - Flow-Force Workspace</title>
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome 6 -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --primary-dark: #0F172A;
+            --primary-surface: #1E293B;
+            --accent-blue: #2563EB;
+            --accent-cyan: #06B6D4;
+            --accent-hover: #1D4ED8;
+            --text-main: #0F172A;
+            --text-muted: #64748B;
+            --border-color: #E2E8F0;
+            --bg-light: #F8FAFC;
+            --card-shadow: 0 20px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-light);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem 1rem;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        /* Ambient background glow */
+        body::before {
+            content: '';
+            position: fixed;
+            top: -20%;
+            right: -10%;
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(37, 99, 235, 0.08) 0%, transparent 70%);
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        body::after {
+            content: '';
+            position: fixed;
+            bottom: -20%;
+            left: -10%;
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(6, 182, 212, 0.08) 0%, transparent 70%);
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        .auth-container {
+            width: 100%;
+            max-width: 680px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .main-card {
+            background: #FFFFFF;
+            border-radius: 1.25rem;
+            border: 1px solid var(--border-color);
+            box-shadow: var(--card-shadow);
+            overflow: hidden;
+        }
+
+        .card-header-custom {
+            background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary-surface) 100%);
+            color: #FFFFFF;
+            padding: 2.25rem 2.5rem;
+            position: relative;
+        }
+
+        .brand-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 0.35rem 0.85rem;
+            border-radius: 9999px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            letter-spacing: 0.04em;
+            color: #93C5FD;
+            margin-bottom: 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+
+        .card-body-custom {
+            padding: 2.5rem;
+        }
+
+        .security-banner {
+            background-color: #EFF6FF;
+            border-left: 4px solid var(--accent-blue);
+            border-radius: 0.5rem;
+            padding: 1rem 1.25rem;
+            margin-bottom: 2rem;
+            display: flex;
+            align-items: flex-start;
+            gap: 1rem;
+        }
+
+        .form-label {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--primary-dark);
+            margin-bottom: 0.4rem;
+        }
+
+        .form-control, .form-select {
+            border: 1.5px solid var(--border-color);
+            border-radius: 0.65rem;
+            padding: 0.75rem 1rem;
+            font-size: 0.95rem;
+            transition: all 0.2s ease;
+        }
+
+        .form-control:focus, .form-select:focus {
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+        }
+
+        .btn-submit {
+            background: linear-gradient(135deg, var(--accent-blue) 0%, var(--accent-hover) 100%);
+            border: none;
+            color: #FFFFFF;
+            font-weight: 600;
+            padding: 0.875rem 1.75rem;
+            border-radius: 0.65rem;
+            font-size: 1rem;
+            width: 100%;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+        }
+
+        .btn-submit:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35);
+            color: #FFFFFF;
+        }
+
+        .system-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            background: #F1F5F9;
+            padding: 0.3rem 0.75rem;
+            border-radius: 0.5rem;
+        }
+
+        .footer-note {
+            text-align: center;
+            margin-top: 1.5rem;
+            font-size: 0.825rem;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="auth-container">
+        <div class="main-card">
+            <!-- Header Section -->
+            <div class="card-header-custom">
+                <div class="brand-badge">
+                    <i class="fas fa-shield-halved"></i>
+                    DEVICE AUTHORIZATION GATEWAY
+                </div>
+                <h2 class="h3 fw-bold mb-1">Company Device Registration</h2>
+                <p class="mb-0 text-white-50" style="font-size: 0.95rem;">
+                    FlowForce Workspace requires authorized company hardware for portal access.
+                </p>
+            </div>
+
+            <!-- Body Section -->
+            <div class="card-body-custom">
+                <!-- Security Notice -->
+                <div class="security-banner">
+                    <i class="fas fa-laptop-code text-primary fs-4 mt-1"></i>
+                    <div>
+                        <div class="fw-semibold text-primary" style="font-size: 0.925rem;">Authorized Hardware Only</div>
+                        <div class="text-secondary small mt-0.5">
+                            Please register only your official company laptop or desktop. Personal smartphones, tablets, and unauthorized PCs are blocked by security policy.
+                        </div>
+                    </div>
+                </div>
+
+                {% if messages %}
+                    {% for message in messages %}
+                        <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-{{ message.tags }}{% endif %} alert-dismissible fade show" role="alert">
+                            <i class="fas fa-circle-exclamation me-2"></i>{{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+
+                <!-- Registration Form -->
+                <form method="POST" action="{% url 'device_register' %}">
+                    {% csrf_token %}
+
+                    <div class="row g-3">
+                        <!-- Employee Full Name -->
+                        <div class="col-md-6">
+                            <label for="requested_by_name" class="form-label">
+                                <i class="fas fa-user me-1 text-muted"></i> Your Full Name <span class="text-danger">*</span>
+                            </label>
+                            <input 
+                                type="text" 
+                                class="form-control" 
+                                id="requested_by_name" 
+                                name="requested_by_name" 
+                                placeholder="e.g. Budi Santoso"
+                                value="{{ requested_by_name|default:'' }}"
+                                required
+                            >
+                        </div>
+
+                        <!-- Company Email -->
+                        <div class="col-md-6">
+                            <label for="employee_email" class="form-label">
+                                <i class="fas fa-envelope me-1 text-muted"></i> Company Email
+                            </label>
+                            <input 
+                                type="email" 
+                                class="form-control" 
+                                id="employee_email" 
+                                name="employee_email" 
+                                placeholder="name@company.com"
+                                value="{{ employee_email|default:'' }}"
+                            >
+                            <div class="form-text" style="font-size: 0.78rem;">Used to auto-link your user profile</div>
+                        </div>
+
+                        <!-- Department Selection -->
+                        <div class="col-md-6">
+                            <label for="department" class="form-label">
+                                <i class="fas fa-building me-1 text-muted"></i> Department
+                            </label>
+                            {% if departments %}
+                                <select class="form-select" id="department" name="department">
+                                    <option value="">-- Select Department --</option>
+                                    {% for dept in departments %}
+                                        <option value="{{ dept.name }}" {% if department == dept.name %}selected{% endif %}>
+                                            {{ dept.name }}
+                                        </option>
+                                    {% endfor %}
+                                    <option value="Management" {% if department == 'Management' %}selected{% endif %}>Management</option>
+                                    <option value="Other" {% if department == 'Other' %}selected{% endif %}>Other</option>
+                                </select>
+                            {% else %}
+                                <input 
+                                    type="text" 
+                                    class="form-control" 
+                                    id="department" 
+                                    name="department" 
+                                    placeholder="e.g. Engineering, Sales, Accounting"
+                                    value="{{ department|default:'' }}"
+                                >
+                            {% endif %}
+                        </div>
+
+                        <!-- Laptop / Machine Model -->
+                        <div class="col-md-6">
+                            <label for="device_name" class="form-label">
+                                <i class="fas fa-laptop me-1 text-muted"></i> Device / Laptop Model <span class="text-danger">*</span>
+                            </label>
+                            <input 
+                                type="text" 
+                                class="form-control" 
+                                id="device_name" 
+                                name="device_name" 
+                                placeholder="e.g. HP ProBook 450 G8 (Accounting #02)"
+                                value="{{ device_name|default:'' }}"
+                                required
+                            >
+                        </div>
+
+                        <!-- Asset Tag / Serial -->
+                        <div class="col-12">
+                            <label for="asset_tag" class="form-label">
+                                <i class="fas fa-barcode me-1 text-muted"></i> Company Asset Tag / Serial Number (Optional)
+                            </label>
+                            <input 
+                                type="text" 
+                                class="form-control" 
+                                id="asset_tag" 
+                                name="asset_tag" 
+                                placeholder="e.g. FF-ID-LPT-042 or Serial Number"
+                                value="{{ asset_tag|default:'' }}"
+                            >
+                        </div>
+                    </div>
+
+                    <!-- Detected Device Metadata -->
+                    <div class="mt-4 p-3 bg-light rounded-3 border">
+                        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+                            <div class="system-pill">
+                                <i class="fas fa-network-wired text-muted"></i>
+                                <span>Network IP: <strong>{{ client_ip }}</strong></span>
+                            </div>
+                            <div class="system-pill">
+                                <i class="fas fa-microchip text-muted"></i>
+                                <span>Detected: <strong>{{ detected_device }}</strong></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <div class="mt-4">
+                        <button type="submit" class="btn btn-submit" id="submitBtn">
+                            <i class="fas fa-paper-plane me-2"></i> Submit for Management Approval
+                        </button>
+                    </div>
+                </form>
+
+                <div class="footer-note">
+                    Approval requests are dispatched immediately to Management in India. Typical response time is under 15 minutes during business hours.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap 5 JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.querySelector('form').addEventListener('submit', function() {
+            var btn = document.getElementById('submitBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span> Submitting Device Request...';
+        });
+    </script>
+</body>
+</html>

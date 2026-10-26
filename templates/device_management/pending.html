@@ -1,0 +1,380 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Device Approval Pending - Flow-Force Workspace</title>
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome 6 -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --primary-dark: #0F172A;
+            --primary-surface: #1E293B;
+            --accent-blue: #2563EB;
+            --accent-amber: #F59E0B;
+            --accent-green: #10B981;
+            --text-main: #0F172A;
+            --text-muted: #64748B;
+            --border-color: #E2E8F0;
+            --bg-light: #F8FAFC;
+            --card-shadow: 0 20px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-light);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem 1rem;
+            position: relative;
+        }
+
+        /* Pulse Radar Container */
+        .pulse-container {
+            position: relative;
+            width: 100px;
+            height: 100px;
+            margin: 0 auto 1.75rem auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .pulse-circle {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: rgba(245, 158, 11, 0.15);
+            animation: pulse-ring 2.2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+        }
+
+        .pulse-circle-2 {
+            position: absolute;
+            width: 80%;
+            height: 80%;
+            border-radius: 50%;
+            background: rgba(245, 158, 11, 0.25);
+            animation: pulse-ring 2.2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite 0.4s;
+        }
+
+        .pulse-core {
+            position: relative;
+            z-index: 2;
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #FFFFFF;
+            font-size: 1.6rem;
+            box-shadow: 0 10px 15px -3px rgba(245, 158, 11, 0.4);
+            transition: all 0.5s ease;
+        }
+
+        .pulse-core.approved {
+            background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+            box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.4);
+        }
+
+        @keyframes pulse-ring {
+            0% {
+                transform: scale(0.6);
+                opacity: 0.8;
+            }
+            80%, 100% {
+                transform: scale(1.6);
+                opacity: 0;
+            }
+        }
+
+        .main-card {
+            background: #FFFFFF;
+            border-radius: 1.25rem;
+            border: 1px solid var(--border-color);
+            box-shadow: var(--card-shadow);
+            max-width: 620px;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        .card-header-custom {
+            background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary-surface) 100%);
+            color: #FFFFFF;
+            padding: 2rem 2.25rem;
+            text-align: center;
+        }
+
+        .card-body-custom {
+            padding: 2.5rem;
+            text-align: center;
+        }
+
+        .device-info-box {
+            background: #F8FAFC;
+            border: 1px solid var(--border-color);
+            border-radius: 0.75rem;
+            padding: 1.25rem;
+            margin: 1.5rem 0;
+            text-align: left;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.4rem 0;
+            font-size: 0.9rem;
+            border-bottom: 1px dashed #E2E8F0;
+        }
+
+        .info-row:last-child {
+            border-bottom: none;
+        }
+
+        .info-label {
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .info-value {
+            color: var(--text-main);
+            font-weight: 600;
+        }
+
+        .status-badge-pending {
+            background: #FEF3C7;
+            color: #92400E;
+            padding: 0.35rem 0.85rem;
+            border-radius: 9999px;
+            font-size: 0.825rem;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .status-badge-approved {
+            background: #D1FAE5;
+            color: #065F46;
+            padding: 0.35rem 0.85rem;
+            border-radius: 9999px;
+            font-size: 0.825rem;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .btn-check-now {
+            background-color: #FFFFFF;
+            border: 1.5px solid var(--border-color);
+            color: var(--primary-dark);
+            font-weight: 600;
+            padding: 0.65rem 1.25rem;
+            border-radius: 0.5rem;
+            font-size: 0.9rem;
+            transition: all 0.2s ease;
+        }
+
+        .btn-check-now:hover {
+            background-color: #F1F5F9;
+            border-color: #CBD5E1;
+        }
+
+        .radar-log {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="main-card">
+        <!-- Header -->
+        <div class="card-header-custom">
+            <div class="d-inline-flex align-items-center gap-2 mb-2 text-warning" style="font-size: 0.85rem; font-weight: 600; letter-spacing: 0.05em;">
+                <i class="fas fa-shield-halved"></i>
+                SECURITY GATEWAY RESTRICTION
+            </div>
+            <h2 class="h4 fw-bold mb-1">Device Authorization Pending</h2>
+            <p class="mb-0 text-white-50 small">
+                Request is currently in review by Admin / Management in India
+            </p>
+        </div>
+
+        <!-- Body -->
+        <div class="card-body-custom">
+            <!-- Animated Pulse Core -->
+            <div class="pulse-container">
+                <div class="pulse-circle" id="pulseRing1"></div>
+                <div class="pulse-circle-2" id="pulseRing2"></div>
+                <div class="pulse-core" id="pulseCore">
+                    <i class="fas fa-clock" id="pulseIcon"></i>
+                </div>
+            </div>
+
+            <!-- Dynamic Status Badge -->
+            <div class="mb-3">
+                <span class="status-badge-pending" id="statusBadge">
+                    <i class="fas fa-hourglass-half"></i>
+                    Awaiting Administrator Approval
+                </span>
+            </div>
+
+            <h3 class="h5 fw-bold text-dark" id="statusHeading">Registration Request Submitted</h3>
+            <p class="text-muted small mb-3" id="statusDescription">
+                Your device credentials have been recorded. Once approved by Management in India, this page will automatically reload and redirect you to the login screen.
+            </p>
+
+            <!-- Device Summary Box -->
+            <div class="device-info-box">
+                <div class="info-row">
+                    <span class="info-label"><i class="fas fa-laptop me-1"></i> Device Model</span>
+                    <span class="info-value">{{ device.device_name }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label"><i class="fas fa-user me-1"></i> Registered To</span>
+                    <span class="info-value">{{ device.requested_by_name }}</span>
+                </div>
+                {% if device.department %}
+                <div class="info-row">
+                    <span class="info-label"><i class="fas fa-building me-1"></i> Department</span>
+                    <span class="info-value">{{ device.department }}</span>
+                </div>
+                {% endif %}
+                {% if device.asset_tag %}
+                <div class="info-row">
+                    <span class="info-label"><i class="fas fa-barcode me-1"></i> Asset Tag</span>
+                    <span class="info-value">{{ device.asset_tag }}</span>
+                </div>
+                {% endif %}
+                <div class="info-row">
+                    <span class="info-label"><i class="fas fa-network-wired me-1"></i> Network IP</span>
+                    <span class="info-value">{{ client_ip }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label"><i class="fas fa-calendar-alt me-1"></i> Submitted At</span>
+                    <span class="info-value">{{ device.created_at|date:"d M Y, H:i" }} IST</span>
+                </div>
+            </div>
+
+            <!-- Polling controls -->
+            <div class="d-flex align-items-center justify-content-center gap-3">
+                <button type="button" class="btn btn-check-now" id="checkNowBtn" onclick="pollStatus(true)">
+                    <i class="fas fa-rotate me-1" id="btnRefreshIcon"></i> Check Status Now
+                </button>
+            </div>
+
+            <div class="radar-log" id="pollLog">
+                <i class="fas fa-circle-notch fa-spin me-1 text-primary"></i> Checking with server every 5 seconds...
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap 5 JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Auto Polling Script -->
+    <script>
+        const STATUS_URL = "{% url 'device_status_check' %}";
+        let isPolling = false;
+        let pollCount = 0;
+
+        async function pollStatus(isManual = false) {
+            if (isPolling) return;
+            isPolling = true;
+
+            const btnIcon = document.getElementById('btnRefreshIcon');
+            const pollLog = document.getElementById('pollLog');
+
+            if (isManual && btnIcon) {
+                btnIcon.classList.add('fa-spin');
+            }
+
+            try {
+                const response = await fetch(STATUS_URL, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    cache: 'no-store'
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    pollCount++;
+
+                    if (data.status === 'APPROVED') {
+                        // Transform UI to approved state
+                        handleApproved(data.redirect_url || '/login/');
+                        return;
+                    } else if (data.status === 'REJECTED' || data.status === 'REVOKED') {
+                        window.location.href = data.redirect_url || '/device/unauthorized/';
+                        return;
+                    } else {
+                        pollLog.innerHTML = `<i class="fas fa-circle-notch fa-spin me-1 text-warning"></i> Still pending approval (Check #${pollCount}). Auto-refreshing...`;
+                    }
+                } else if (response.status === 404) {
+                    pollLog.innerHTML = '<span class="text-danger"><i class="fas fa-triangle-exclamation me-1"></i> Registration record not found. Redirecting...</span>';
+                    setTimeout(() => window.location.href = '/device/register/', 2000);
+                    return;
+                }
+            } catch (err) {
+                console.warn('Status poll error:', err);
+                pollLog.innerHTML = '<span class="text-muted"><i class="fas fa-wifi me-1"></i> Network reconnecting...</span>';
+            } finally {
+                isPolling = false;
+                if (btnIcon) {
+                    btnIcon.classList.remove('fa-spin');
+                }
+            }
+        }
+
+        function handleApproved(redirectUrl) {
+            // Update pulse core to green checkmark
+            const core = document.getElementById('pulseCore');
+            const icon = document.getElementById('pulseIcon');
+            const badge = document.getElementById('statusBadge');
+            const heading = document.getElementById('statusHeading');
+            const desc = document.getElementById('statusDescription');
+            const pollLog = document.getElementById('pollLog');
+
+            core.classList.add('approved');
+            icon.className = 'fas fa-check';
+
+            badge.className = 'status-badge-approved';
+            badge.innerHTML = '<i class="fas fa-circle-check"></i> Device Approved';
+
+            heading.innerText = 'Authorization Granted!';
+            desc.innerText = 'Your laptop has been officially approved. Initializing secure session and redirecting...';
+            pollLog.innerHTML = '<span class="text-success fw-semibold"><i class="fas fa-arrow-right me-1"></i> Redirecting to FlowForce Portal...</span>';
+
+            // Auto redirect
+            setTimeout(() => {
+                window.location.href = redirectUrl;
+            }, 1200);
+        }
+
+        // Schedule polling every 5 seconds
+        setInterval(() => pollStatus(false), 5000);
+        // Initial quick check
+        setTimeout(() => pollStatus(false), 1500);
+    </script>
+</body>
+</html>

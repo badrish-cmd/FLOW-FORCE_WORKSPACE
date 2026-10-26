@@ -78,6 +78,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'auth_app.middleware.DeviceGatekeeperMiddleware',
 ]
 
 # Allow same-origin iframe embedding for clean in-browser PDF previews
@@ -386,4 +387,16 @@ def configure_sqlite(sender, connection, **kwargs):
         cursor.execute('PRAGMA journal_mode=WAL;')
         cursor.execute('PRAGMA synchronous=NORMAL;')
         cursor.execute('PRAGMA busy_timeout=10000;')  # 10s busy timeout
+
+# --------------------------------------------------
+# DEVICE AUTHORIZATION & ACCESS RESTRICTION SYSTEM
+# --------------------------------------------------
+# Operational mode: 'ENFORCE' | 'LOG_ONLY' / 'SOFT' | 'DISABLED'
+DEVICE_RESTRICTION_MODE = os.getenv('DEVICE_RESTRICTION_MODE', 'ENFORCE')
+DEVICE_COOKIE_NAME = 'ff_device_token'
+DEVICE_PENDING_COOKIE_NAME = 'ff_pending_device_token'
+DEVICE_COOKIE_AGE = int(os.getenv('DEVICE_COOKIE_AGE', 365 * 24 * 60 * 60))  # 1 year
+DEVICE_BYPASS_TOKEN = os.getenv('DEVICE_BYPASS_TOKEN', None)
+DEVICE_RESTRICTION_TESTING = False
+
 

@@ -1,0 +1,202 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Access Restricted - Flow-Force Workspace</title>
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome 6 -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --primary-dark: #0F172A;
+            --primary-surface: #1E293B;
+            --accent-red: #EF4444;
+            --accent-red-dark: #DC2626;
+            --accent-blue: #2563EB;
+            --text-main: #0F172A;
+            --text-muted: #64748B;
+            --border-color: #E2E8F0;
+            --bg-light: #F8FAFC;
+            --card-shadow: 0 20px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-light);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem 1rem;
+        }
+
+        .main-card {
+            background: #FFFFFF;
+            border-radius: 1.25rem;
+            border: 1px solid var(--border-color);
+            box-shadow: var(--card-shadow);
+            max-width: 600px;
+            width: 100%;
+            overflow: hidden;
+            text-align: center;
+        }
+
+        .card-header-custom {
+            background: linear-gradient(135deg, #1E1B4B 0%, #0F172A 100%);
+            color: #FFFFFF;
+            padding: 2.25rem 2rem;
+            position: relative;
+        }
+
+        .shield-icon-wrapper {
+            width: 72px;
+            height: 72px;
+            border-radius: 50%;
+            background: rgba(239, 68, 68, 0.15);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 1.25rem auto;
+            border: 2px solid rgba(239, 68, 68, 0.3);
+            color: var(--accent-red);
+            font-size: 2rem;
+        }
+
+        .card-body-custom {
+            padding: 2.25rem;
+        }
+
+        .audit-box {
+            background: #FEF2F2;
+            border: 1px solid #FEE2E2;
+            border-radius: 0.75rem;
+            padding: 1.25rem;
+            margin: 1.5rem 0;
+            text-align: left;
+            font-size: 0.85rem;
+        }
+
+        .audit-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.35rem 0;
+            border-bottom: 1px dashed #FECACA;
+        }
+
+        .audit-item:last-child {
+            border-bottom: none;
+        }
+
+        .btn-register-device {
+            background: linear-gradient(135deg, var(--accent-blue) 0%, #1D4ED8 100%);
+            border: none;
+            color: #FFFFFF;
+            font-weight: 600;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.65rem;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn-register-device:hover {
+            transform: translateY(-1px);
+            color: #FFFFFF;
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+        }
+
+        .admin-link {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            text-decoration: none;
+            transition: color 0.2s ease;
+        }
+
+        .admin-link:hover {
+            color: var(--accent-blue);
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="main-card">
+        <!-- Header -->
+        <div class="card-header-custom">
+            <div class="shield-icon-wrapper">
+                <i class="fas fa-ban"></i>
+            </div>
+            <h2 class="h4 fw-bold mb-1">Access Restricted</h2>
+            <p class="mb-0 text-white-50 small">
+                Device Authorization & Security Policy
+            </p>
+        </div>
+
+        <!-- Body -->
+        <div class="card-body-custom">
+            <h3 class="h5 fw-bold text-dark mb-2">Unauthorized Device Detected</h3>
+            <p class="text-muted small">
+                The FlowForce Workspace portal is restricted exclusively to <strong>approved company laptops and workstations</strong>. Access from personal smartphones, unauthorized tablets, or unverified computers is prohibited.
+            </p>
+
+            <!-- Audit Trail -->
+            <div class="audit-box">
+                <div class="audit-item">
+                    <span class="text-secondary"><i class="fas fa-network-wired me-1"></i> Client IP:</span>
+                    <span class="fw-semibold text-dark">{{ client_ip }}</span>
+                </div>
+                <div class="audit-item">
+                    <span class="text-secondary"><i class="fas fa-laptop me-1"></i> Signature:</span>
+                    <span class="fw-semibold text-dark">{{ detected_device }}</span>
+                </div>
+                <div class="audit-item">
+                    <span class="text-secondary"><i class="fas fa-clock me-1"></i> Timestamp:</span>
+                    <span class="fw-semibold text-dark">{{ now|date:"d M Y, H:i:s" }}</span>
+                </div>
+                {% if device %}
+                <div class="audit-item">
+                    <span class="text-secondary"><i class="fas fa-tag me-1"></i> Device Status:</span>
+                    <span class="badge bg-danger">{{ device.get_status_display }}</span>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Action buttons -->
+            <div class="mt-4 d-flex flex-column align-items-center gap-3">
+                <a href="{% url 'device_register' %}" class="btn-register-device">
+                    <i class="fas fa-laptop-medical"></i> Register This Company Laptop
+                </a>
+
+                <div class="small text-muted">
+                    If this is an official company laptop and you need immediate clearance,<br>
+                    contact <strong>General Management or IT in India</strong>.
+                </div>
+            </div>
+
+            <hr class="my-4" style="border-color: var(--border-color);">
+
+            <div class="d-flex justify-content-between align-items-center">
+                <span class="small text-muted">FlowForce Security Gateway</span>
+                <a href="/admin/login/" class="admin-link">
+                    <i class="fas fa-lock me-1"></i> Admin Emergency Login
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap 5 JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
