@@ -30,7 +30,7 @@ class DeviceGatekeeperMiddleware:
         "/static/",
         "/media/",
         "/favicon.ico",
-        "/admin/login/",
+        "/admin/",
     )
 
     def __init__(self, get_response):
