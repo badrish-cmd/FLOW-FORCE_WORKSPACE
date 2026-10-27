@@ -196,4 +196,54 @@ class AuthorizedDevice(models.Model):
     def is_approved(self):
         return self.status == "APPROVED"
 
+    @classmethod
+    def is_ip_approved(cls, ip_address):
+        """
+        Check if an IP address is authorized.
+        True if IP matches settings.DEVICE_TRUSTED_IPS or any APPROVED AuthorizedDevice record.
+        """
+        if not ip_address:
+            return False
+
+        # 1. Configured static trusted IPs
+        trusted_ips_str = getattr(settings, "DEVICE_TRUSTED_IPS", "")
+        if trusted_ips_str:
+            trusted_list = [ip.strip() for ip in str(trusted_ips_str).split(",") if ip.strip()]
+            if ip_address in trusted_list:
+                return True
+
+        # 2. Approved devices database check
+        return cls.objects.filter(
+            status="APPROVED"
+        ).filter(
+            models.Q(registration_ip=ip_address) | models.Q(last_seen_ip=ip_address)
+        ).exists()
+
+    @classmethod
+    def get_approved_device_for_ip(cls, ip_address, user=None, email=None):
+        """
+        Retrieve or find the most appropriate APPROVED AuthorizedDevice record for an IP address.
+        """
+        if not ip_address:
+            return None
+
+        qs = cls.objects.filter(
+            status="APPROVED"
+        ).filter(
+            models.Q(registration_ip=ip_address) | models.Q(last_seen_ip=ip_address)
+        )
+
+        if user and getattr(user, "is_authenticated", False):
+            user_dev = qs.filter(assigned_user=user).first()
+            if user_dev:
+                return user_dev
+
+        if email:
+            email_dev = qs.filter(employee_email__iexact=email).first()
+            if email_dev:
+                return email_dev
+
+        return qs.order_by("-approved_at", "-last_used_at").first()
+
+
     

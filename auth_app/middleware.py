@@ -15,14 +15,18 @@ def get_client_ip(request):
     x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
     if x_forwarded_for:
         return x_forwarded_for.split(",")[0].strip()
+    x_real_ip = request.META.get("HTTP_X_REAL_IP")
+    if x_real_ip:
+        return x_real_ip.strip()
     return request.META.get("REMOTE_ADDR")
 
 
 class DeviceGatekeeperMiddleware:
     """
     FlowForce Gatekeeper Middleware.
-    Restricts access exclusively to authorized company hardware.
+    Restricts access exclusively to authorized company hardware and authorized IP addresses.
     Checks for the 'ff_device_token' cookie and validates against AuthorizedDevice records.
+    If accessing from an approved IP, automatically grants access and provisions the device cookie.
     """
 
     EXEMPT_PATH_PREFIXES = (
@@ -72,6 +76,12 @@ class DeviceGatekeeperMiddleware:
 
         cookie_name = getattr(settings, "DEVICE_COOKIE_NAME", "ff_device_token")
         pending_cookie_name = getattr(settings, "DEVICE_PENDING_COOKIE_NAME", "ff_pending_device_token")
+        cookie_age = getattr(settings, "DEVICE_COOKIE_AGE", 365 * 24 * 60 * 60)
+        secure = request.is_secure() or (not settings.DEBUG)
+
+        client_ip = get_client_ip(request)
+        ip_is_approved = AuthorizedDevice.is_ip_approved(client_ip)
+
         token_str = request.COOKIES.get(cookie_name)
 
         # 5. Soft Mode / Log-Only handling
@@ -84,11 +94,51 @@ class DeviceGatekeeperMiddleware:
                         request.authorized_device = device
                 except (ValueError, TypeError):
                     pass
-            logger.debug(f"[DeviceGatekeeper:LogOnly] Path={path}, IP={get_client_ip(request)}, Token={token_str}")
+            logger.debug(f"[DeviceGatekeeper:LogOnly] Path={path}, IP={client_ip}, Token={token_str}")
             return self.get_response(request)
 
-        # 6. ENFORCE MODE: Cookie Verification
+        # 6. ENFORCE MODE: Cookie Verification & IP Authorization
         if not token_str:
+            # Check if this IP is already approved
+            if ip_is_approved:
+                approved_device = AuthorizedDevice.get_approved_device_for_ip(client_ip, user=user)
+                if not approved_device:
+                    approved_device = AuthorizedDevice.objects.create(
+                        device_token=uuid.uuid4(),
+                        device_name=f"Authorized Network Device ({client_ip})",
+                        requested_by_name="Office Network User",
+                        status="APPROVED",
+                        registration_ip=client_ip,
+                        last_seen_ip=client_ip,
+                        approved_at=timezone.now(),
+                    )
+
+                # Auto-approve pending device cookie if present
+                pending_token = request.COOKIES.get(pending_cookie_name)
+                if pending_token:
+                    try:
+                        p_uuid = uuid.UUID(str(pending_token).strip())
+                        AuthorizedDevice.objects.filter(device_token=p_uuid, status="PENDING").update(
+                            status="APPROVED",
+                            approved_at=timezone.now(),
+                        )
+                    except (ValueError, TypeError):
+                        pass
+
+                request.authorized_device = approved_device
+                response = self.get_response(request)
+                response.set_cookie(
+                    key=cookie_name,
+                    value=str(approved_device.device_token),
+                    max_age=cookie_age,
+                    httponly=True,
+                    samesite="Lax",
+                    secure=secure,
+                )
+                if request.COOKIES.get(pending_cookie_name):
+                    response.delete_cookie(pending_cookie_name)
+                return response
+
             # Check if pending registration cookie exists
             if request.COOKIES.get(pending_cookie_name):
                 return redirect("/device/pending/")
@@ -98,6 +148,20 @@ class DeviceGatekeeperMiddleware:
         try:
             device_token = uuid.UUID(str(token_str).strip())
         except (ValueError, TypeError):
+            if ip_is_approved:
+                approved_device = AuthorizedDevice.get_approved_device_for_ip(client_ip, user=user)
+                if approved_device:
+                    request.authorized_device = approved_device
+                    response = self.get_response(request)
+                    response.set_cookie(
+                        key=cookie_name,
+                        value=str(approved_device.device_token),
+                        max_age=cookie_age,
+                        httponly=True,
+                        samesite="Lax",
+                        secure=secure,
+                    )
+                    return response
             # Corrupted cookie -> clear and redirect
             response = redirect("/device/register/")
             response.delete_cookie(cookie_name)
@@ -106,6 +170,20 @@ class DeviceGatekeeperMiddleware:
         # 7. Database Verification
         device = AuthorizedDevice.objects.filter(device_token=device_token).first()
         if not device:
+            if ip_is_approved:
+                approved_device = AuthorizedDevice.get_approved_device_for_ip(client_ip, user=user)
+                if approved_device:
+                    request.authorized_device = approved_device
+                    response = self.get_response(request)
+                    response.set_cookie(
+                        key=cookie_name,
+                        value=str(approved_device.device_token),
+                        max_age=cookie_age,
+                        httponly=True,
+                        samesite="Lax",
+                        secure=secure,
+                    )
+                    return response
             # Token not recognized in database -> delete cookie & redirect to register
             response = redirect("/device/register/")
             response.delete_cookie(cookie_name)
@@ -114,7 +192,6 @@ class DeviceGatekeeperMiddleware:
         # Check status
         if device.status == "APPROVED":
             # Throttled update of last_seen_ip and last_used_at (avoid heavy DB writes on every asset request)
-            client_ip = get_client_ip(request)
             now = timezone.now()
             time_diff = (now - device.last_used_at).total_seconds() if device.last_used_at else 9999
             if time_diff > 300 or device.last_seen_ip != client_ip:
@@ -127,6 +204,25 @@ class DeviceGatekeeperMiddleware:
             return self.get_response(request)
 
         elif device.status == "PENDING":
+            if ip_is_approved:
+                # Promote pending device immediately since IP is pre-authorized
+                device.status = "APPROVED"
+                device.approved_at = timezone.now()
+                device.last_seen_ip = client_ip
+                device.save(update_fields=["status", "approved_at", "last_seen_ip"])
+                request.authorized_device = device
+                response = self.get_response(request)
+                response.set_cookie(
+                    key=cookie_name,
+                    value=str(device.device_token),
+                    max_age=cookie_age,
+                    httponly=True,
+                    samesite="Lax",
+                    secure=secure,
+                )
+                if request.COOKIES.get(pending_cookie_name):
+                    response.delete_cookie(pending_cookie_name)
+                return response
             return redirect("/device/pending/")
 
         elif device.status in ("REJECTED", "REVOKED"):
@@ -135,4 +231,7 @@ class DeviceGatekeeperMiddleware:
             return response
 
         # Fallback redirect to register
+        if ip_is_approved:
+            return self.get_response(request)
         return redirect("/device/register/")
+

@@ -84,6 +84,28 @@ def device_register_view(request):
         except (ValueError, TypeError):
             pass
 
+    client_ip = get_client_ip(request)
+    ip_is_approved = AuthorizedDevice.is_ip_approved(client_ip)
+
+    # If incoming client IP is pre-authorized, auto-link approved device and go to login
+    if ip_is_approved and request.method == "GET":
+        approved_device = AuthorizedDevice.get_approved_device_for_ip(client_ip)
+        if approved_device:
+            messages.info(request, f"Your network IP ({client_ip}) is authorized. Welcome back!")
+            response = redirect("/login/")
+            cookie_age = getattr(settings, "DEVICE_COOKIE_AGE", 365 * 24 * 60 * 60)
+            secure = request.is_secure() or (not settings.DEBUG)
+            response.set_cookie(
+                key=cookie_name,
+                value=str(approved_device.device_token),
+                max_age=cookie_age,
+                httponly=True,
+                samesite="Lax",
+                secure=secure,
+            )
+            response.delete_cookie(pending_cookie_name)
+            return response
+
     # If pending cookie exists, direct to pending page
     pending_token = request.COOKIES.get(pending_cookie_name) or request.session.get("pending_device_token")
     if pending_token and request.method == "GET":
@@ -91,6 +113,23 @@ def device_register_view(request):
             pending_uuid = uuid.UUID(str(pending_token).strip())
             pending_device = AuthorizedDevice.objects.filter(device_token=pending_uuid, status="PENDING").first()
             if pending_device:
+                if ip_is_approved or AuthorizedDevice.is_ip_approved(pending_device.registration_ip):
+                    pending_device.status = "APPROVED"
+                    pending_device.approved_at = timezone.now()
+                    pending_device.save(update_fields=["status", "approved_at"])
+                    response = redirect("/login/")
+                    cookie_age = getattr(settings, "DEVICE_COOKIE_AGE", 365 * 24 * 60 * 60)
+                    secure = request.is_secure() or (not settings.DEBUG)
+                    response.set_cookie(
+                        key=cookie_name,
+                        value=str(pending_device.device_token),
+                        max_age=cookie_age,
+                        httponly=True,
+                        samesite="Lax",
+                        secure=secure,
+                    )
+                    response.delete_cookie(pending_cookie_name)
+                    return response
                 return redirect("/device/pending/")
         except (ValueError, TypeError):
             pass
@@ -141,6 +180,9 @@ def device_register_view(request):
         if employee_email:
             assigned_user = EmployeeUser.objects.filter(email__iexact=employee_email).first()
 
+        initial_status = "APPROVED" if ip_is_approved else "PENDING"
+        approved_at_val = timezone.now() if ip_is_approved else None
+
         device = AuthorizedDevice.objects.create(
             device_token=uuid.uuid4(),
             device_name=device_name,
@@ -149,16 +191,33 @@ def device_register_view(request):
             employee_email=employee_email or None,
             department=department,
             assigned_user=assigned_user,
-            status="PENDING",
+            status=initial_status,
             registration_ip=client_ip,
             last_seen_ip=client_ip,
             user_agent_summary=ua_summary,
+            approved_at=approved_at_val,
         )
 
         logger.info(
             f"New device registration created: ID={device.id}, Name='{device_name}', "
-            f"User='{requested_by_name}', IP={client_ip}"
+            f"User='{requested_by_name}', IP={client_ip}, Status={initial_status}"
         )
+
+        if initial_status == "APPROVED":
+            messages.success(request, f"Device '{device_name}' authorized via approved IP ({client_ip})! You may now sign in.")
+            response = redirect("/login/")
+            secure = request.is_secure() or (not settings.DEBUG)
+            cookie_age = getattr(settings, "DEVICE_COOKIE_AGE", 365 * 24 * 60 * 60)
+            response.set_cookie(
+                key=cookie_name,
+                value=str(device.device_token),
+                max_age=cookie_age,
+                httponly=True,
+                samesite="Lax",
+                secure=secure,
+            )
+            response.delete_cookie(pending_cookie_name)
+            return response
 
         response = redirect("/device/pending/")
         secure = request.is_secure() or (not settings.DEBUG)
@@ -216,8 +275,16 @@ def device_pending_view(request):
     if not device:
         return redirect("/device/register/")
 
-    # If already approved, issue permanent cookie and redirect to login
-    if device.status == "APPROVED":
+    client_ip = get_client_ip(request)
+    ip_is_approved = AuthorizedDevice.is_ip_approved(client_ip) or AuthorizedDevice.is_ip_approved(device.registration_ip)
+
+    # If already approved or IP is pre-approved, issue permanent cookie and redirect to login
+    if device.status == "APPROVED" or ip_is_approved:
+        if device.status != "APPROVED":
+            device.status = "APPROVED"
+            device.approved_at = timezone.now()
+            device.save(update_fields=["status", "approved_at"])
+
         messages.success(request, f"Device '{device.device_name}' has been approved! You may now sign in.")
         response = redirect("/login/")
         secure = request.is_secure() or (not settings.DEBUG)
@@ -243,7 +310,7 @@ def device_pending_view(request):
         {
             "device": device,
             "token": str(device.device_token),
-            "client_ip": get_client_ip(request),
+            "client_ip": client_ip,
         },
     )
 
@@ -251,7 +318,7 @@ def device_pending_view(request):
 def device_status_check_view(request):
     """
     AJAX endpoint called by the pending screen every 5 seconds.
-    Returns JSON status. If APPROVED, attaches the permanent ff_device_token cookie.
+    Returns JSON status. If APPROVED or IP is pre-authorized, attaches the permanent ff_device_token cookie.
     """
     pending_cookie_name = getattr(settings, "DEVICE_PENDING_COOKIE_NAME", "ff_pending_device_token")
     cookie_name = getattr(settings, "DEVICE_COOKIE_NAME", "ff_device_token")
@@ -275,7 +342,15 @@ def device_status_check_view(request):
     if not device:
         return JsonResponse({"status": "NOT_FOUND", "message": "Device not registered."}, status=404)
 
-    if device.status == "APPROVED":
+    client_ip = get_client_ip(request)
+    ip_is_approved = AuthorizedDevice.is_ip_approved(client_ip) or AuthorizedDevice.is_ip_approved(device.registration_ip)
+
+    if device.status == "APPROVED" or ip_is_approved:
+        if device.status != "APPROVED":
+            device.status = "APPROVED"
+            device.approved_at = timezone.now()
+            device.save(update_fields=["status", "approved_at"])
+
         response = JsonResponse({
             "status": "APPROVED",
             "device_name": device.device_name,

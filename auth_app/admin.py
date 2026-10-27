@@ -98,6 +98,7 @@ class AuthorizedDeviceAdmin(admin.ModelAdmin):
     )
     actions = [
         'approve_selected_devices',
+        'auto_approve_pending_from_approved_ips',
         'revoke_selected_devices',
         'reject_selected_devices',
         'reset_to_pending',
@@ -120,12 +121,68 @@ class AuthorizedDeviceAdmin(admin.ModelAdmin):
 
     @admin.action(description='Approve selected devices')
     def approve_selected_devices(self, request, queryset):
+        now = timezone.now()
         count = queryset.update(
             status='APPROVED',
-            approved_at=timezone.now(),
+            approved_at=now,
             approved_by=request.user
         )
-        self.message_user(request, f'Successfully approved {count} device(s).')
+        # Also auto-approve any other pending devices sharing the same IP(s)
+        approved_ips = list(
+            queryset.exclude(registration_ip__isnull=True).exclude(registration_ip='').values_list('registration_ip', flat=True)
+        )
+        auto_approved_count = 0
+        if approved_ips:
+            auto_approved_count = AuthorizedDevice.objects.filter(
+                status='PENDING',
+                registration_ip__in=approved_ips
+            ).update(
+                status='APPROVED',
+                approved_at=now,
+                approved_by=request.user
+            )
+
+        msg = f'Successfully approved {count} device(s).'
+        if auto_approved_count:
+            msg += f' Automatically approved {auto_approved_count} pending device(s) on matching authorized network IP(s).'
+        self.message_user(request, msg)
+
+    @admin.action(description='Auto-approve all pending devices from already approved IPs')
+    def auto_approve_pending_from_approved_ips(self, request, queryset):
+        now = timezone.now()
+        approved_ips = list(
+            AuthorizedDevice.objects.filter(status='APPROVED')
+            .exclude(registration_ip__isnull=True)
+            .exclude(registration_ip='')
+            .values_list('registration_ip', flat=True)
+            .distinct()
+        )
+        count = 0
+        if approved_ips:
+            count = AuthorizedDevice.objects.filter(
+                status='PENDING',
+                registration_ip__in=approved_ips
+            ).update(
+                status='APPROVED',
+                approved_at=now,
+                approved_by=request.user
+            )
+        self.message_user(request, f'Synchronized approvals: {count} pending device(s) were approved based on existing authorized IPs.')
+
+    def save_model(self, request, obj, form, change):
+        if obj.status == 'APPROVED' and not obj.approved_at:
+            obj.approved_at = timezone.now()
+            obj.approved_by = request.user
+        super().save_model(request, obj, form, change)
+        if obj.status == 'APPROVED' and obj.registration_ip:
+            AuthorizedDevice.objects.filter(
+                status='PENDING',
+                registration_ip=obj.registration_ip
+            ).update(
+                status='APPROVED',
+                approved_at=timezone.now(),
+                approved_by=request.user
+            )
 
     @admin.action(description='Revoke / Block selected devices')
     def revoke_selected_devices(self, request, queryset):
@@ -148,4 +205,5 @@ class AuthorizedDeviceAdmin(admin.ModelAdmin):
             approved_at=None,
             approved_by=None
         )
-        self.message_user(request, f'Reset {count} device(s) back to Pending status.')
+        self.message_user(request, f'Reset {count} device(s) back to Pending status.')
+

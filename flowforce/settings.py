@@ -397,6 +397,8 @@ DEVICE_COOKIE_NAME = 'ff_device_token'
 DEVICE_PENDING_COOKIE_NAME = 'ff_pending_device_token'
 DEVICE_COOKIE_AGE = int(os.getenv('DEVICE_COOKIE_AGE', 365 * 24 * 60 * 60))  # 1 year
 DEVICE_BYPASS_TOKEN = os.getenv('DEVICE_BYPASS_TOKEN', None)
+DEVICE_TRUSTED_IPS = os.getenv('DEVICE_TRUSTED_IPS', '')
 DEVICE_RESTRICTION_TESTING = False
+
 
 

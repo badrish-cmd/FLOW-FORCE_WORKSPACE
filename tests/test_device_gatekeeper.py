@@ -220,3 +220,42 @@ class DeviceGatekeeperMiddlewareTest(TestCase):
         # In soft mode (LOG_ONLY), unauthenticated requests without cookie are allowed through
         response = self.client.get("/login/")
         self.assertEqual(response.status_code, 200)
+
+    def test_approved_ip_allows_access_without_cookie(self):
+        # Pre-approve IP 103.76.12.58
+        AuthorizedDevice.objects.create(
+            device_name="Office Gateway Device",
+            requested_by_name="Admin",
+            status="APPROVED",
+            registration_ip="103.76.12.58",
+        )
+        # Any employee connecting from this IP without cookie is allowed
+        response = self.client.get("/login/", REMOTE_ADDR="103.76.12.58")
+        self.assertEqual(response.status_code, 200)
+        # Cookie is automatically provisioned
+        self.assertIn("ff_device_token", response.cookies)
+
+    def test_pending_device_auto_promoted_on_approved_ip(self):
+        # Device was pending on 103.76.12.58
+        AuthorizedDevice.objects.create(
+            device_name="Primary Laptop",
+            requested_by_name="Adhika",
+            status="APPROVED",
+            registration_ip="103.76.12.58",
+        )
+        pending_dev = AuthorizedDevice.objects.create(
+            device_name="Second Instance / Browser",
+            requested_by_name="Adhika",
+            status="PENDING",
+            registration_ip="103.76.12.58",
+        )
+        self.client.cookies["ff_pending_device_token"] = str(pending_dev.device_token)
+
+        response = self.client.get("/login/", REMOTE_ADDR="103.76.12.58")
+        self.assertEqual(response.status_code, 200)
+
+        # Pending device is automatically marked APPROVED
+        pending_dev.refresh_from_db()
+        self.assertEqual(pending_dev.status, "APPROVED")
+        self.assertIn("ff_device_token", response.cookies)
+
