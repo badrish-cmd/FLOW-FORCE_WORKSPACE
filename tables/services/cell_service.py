@@ -139,7 +139,7 @@ class CellMutationService:
                 raise CellPermissionDeniedError("No edit access to this table or task row")
 
             # Enforce column level permissions
-            if table.job_type != "LIST_PID":
+            if table.job_type not in ["LIST_PID", "GENERAL"]:
                 if is_assigned:
                     if column.name == "S_NO" or column.name in ["INITIAL_MAIL", "ALERT_MAIL", "DAYS_OVERDUE"]:
                         raise CellPermissionDeniedError(f"Column {column.name} is read-only for assignees")
@@ -157,7 +157,8 @@ class CellMutationService:
 
         # Sync System Columns with Task Model if necessary
         is_list_pid = (table.job_type == "LIST_PID")
-        if column.is_system_column or (is_list_pid and column.name.upper() in ["DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]):
+        is_general = (table.job_type == "GENERAL")
+        if column.is_system_column or (is_list_pid and column.name.upper() in ["DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]) or (is_general and (column.data_type == "DATE" or "DUE" in column.name.upper())):
             task = getattr(row, "task", None)
             if task:
                 new_date = None
@@ -179,11 +180,13 @@ class CellMutationService:
                         except ValueError:
                             pass
                 else:
-                    if column.name in ["DUE_DATE", "FOLLOW_UP_DATE", "RETURN_DATE", "DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]:
-                        try:
-                            new_date = datetime.datetime.strptime(str(value).split("T")[0], "%Y-%m-%d").date()
-                        except ValueError:
-                            raise CellValidationError("Invalid date format")
+                    if column.name in ["DUE_DATE", "FOLLOW_UP_DATE", "RETURN_DATE", "DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"] or (is_general and column.data_type == "DATE"):
+                        if value:
+                            try:
+                                new_date = datetime.datetime.strptime(str(value).split("T")[0], "%Y-%m-%d").date()
+                            except ValueError:
+                                if not is_general:
+                                    raise CellValidationError("Invalid date format")
 
                 if new_date:
                     if task.due_date != new_date:
@@ -195,9 +198,9 @@ class CellMutationService:
                     else:
                         task.due_date = new_date
                         task.save(update_fields=["due_date"])
-                elif not is_list_pid and column.name in ["DUE_DATE", "FOLLOW_UP_DATE", "RETURN_DATE", "DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]:
+                elif not is_list_pid and not is_general and column.name in ["DUE_DATE", "FOLLOW_UP_DATE", "RETURN_DATE", "DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]:
                     raise CellValidationError("Invalid date format")
-            elif not is_list_pid:
+            elif not is_list_pid and not is_general:
                 # No task but system column
                 pass
         elif column.name in ["TASK_NAME", "CUSTOMER_NAME", "ENQUIRY_NO", "TOOL_NAME"] and column.is_system_column:

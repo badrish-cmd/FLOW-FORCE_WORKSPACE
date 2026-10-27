@@ -837,7 +837,7 @@ class ColumnViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         if not has_table_access(request.user, instance.table, "ADMIN"):
             return Response({"error": "Only admins can update columns"}, status=status.HTTP_403_FORBIDDEN)
-        if instance.is_system_column:
+        if instance.is_system_column and instance.table.job_type != "GENERAL":
             if request.data.get("name") and request.data.get("name") != instance.name:
                 return Response({"error": "Cannot rename system columns"}, status=status.HTTP_400_BAD_REQUEST)
             if request.data.get("data_type") and request.data.get("data_type") != instance.data_type:
@@ -849,7 +849,7 @@ class ColumnViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         if not has_table_access(request.user, instance.table, "ADMIN"):
             return Response({"error": "Only admins can update columns"}, status=status.HTTP_403_FORBIDDEN)
-        if instance.is_system_column:
+        if instance.is_system_column and instance.table.job_type != "GENERAL":
             if request.data.get("name") and request.data.get("name") != instance.name:
                 return Response({"error": "Cannot rename system columns"}, status=status.HTTP_400_BAD_REQUEST)
             if request.data.get("data_type") and request.data.get("data_type") != instance.data_type:
@@ -861,7 +861,7 @@ class ColumnViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         if not has_table_access(request.user, instance.table, "ADMIN"):
             return Response({"error": "Only admins can delete columns"}, status=status.HTTP_403_FORBIDDEN)
-        if instance.is_system_column:
+        if instance.is_system_column and instance.table.job_type != "GENERAL":
             return Response({"error": "Cannot delete system columns"}, status=status.HTTP_400_BAD_REQUEST)
         return super().destroy(request, *args, **kwargs)
 

@@ -44,6 +44,7 @@ class RowService:
         is_list_pid = table.job_type == "LIST_PID"
         is_personal = table.job_type == "PERSONAL"
         is_logs = table.job_type == "LOGS"
+        is_general = table.job_type == "GENERAL"
 
         # Verify DUE_DATE/FOLLOW_UP_DATE/RETURN_DATE and TASK_NAME/CUSTOMER_NAME/TOOL_NAME are present
         if is_sales:
@@ -66,6 +67,29 @@ class RowService:
             task_name = cells_data.get("TOOL_NAME") or cells_data.get("TASK_NAME")
             date_field_name = "RETURN_DATE"
             name_field_name = "TOOL_NAME"
+        elif is_general:
+            task_name = cells_data.get("TASK_NAME")
+            if not task_name:
+                for k, v in cells_data.items():
+                    if any(term in k.upper() for term in ["TASK", "NAME", "TITLE", "SUBJECT", "DESC"]) and v:
+                        task_name = str(v)
+                        break
+            if not task_name:
+                for k, v in cells_data.items():
+                    if v and k not in ["S_NO", "DATE", "INITIAL_MAIL", "ALERT_MAIL"]:
+                        task_name = str(v)
+                        break
+            if not task_name:
+                task_name = "General Task"
+
+            due_date_str = cells_data.get("DUE_DATE")
+            if not due_date_str:
+                for k, v in cells_data.items():
+                    if any(term in k.upper() for term in ["DUE", "DEADLINE", "TARGET", "FINISH"]) and v:
+                        due_date_str = str(v)
+                        break
+            date_field_name = "DUE_DATE"
+            name_field_name = "TASK_NAME"
         else:
             due_date_str = cells_data.get("DUE_DATE")
             task_name = cells_data.get("TASK_NAME")
@@ -80,7 +104,7 @@ class RowService:
                 due_date = datetime.datetime.strptime(str(due_date_str).split("T")[0], "%Y-%m-%d").date()
             except ValueError:
                 raise RowCreationValidationError(f"Invalid {date_field_name} format. Use YYYY-MM-DD")
-        elif not is_list_pid and not is_personal:
+        elif not is_list_pid and not is_personal and not is_general:
             raise RowCreationValidationError(f"{date_field_name} is mandatory")
 
         # 1. Create Row
@@ -155,6 +179,20 @@ class RowService:
             }
         elif is_personal:
             cell_values = {}
+        elif is_general:
+            cell_values = {}
+            if "S_NO" in cols:
+                cell_values["S_NO"] = s_no
+            if "DATE" in cols:
+                cell_values["DATE"] = timezone.localdate().isoformat()
+            if "DUE_DATE" in cols:
+                cell_values["DUE_DATE"] = due_date.isoformat() if due_date else None
+            if "TASK_NAME" in cols:
+                cell_values["TASK_NAME"] = task_name
+            if "INITIAL_MAIL" in cols:
+                cell_values["INITIAL_MAIL"] = "NO"
+            if "ALERT_MAIL" in cols:
+                cell_values["ALERT_MAIL"] = "NO"
         else:
             cell_values = {
                 "S_NO": s_no,

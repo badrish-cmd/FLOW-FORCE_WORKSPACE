@@ -91,14 +91,15 @@ class Table(models.Model):
                     ("INITIAL_MAIL", "TEXT", 5),
                     ("ALERT_MAIL", "TEXT", 6),
                 ]
-            is_sys = (self.job_type != "LIST_PID")
+            is_sys = (self.job_type not in ["LIST_PID", "GENERAL"])
+            is_mand = (self.job_type not in ["LIST_PID", "GENERAL"])
             for name, dtype, pos in system_cols:
                 opts = "Returned,Not Returned" if (name == "STATUS" and self.job_type == "LOGS") else None
                 Column.objects.create(
                     table=self,
                     name=name,
                     data_type=dtype,
-                    is_mandatory=True,
+                    is_mandatory=is_mand,
                     is_system_column=is_sys,
                     position=pos,
                     options=opts

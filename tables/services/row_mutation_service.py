@@ -72,7 +72,7 @@ class RowMutationService:
                 continue
 
             # Enforce column level permissions
-            if check_permissions and table.job_type != "LIST_PID":
+            if check_permissions and table.job_type not in ["LIST_PID", "GENERAL"]:
                 if is_assigned:
                     if column.name == "S_NO" or column.name in ["INITIAL_MAIL", "ALERT_MAIL"]:
                         continue
@@ -90,7 +90,8 @@ class RowMutationService:
 
             # Sync System Columns with Task Model if necessary
             is_list_pid = (table.job_type == "LIST_PID")
-            if column.is_system_column or (is_list_pid and column.name.upper() in ["DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]):
+            is_general = (table.job_type == "GENERAL")
+            if column.is_system_column or (is_list_pid and column.name.upper() in ["DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]) or (is_general and (column.data_type == "DATE" or "DUE" in column.name.upper())):
                 task = getattr(row, "task", None)
                 if task:
                     new_date = None
@@ -112,7 +113,7 @@ class RowMutationService:
                             except ValueError:
                                 pass
                     else:
-                        if column.name in ["DUE_DATE", "FOLLOW_UP_DATE", "RETURN_DATE", "DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"]:
+                        if column.name in ["DUE_DATE", "FOLLOW_UP_DATE", "RETURN_DATE", "DUE_DATE_FLOW_FORCE", "DUE_DATE_CUSTOMER"] or (is_general and column.data_type == "DATE"):
                             try:
                                 new_date = datetime.datetime.strptime(str(value).split("T")[0], "%Y-%m-%d").date()
                             except ValueError:

@@ -52,7 +52,7 @@ class TablesTestCase(TestCase):
         self.assertEqual(cell.value, 123)
 
     def test_table_duplication(self):
-        table = Table.objects.create(name="Source Table", created_by=self.admin)
+        table = Table.objects.create(name="Source Table", created_by=self.admin, job_type="STANDARD")
         # Create a custom column
         Column.objects.create(table=table, name="Custom Text Column", data_type="TEXT", position=7)
         
@@ -62,7 +62,8 @@ class TablesTestCase(TestCase):
             name=f"Copy of {table.name}",
             description=table.description,
             created_by=self.admin,
-            department=table.department
+            department=table.department,
+            job_type="STANDARD"
         )
         for col in table.columns.filter(is_system_column=False):
             Column.objects.create(
@@ -77,6 +78,80 @@ class TablesTestCase(TestCase):
         self.assertEqual(new_table.name, "Copy of Source Table")
         self.assertEqual(new_table.columns.count(), 7)  # 6 system + 1 custom
         self.assertEqual(new_table.columns.filter(is_system_column=False).count(), 1)
+
+    def test_general_table_columns_are_editable_and_no_system_columns(self):
+        from tables.views import ColumnViewSet
+        from tables.services.row_service import RowService
+        from tables.services.cell_service import CellMutationService
+        from tables.permissions import get_column_access_level
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        factory = APIRequestFactory()
+
+        # 1. Create a GENERAL table - verify all columns are NOT system columns and NOT mandatory
+        table = Table.objects.create(name="General Project Table", job_type="GENERAL", created_by=self.admin)
+        TableAccess.objects.create(table=table, user=self.admin, access_level="ADMIN")
+        TableAccess.objects.create(table=table, user=self.employee, access_level="EDIT")
+
+        for col in table.columns.all():
+            self.assertFalse(col.is_system_column, f"Column {col.name} should not be a system column in general tables")
+            self.assertFalse(col.is_mandatory, f"Column {col.name} should not be mandatory in general tables")
+            self.assertEqual(get_column_access_level(self.employee, col), "EDITABLE")
+
+        # 2. Rename columns via ColumnViewSet (e.g. TASK_NAME -> "Project Item", DUE_DATE -> "Deadline", S_NO -> "Item #")
+        task_col = table.columns.get(name="TASK_NAME")
+        due_col = table.columns.get(name="DUE_DATE")
+        sno_col = table.columns.get(name="S_NO")
+
+        view_patch = ColumnViewSet.as_view({'patch': 'partial_update'})
+
+        req1 = factory.patch(f"/tables/api/columns/{task_col.id}/", {"name": "Project Item"}, format="json")
+        force_authenticate(req1, user=self.admin)
+        res1 = view_patch(req1, pk=task_col.id)
+        self.assertEqual(res1.status_code, 200)
+        task_col.refresh_from_db()
+        self.assertEqual(task_col.name, "Project Item")
+
+        req2 = factory.patch(f"/tables/api/columns/{due_col.id}/", {"name": "Deadline"}, format="json")
+        force_authenticate(req2, user=self.admin)
+        res2 = view_patch(req2, pk=due_col.id)
+        self.assertEqual(res2.status_code, 200)
+        due_col.refresh_from_db()
+        self.assertEqual(due_col.name, "Deadline")
+
+        req3 = factory.patch(f"/tables/api/columns/{sno_col.id}/", {"name": "Item #"}, format="json")
+        force_authenticate(req3, user=self.admin)
+        res3 = view_patch(req3, pk=sno_col.id)
+        self.assertEqual(res3.status_code, 200)
+        sno_col.refresh_from_db()
+        self.assertEqual(sno_col.name, "Item #")
+
+        # 3. Delete a column from general table (e.g. ALERT_MAIL) - should succeed
+        alert_col = table.columns.get(name="ALERT_MAIL")
+        view_del = ColumnViewSet.as_view({'delete': 'destroy'})
+        req_del = factory.delete(f"/tables/api/columns/{alert_col.id}/")
+        force_authenticate(req_del, user=self.admin)
+        res_del = view_del(req_del, pk=alert_col.id)
+        self.assertEqual(res_del.status_code, 204)
+        self.assertFalse(Column.objects.filter(id=alert_col.id).exists())
+
+        # 4. Create row without mandatory DUE_DATE or TASK_NAME
+        row = RowService.create_row(
+            table=table,
+            user=self.admin,
+            cells_data={"Project Item": "Build Website Homepage", "Deadline": "2026-11-15"}
+        )
+        self.assertIsNotNone(row.task)
+        self.assertEqual(row.task.due_date, datetime.date(2026, 11, 15))
+        self.assertEqual(row.task.task_name, "Build Website Homepage")
+
+        # 5. Row creation with empty fields also succeeds (no system columns required)
+        row2 = RowService.create_row(
+            table=table,
+            user=self.admin,
+            cells_data={}
+        )
+        self.assertIsNotNone(row2.task)
+        self.assertIsNone(row2.task.due_date)
 
     def test_import_csv_with_offsets_and_equality_check(self):
         from tables.views import TableViewSet

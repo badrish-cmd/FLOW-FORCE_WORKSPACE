@@ -116,7 +116,7 @@ class TableDeleteService:
         Raises:
             DeleteValidationError: If column is a system column.
         """
-        if column.is_system_column:
+        if column.is_system_column and column.table.job_type != "GENERAL":
             raise DeleteValidationError("Cannot delete rows using system column filter")
 
         with transaction.atomic():
@@ -151,7 +151,7 @@ class TableDeleteService:
         Raises:
             DeleteValidationError: If column is a system column.
         """
-        if column.is_system_column:
+        if column.is_system_column and column.table.job_type != "GENERAL":
             raise DeleteValidationError("Cannot clear system columns")
 
         with transaction.atomic():

@@ -132,6 +132,9 @@ class Task(models.Model):
             elif job_type == "PERSONAL":
                 cell = find_cell(["TASK_NAME", "TASK NAME", "NAME", "TITLE", "SUBJECT", "TASK"]) or find_cell([], by_type=True)
                 return cell.value if (cell and cell.value) else f"Personal Row {self.row.id}"
+            elif job_type == "GENERAL":
+                cell = find_cell(["TASK_NAME", "TASK NAME", "NAME", "TITLE", "SUBJECT", "TASK", "DESCRIPTION"]) or find_cell([], by_type=True)
+                return cell.value if (cell and cell.value) else "General Task"
             else:
                 cell = find_cell(["TASK_NAME"])
                 return cell.value if (cell and cell.value) else "Unnamed Task"
@@ -158,6 +161,11 @@ class Task(models.Model):
             if not name_cell:
                 name_cell = self.row.cells.filter(column__data_type="TEXT").first()
             return name_cell.value if name_cell else f"Personal Row {self.row.id}"
+        elif job_type == "GENERAL":
+            name_cell = self.row.cells.filter(column__name__in=["TASK_NAME", "TASK NAME", "NAME", "TITLE", "SUBJECT", "TASK", "DESCRIPTION"]).first()
+            if not name_cell:
+                name_cell = self.row.cells.filter(column__data_type="TEXT").exclude(column__name__in=["INITIAL_MAIL", "ALERT_MAIL"]).first()
+            return name_cell.value if name_cell else "General Task"
         else:
             name_cell = self.row.cells.filter(column__name="TASK_NAME").first()
             return name_cell.value if name_cell else "Unnamed Task"

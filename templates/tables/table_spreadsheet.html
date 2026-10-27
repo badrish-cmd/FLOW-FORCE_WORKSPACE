@@ -3302,6 +3302,7 @@ comments: [],
                 const isListPid = '{{ table.job_type }}' === 'LIST_PID';
                 const isPersonal = '{{ table.job_type }}' === 'PERSONAL';
                 const isLogs = '{{ table.job_type }}' === 'LOGS';
+                const isGeneral = '{{ table.job_type }}' === 'GENERAL';
                 if (isLogs) {
                     if (!this.newRowCells.ISSUE_DATE) {
                         this.newRowCells.ISSUE_DATE = new Date().toISOString().split('T')[0];
@@ -3320,7 +3321,7 @@ comments: [],
                     isInvalid = !nameVal;
                 } else if (isListPid) {
                     isInvalid = !nameVal;
-                } else if (isPersonal) {
+                } else if (isPersonal || isGeneral) {
                     isInvalid = false;
                 } else {
                     isInvalid = !nameVal || !dateVal;
@@ -3396,7 +3397,7 @@ comments: [],
                                 INITIAL_MAIL: '',
                                 ALERT_MAIL: ''
                             };
-                        } else if (isPersonal) {
+                        } else if (isPersonal || isGeneral) {
                             this.newRowCells = {};
                         } else {
                             this.newRowCells = {
@@ -3569,7 +3570,8 @@ comments: [],
                 this.editColumnName = columnName;
                 this.editColumnType = columnType;
                 this.editColumnOptions = columnOptions || '';
-                this.editColumnIsSystem = isSystem;
+                const isGeneral = '{{ table.job_type }}' === 'GENERAL';
+                this.editColumnIsSystem = isGeneral ? false : isSystem;
                 this.editColumnIsFilterable = isFilterable;
 
                 this.editTextType = 'single';

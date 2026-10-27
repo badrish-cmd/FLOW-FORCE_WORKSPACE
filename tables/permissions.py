@@ -128,7 +128,7 @@ def get_column_access_level(user, column):
         return access_rule.access_level
     except ColumnAccess.DoesNotExist:
         # Default behavior:
-        if table.job_type == "LIST_PID":
+        if table.job_type in ["LIST_PID", "GENERAL"]:
             if has_table_access(user, table, "EDIT"):
                 return "EDITABLE"
             return "READ_ONLY"
