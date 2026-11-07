@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+{% block title %}Vendors - Vendor Quotes{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-7xl">
+    <div class="mb-4">
+        <h1 class="text-2xl font-bold text-gray-900">Vendors &amp; master workbooks</h1>
+        <p class="text-sm text-slate-500">Each vendor has default pricing values and a master workbook with one sheet per past quote.</p>
+    </div>
+    {% with nav='vendors' %}{% include 'vendor_quotes/_nav.html' %}{% endwith %}
+
+    <div class="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <div class="lg:col-span-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <table class="min-w-full divide-y divide-slate-200 text-sm">
+                <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <tr><th class="px-4 py-3">Vendor</th><th class="px-4 py-3">Currency</th><th class="px-4 py-3">Rate (IDR)</th><th class="px-4 py-3">Margin</th><th class="px-4 py-3">Past sheets</th><th class="px-4 py-3">Quotes</th></tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for v in vendors %}
+                    <tr class="cursor-pointer hover:bg-slate-50" onclick="location.href='{% url 'vendor_quotes:vendor_detail' v.id %}'">
+                        <td class="px-4 py-3 font-semibold text-slate-900">{{ v.name }}{% if v.code %} <span class="text-xs font-normal text-slate-400">{{ v.code }}</span>{% endif %}{% if not v.is_active %} <span class="ml-1 rounded bg-slate-100 px-1.5 text-xs text-slate-500">inactive</span>{% endif %}</td>
+                        <td class="px-4 py-3">{{ v.currency }}</td>
+                        <td class="px-4 py-3">{{ v.default_exchange_rate|floatformat:"-2" }}</td>
+                        <td class="px-4 py-3">{{ v.default_margin_factor|floatformat:"-2" }}</td>
+                        <td class="px-4 py-3">{{ v.n_sheets }}</td>
+                        <td class="px-4 py-3">{{ v.n_quotes }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="6" class="px-4 py-10 text-center text-slate-500">No vendors yet. Add BOS on the right to start.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <form method="post" class="space-y-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            {% csrf_token %}
+            <h2 class="font-semibold text-slate-800">Add vendor</h2>
+            {% for field in form %}
+            <div>
+                {% if field.name == 'is_active' %}
+                <label class="flex items-center gap-2 text-sm text-slate-700">{{ field }} Active</label>
+                {% else %}
+                <label class="mb-1 block text-xs font-semibold text-slate-600">{{ field.label }}</label>
+                {{ field }}
+                {% endif %}
+                {% for e in field.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+            </div>
+            {% endfor %}
+            <button class="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">Add vendor</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

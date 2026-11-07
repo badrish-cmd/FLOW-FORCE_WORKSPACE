@@ -1,0 +1,192 @@
+{% extends 'base.html' %}
+{% load static humanize %}
+{% block title %}{{ quote.enquiry.number }} · {{ quote.vendor.name }} - Vendor Quotes{% endblock %}
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'vendor_quotes/ff-sheet.css' %}">
+<style>
+    #sheet-host { height: calc(100vh - 230px); min-height: 520px; }
+    .vq-panel iframe { width: 100%; height: calc(100vh - 230px); min-height: 520px; border: 0; }
+</style>
+{% endblock %}
+{% block content %}
+<div x-data="quotePage()" x-init="init()" class="mx-auto max-w-[1800px]">
+    <!-- Header -->
+    <div class="mb-3 flex flex-wrap items-start gap-4">
+        <div class="min-w-0 flex-1">
+            <div class="text-sm text-slate-500">
+                <a href="{% url 'vendor_quotes:quote_list' %}" class="hover:text-blue-600">Vendor quotes</a>
+                <span class="mx-1">/</span>
+                <a href="{% url 'vendor_quotes:enquiry_detail' quote.enquiry.id %}" class="hover:text-blue-600">{{ quote.enquiry.number }}</a>
+            </div>
+            <h1 class="mt-0.5 truncate text-2xl font-bold text-gray-900">{{ quote.enquiry.customer_name }}</h1>
+            <div class="mt-1 flex flex-wrap items-center gap-3 text-sm text-slate-600">
+                <span><i class="fas fa-industry mr-1 text-slate-400"></i>{{ quote.vendor.name }}{% if quote.vendor_quote_no %} · quote {{ quote.vendor_quote_no }}{% endif %}</span>
+                {% include 'vendor_quotes/_status.html' with status=rev.status %}
+                {% if rev.zoho_estimate_number %}<span class="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-blue-700">Zoho {{ rev.zoho_estimate_number }}</span>{% endif %}
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="flex flex-wrap items-center gap-2">
+            {% if editable %}
+            <span class="text-xs" :class="dirty ? 'text-amber-600' : 'text-slate-400'" x-text="saveLabel"></span>
+            <button type="button" @click="save()" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50" title="Ctrl+S"><i class="fas fa-save mr-1.5"></i>Save</button>
+            {% endif %}
+            {% if editable and rev.status != 'IN_REVIEW' and can_edit %}
+            <form method="post" action="{% url 'vendor_quotes:revision_submit' rev.id %}" @submit.prevent="saveThenSubmit($event.target)">{% csrf_token %}
+                <button class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"><i class="fas fa-paper-plane mr-1.5"></i>Send for approval</button>
+            </form>
+            {% endif %}
+            {% if rev.status == 'IN_REVIEW' and can_approve %}
+            <button type="button" @click="openDecision('approve')" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"><i class="fas fa-check mr-1.5"></i>Approve</button>
+            <button type="button" @click="openDecision('send_back')" class="rounded-lg border border-orange-300 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-800 hover:bg-orange-100"><i class="fas fa-undo mr-1.5"></i>Send back</button>
+            <button type="button" @click="openDecision('reject')" class="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50">Reject</button>
+            {% endif %}
+            {% if rev.status == 'APPROVED' and is_latest and can_edit %}
+            <form method="post" action="{% url 'vendor_quotes:quote_revise' quote.id %}" onsubmit="return confirm('Start revision R{{ rev.number|add:1 }} from this approved version?')">{% csrf_token %}
+                <button class="rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"><i class="fas fa-code-branch mr-1.5"></i>Revise (R{{ rev.number|add:1 }})</button>
+            </form>
+            {% endif %}
+            <a href="{% url 'vendor_quotes:revision_excel' rev.id %}" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"><i class="fas fa-file-excel mr-1.5 text-emerald-600"></i>Excel</a>
+            {% if quote.quote_file %}
+            <button type="button" @click="showPdf = !showPdf" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"><i class="fas fa-file-pdf mr-1.5 text-red-500"></i><span x-text="showPdf ? 'Hide vendor quote' : 'Show vendor quote'"></span></button>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Revision tabs -->
+    {% if revisions|length > 1 %}
+    <div class="mb-3 flex flex-wrap gap-1 text-sm">
+        {% for r in revisions %}
+        <a href="?rev={{ r.number }}" class="rounded-lg border px-3 py-1.5 {% if r.number == rev.number %}border-blue-500 bg-blue-50 font-semibold text-blue-700{% else %}border-slate-200 bg-white text-slate-600 hover:bg-slate-50{% endif %}">{{ r.label }} <span class="text-xs opacity-70">· {{ r.get_status_display }}</span></a>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Banners -->
+    {% if rev.status == 'SENT_BACK' and rev.decision_comment %}
+    <div class="mb-3 rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm text-orange-900"><i class="fas fa-comment-dots mr-2"></i><strong>{{ rev.decided_by.full_name|default:"GM" }}:</strong> {{ rev.decision_comment }}</div>
+    {% elif rev.status == 'IN_REVIEW' and can_approve %}
+    <div class="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"><i class="fas fa-info-circle mr-2"></i>Check the prices. You can change any cell or formula directly, then Approve.</div>
+    {% elif rev.status == 'IN_REVIEW' %}
+    <div class="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"><i class="fas fa-hourglass-half mr-2"></i>Waiting for the GM's approval. The sheet is locked for you until it's approved or sent back.</div>
+    {% elif rev.status == 'APPROVED' and not is_latest %}
+    <div class="mb-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">You're looking at an older version. The latest is {% with revisions|last as lr %}{{ lr.label }}{% endwith %}.</div>
+    {% endif %}
+    {% if editable %}
+    <div x-show="summary.problems && summary.problems.length" x-cloak class="mb-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800"><i class="fas fa-exclamation-triangle mr-2"></i><span x-text="summary.problems && summary.problems[0]"></span></div>
+    {% endif %}
+
+    <!-- Sheet + vendor quote -->
+    <div class="flex gap-3">
+        <div class="min-w-0 flex-1 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div id="sheet-host"></div>
+        </div>
+        {% if quote.quote_file %}
+        <div x-show="showPdf" x-cloak class="vq-panel w-[42%] shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            {% if quote.quote_file_is_pdf %}
+            <iframe src="{% url 'vendor_quotes:quote_file' quote.id %}" title="Vendor quote"></iframe>
+            {% else %}
+            <div class="p-6 text-sm text-slate-600">The vendor quote isn't a PDF. <a class="font-semibold text-blue-600" href="{% url 'vendor_quotes:quote_file' quote.id %}?download=1">Download it</a>.</div>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Summary, outputs, history -->
+    <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="mb-3 font-semibold text-slate-800">Quotation summary</h2>
+            <dl class="space-y-2 text-sm">
+                <div class="flex justify-between"><dt class="text-slate-500">Priced lines</dt><dd class="font-semibold" x-text="summary.lines">{{ lines|length }}</dd></div>
+                <div class="flex justify-between"><dt class="text-slate-500">Total selling (IDR)</dt><dd class="font-semibold" x-text="fmt(summary.total)">{{ total|floatformat:0|intcomma }}</dd></div>
+                <div class="flex justify-between"><dt class="text-slate-500">Prepared by</dt><dd>{{ rev.created_by.full_name|default:"—" }}</dd></div>
+                {% if rev.submitted_at %}<div class="flex justify-between"><dt class="text-slate-500">Sent for approval</dt><dd>{{ rev.submitted_at|date:"M j, Y H:i" }}</dd></div>{% endif %}
+                {% if rev.decided_at %}<div class="flex justify-between"><dt class="text-slate-500">{{ rev.get_status_display }} by</dt><dd>{{ rev.decided_by.full_name }} · {{ rev.decided_at|date:"M j, H:i" }}</dd></div>{% endif %}
+            </dl>
+            <p class="mt-3 text-xs text-slate-400">Lines are read from the Qty, Description and Unit Selling Price columns. Lines with no quantity are skipped.</p>
+        </div>
+
+        <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="mb-3 font-semibold text-slate-800">After approval</h2>
+            {% if rev.status == 'APPROVED' %}
+            <div class="space-y-4 text-sm">
+                <div>
+                    <div class="flex items-center justify-between"><span class="text-slate-500">Excel → {{ quote.vendor.name }} master</span>{% include 'vendor_quotes/_output.html' with status=rev.excel_status %}</div>
+                    {% if rev.master_sheet_name %}<div class="mt-1 text-xs text-slate-500">Sheet “{{ rev.master_sheet_name }}” added. <a class="text-blue-600" href="{% url 'vendor_quotes:vendor_detail' quote.vendor.id %}">Open master</a></div>{% endif %}
+                    {% if rev.excel_error %}<div class="mt-1 text-xs text-red-600">{{ rev.excel_error }}</div>{% endif %}
+                </div>
+                <div>
+                    <div class="flex items-center justify-between"><span class="text-slate-500">Zoho Books draft quotation</span>{% include 'vendor_quotes/_output.html' with status=rev.zoho_status %}</div>
+                    {% if rev.zoho_estimate_number %}<div class="mt-1 text-xs text-slate-500">Draft <strong>{{ rev.zoho_estimate_number }}</strong> created. <a class="text-blue-600" target="_blank" rel="noopener" href="{{ zoho_url }}">Open in Zoho</a></div>{% endif %}
+                    {% if rev.zoho_error %}<div class="mt-1 text-xs {% if rev.zoho_status == 'WAITING_CONNECTION' %}text-amber-700{% else %}text-red-600{% endif %}">{{ rev.zoho_error }}</div>{% endif %}
+                </div>
+                {% if rev.excel_status == 'FAILED' or rev.zoho_status == 'FAILED' or rev.zoho_status == 'WAITING_CONNECTION' %}
+                <form method="post" action="{% url 'vendor_quotes:revision_retry' rev.id %}">{% csrf_token %}
+                    <button class="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"><i class="fas fa-redo mr-1"></i>Retry</button>
+                </form>
+                {% endif %}
+            </div>
+            {% else %}
+            <ul class="space-y-2 text-sm text-slate-600">
+                <li><i class="fas fa-file-excel mr-2 text-emerald-600"></i>The price table is added as a new sheet to the {{ quote.vendor.name }} master workbook.</li>
+                <li><i class="fas fa-file-invoice mr-2 text-blue-600"></i>A <strong>draft</strong> quotation is created in Zoho Books{% if rev.number %} as the original number + R{{ rev.number }}{% endif %}. Nothing is sent to the customer.</li>
+            </ul>
+            {% endif %}
+        </div>
+
+        <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" x-data="{ tab: 'events' }">
+            <div class="mb-3 flex gap-3 text-sm">
+                <button type="button" @click="tab='events'" :class="tab==='events' ? 'font-semibold text-blue-700' : 'text-slate-500'">Timeline</button>
+                <button type="button" @click="tab='changes'" :class="tab==='changes' ? 'font-semibold text-blue-700' : 'text-slate-500'">Changes ({{ changes|length }})</button>
+            </div>
+            <ul x-show="tab==='events'" class="max-h-64 space-y-2 overflow-y-auto text-sm">
+                {% for e in events %}
+                <li class="border-l-2 border-slate-200 pl-3"><div class="text-slate-800">{{ e.message|default:e.action }}</div><div class="text-xs text-slate-400">{{ e.user.full_name|default:"System" }} · {{ e.created_at|date:"M j, H:i" }}</div></li>
+                {% empty %}<li class="text-slate-400">Nothing yet.</li>{% endfor %}
+            </ul>
+            <div x-show="tab==='changes'" x-cloak class="max-h-64 overflow-y-auto">
+                <table class="w-full text-xs">
+                    <thead class="text-left text-slate-400"><tr><th class="py-1">Cell</th><th>Old → New</th><th>By</th></tr></thead>
+                    <tbody>
+                    {% for c in changes %}
+                    <tr class="border-t border-slate-100 align-top"><td class="py-1 font-mono">{{ c.cell }}</td><td class="break-all"><span class="text-red-600 line-through">{{ c.old_value|truncatechars:40 }}</span> → <span class="text-emerald-700">{{ c.new_value|truncatechars:40 }}</span></td><td class="whitespace-nowrap text-slate-500">{{ c.user.full_name|default:"" }}<br>{{ c.created_at|date:"M j H:i" }}</td></tr>
+                    {% empty %}<tr><td colspan="3" class="py-2 text-slate-400">No changes saved yet.</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Decision dialog (teleported to <body> so the spreadsheet canvas can't cover it) -->
+    <template x-teleport="body">
+    <div x-show="decision" x-cloak id="decision-dialog" class="fixed inset-0 flex items-center justify-center bg-slate-900/50 p-4" style="z-index: 5000" @keydown.escape.window="decision=null">
+        <div class="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl" @click.outside="decision=null">
+            <h3 class="text-lg font-semibold text-slate-900" x-text="{approve:'Approve this quote', send_back:'Send back to Ibrahim', reject:'Reject this quote'}[decision]"></h3>
+            <p class="mt-1 text-sm text-slate-500" x-show="decision==='approve'">Your changes are saved first. Then the Excel sheet is added to the vendor master and a draft quotation is created in Zoho Books.</p>
+            <form method="post" :action="{approve:'{% url 'vendor_quotes:revision_approve' rev.id %}', send_back:'{% url 'vendor_quotes:revision_send_back' rev.id %}', reject:'{% url 'vendor_quotes:revision_reject' rev.id %}'}[decision]" @submit.prevent="saveThenSubmit($event.target)" class="mt-4 space-y-3">
+                {% csrf_token %}
+                <textarea name="comment" rows="3" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" :placeholder="decision==='send_back' ? 'What needs to change? (required)' : 'Comment (optional)'" :required="decision==='send_back'"></textarea>
+                <div class="flex justify-end gap-2">
+                    <button type="button" @click="decision=null" class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancel</button>
+                    <button id="decision-confirm" class="rounded-lg px-4 py-2 text-sm font-semibold text-white" :class="decision==='approve' ? 'bg-emerald-600 hover:bg-emerald-700' : (decision==='reject' ? 'bg-red-600 hover:bg-red-700' : 'bg-orange-500 hover:bg-orange-600')" x-text="{approve:'Approve', send_back:'Send back', reject:'Reject'}[decision]"></button>
+                </div>
+            </form>
+        </div>
+    </div>
+    </template>
+</div>
+{{ rev.snapshot|json_script:"sheet-data" }}
+{% endblock %}
+{% block extra_js %}
+<script src="{% static 'vendor_quotes/ff-sheet.js' %}"></script>
+<script>
+window.VQ = {
+    editable: {{ editable|yesno:"true,false" }},
+    saveUrl: "{% url 'vendor_quotes:revision_save' rev.id %}",
+    csrf: "{{ csrf_token }}",
+    summary: { lines: {{ lines|length }}, total: {{ total|floatformat:0|default:0 }}, problems: {{ problems_json|safe }} },
+};
+</script>
+<script src="{% static 'vendor_quotes/quote_sheet.js' %}"></script>
+{% endblock %}

@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}{{ sheet.vendor.name }} · {{ sheet.sheet_name }}{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'vendor_quotes/ff-sheet.css' %}"><style>#sheet-host{height:calc(100vh - 300px);min-height:480px}</style>{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-[1800px]">
+    <div class="mb-3">
+        <a href="{% url 'vendor_quotes:vendor_detail' sheet.vendor.id %}" class="text-sm text-slate-500 hover:text-blue-600"><i class="fas fa-arrow-left mr-1"></i>{{ sheet.vendor.name }} master</a>
+        <h1 class="mt-1 text-2xl font-bold text-gray-900">{{ sheet.enquiry_no|default:sheet.sheet_name }}</h1>
+        <p class="text-sm text-slate-500">Past quote from the master workbook (sheet “{{ sheet.sheet_name }}”). Read-only here; copy it when creating a new vendor quote.</p>
+    </div>
+    <form method="post" class="mb-3 grid grid-cols-1 gap-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-5">
+        {% csrf_token %}
+        <input name="enquiry_no" value="{{ sheet.enquiry_no }}" placeholder="ENQ no." class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+        <input name="customer_name" value="{{ sheet.customer_name }}" placeholder="Customer" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+        <input name="vendor_quote_no" value="{{ sheet.vendor_quote_no }}" placeholder="Vendor quote no." class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+        <input name="quotation_no" value="{{ sheet.quotation_no }}" placeholder="Our quotation no." class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+        <button class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">Save details</button>
+    </form>
+    <div class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"><div id="sheet-host"></div></div>
+</div>
+{{ sheet.snapshot|json_script:"sheet-data" }}
+{% endblock %}
+{% block extra_js %}
+<script src="{% static 'vendor_quotes/ff-sheet.js' %}"></script>
+<script>FFSheet.mount(document.getElementById('sheet-host'), JSON.parse(document.getElementById('sheet-data').textContent), { readOnly: true });</script>
+{% endblock %}

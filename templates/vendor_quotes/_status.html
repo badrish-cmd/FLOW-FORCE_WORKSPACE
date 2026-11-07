@@ -1,0 +1,6 @@
+{% if status == "DRAFT" %}<span class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-700">Draft</span>
+{% elif status == "IN_REVIEW" %}<span class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800"><i class="fas fa-hourglass-half text-[10px]"></i>Waiting for GM</span>
+{% elif status == "SENT_BACK" %}<span class="inline-flex items-center gap-1 rounded-full bg-orange-100 px-2.5 py-0.5 text-xs font-semibold text-orange-800"><i class="fas fa-undo text-[10px]"></i>Sent back</span>
+{% elif status == "APPROVED" %}<span class="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800"><i class="fas fa-check text-[10px]"></i>Approved</span>
+{% elif status == "REJECTED" %}<span class="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-700">Rejected</span>
+{% else %}<span class="text-xs text-slate-400">—</span>{% endif %}

@@ -1,0 +1,91 @@
+{% extends 'base.html' %}
+{% block title %}{{ vendor.name }} - Vendor Quotes{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-7xl">
+    <div class="mb-4">
+        <a href="{% url 'vendor_quotes:vendor_list' %}" class="text-sm text-slate-500 hover:text-blue-600"><i class="fas fa-arrow-left mr-1"></i>Vendors</a>
+        <h1 class="mt-1 text-2xl font-bold text-gray-900">{{ vendor.name }}</h1>
+    </div>
+    {% with nav='vendors' %}{% include 'vendor_quotes/_nav.html' %}{% endwith %}
+
+    <div class="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <div class="space-y-5">
+            <form method="post" class="space-y-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                {% csrf_token %}
+                <h2 class="font-semibold text-slate-800">Default pricing values</h2>
+                <p class="text-xs text-slate-500">These pre-fill every new price table for {{ vendor.name }}. They can still be changed on each quote.</p>
+                {% for field in form %}
+                <div>
+                    {% if field.name == 'is_active' %}
+                    <label class="flex items-center gap-2 text-sm text-slate-700">{{ field }} Active</label>
+                    {% else %}
+                    <label class="mb-1 block text-xs font-semibold text-slate-600">{{ field.label }}</label>
+                    {{ field }}
+                    {% endif %}
+                    {% for e in field.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+                </div>
+                {% endfor %}
+                <button class="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">Save defaults</button>
+            </form>
+
+            <form method="post" enctype="multipart/form-data" class="space-y-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                {% csrf_token %}<input type="hidden" name="action" value="upload">
+                <h2 class="font-semibold text-slate-800">Master workbook</h2>
+                {% with m=vendor.current_master %}
+                {% if m %}
+                <div class="rounded-lg bg-slate-50 p-3 text-sm">
+                    <div class="font-medium text-slate-800"><i class="fas fa-file-excel mr-1.5 text-emerald-600"></i>{{ m.filename }}</div>
+                    <div class="text-xs text-slate-500">{{ m.sheet_count }} sheets · {{ m.created_at|date:"M j, Y H:i" }}</div>
+                    <a href="{% url 'vendor_quotes:master_file_download' m.id %}" class="mt-2 inline-block text-xs font-semibold text-blue-600">Download current master</a>
+                </div>
+                {% else %}
+                <p class="text-sm text-slate-500">No master uploaded yet.</p>
+                {% endif %}
+                {% endwith %}
+                <div class="rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 p-3">{{ upload.file }}</div>
+                {% for e in upload.file.errors %}<p class="text-xs text-red-600">{{ e }}</p>{% endfor %}
+                <p class="text-xs text-slate-500">Uploading splits the workbook sheet by sheet into past quotes. It replaces the list below; earlier master files stay in the history.</p>
+                <button class="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"><i class="fas fa-upload mr-1.5"></i>Upload &amp; split</button>
+                {% if masters|length > 1 %}
+                <details class="text-xs text-slate-500"><summary class="cursor-pointer">History ({{ masters|length }})</summary>
+                    <ul class="mt-2 space-y-1">{% for m in masters %}<li><a class="text-blue-600" href="{% url 'vendor_quotes:master_file_download' m.id %}">{{ m.created_at|date:"M j, Y H:i" }}</a> · {{ m.note }}</li>{% endfor %}</ul>
+                </details>
+                {% endif %}
+            </form>
+        </div>
+
+        <div class="lg:col-span-2 rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div class="flex flex-wrap items-center gap-2 border-b border-slate-100 p-4">
+                <h2 class="mr-auto font-semibold text-slate-800">Past quotes ({{ page.paginator.count }})</h2>
+                {% if missing %}<a href="?missing=1" class="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">{{ missing }} without ENQ no.</a>{% endif %}
+                <form method="get" class="flex gap-2"><input name="q" value="{{ q }}" placeholder="ENQ, customer, quote no." class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm"><button class="rounded-lg bg-slate-800 px-3 py-1.5 text-sm text-white">Search</button></form>
+            </div>
+            <table class="min-w-full divide-y divide-slate-100 text-sm">
+                <thead class="text-left text-xs font-semibold uppercase tracking-wide text-slate-500"><tr><th class="px-4 py-2">Sheet</th><th class="px-4 py-2">Enquiry</th><th class="px-4 py-2">Customer</th><th class="px-4 py-2">Vendor quote</th><th class="px-4 py-2">Our quotation</th></tr></thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for s in page %}
+                    <tr class="cursor-pointer hover:bg-slate-50" onclick="location.href='{% url 'vendor_quotes:master_sheet_detail' s.id %}'">
+                        <td class="px-4 py-2 text-slate-600">{{ s.sheet_name }}</td>
+                        <td class="px-4 py-2 font-medium text-slate-900">{% if s.details_missing %}<span class="text-xs text-amber-700">details missing</span>{% else %}{{ s.enquiry_no }}{% endif %}</td>
+                        <td class="px-4 py-2 text-slate-600">{{ s.customer_name|default:"—" }}</td>
+                        <td class="px-4 py-2 text-slate-600">{{ s.vendor_quote_no|default:"—" }}</td>
+                        <td class="px-4 py-2 text-slate-600">{{ s.quotation_no|default:"—" }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="5" class="px-4 py-10 text-center text-slate-500">No past sheets. Upload the master workbook to import them.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% if page.has_other_pages %}
+            <div class="flex justify-between p-4 text-sm text-slate-600">
+                <span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+                <div class="flex gap-2">
+                    {% if page.has_previous %}<a class="rounded-lg border px-3 py-1" href="?q={{ q }}&page={{ page.previous_page_number }}">Previous</a>{% endif %}
+                    {% if page.has_next %}<a class="rounded-lg border px-3 py-1" href="?q={{ q }}&page={{ page.next_page_number }}">Next</a>{% endif %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

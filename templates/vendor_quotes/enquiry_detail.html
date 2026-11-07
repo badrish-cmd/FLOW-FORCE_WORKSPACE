@@ -1,0 +1,60 @@
+{% extends 'base.html' %}
+{% block title %}{{ enquiry.number }} - Vendor Quotes{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-6xl">
+    <div class="mb-4">
+        <a href="{% url 'vendor_quotes:quote_list' %}" class="text-sm text-slate-500 hover:text-blue-600"><i class="fas fa-arrow-left mr-1"></i>Vendor quotes</a>
+        <h1 class="mt-1 text-2xl font-bold text-gray-900">{{ enquiry.number }}</h1>
+        <p class="text-sm text-slate-500">{{ enquiry.customer_name }}</p>
+    </div>
+
+    <div class="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <div class="lg:col-span-2 rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div class="flex items-center justify-between border-b border-slate-100 p-4">
+                <h2 class="font-semibold text-slate-800">Vendor quotes for this enquiry</h2>
+                <a href="{% url 'vendor_quotes:quote_create' %}?enquiry={{ enquiry.number|urlencode }}&customer={{ enquiry.customer_name|urlencode }}" class="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700"><i class="fas fa-plus mr-1"></i>Add vendor quote</a>
+            </div>
+            <ul class="divide-y divide-slate-100">
+                {% for q in quotes %}
+                {% with rev=q.revisions.all|first %}
+                <li><a href="{% url 'vendor_quotes:quote_detail' q.id %}" class="flex flex-wrap items-center gap-x-5 gap-y-1 px-4 py-3 hover:bg-slate-50">
+                    <span class="font-semibold text-slate-900">{{ q.vendor.name }}</span>
+                    <span class="text-sm text-slate-500">{{ q.vendor_quote_no }}</span>
+                    <span class="text-sm text-slate-500">{{ rev.label }}</span>
+                    {% include 'vendor_quotes/_status.html' with status=rev.status %}
+                    <span class="ml-auto text-sm text-slate-600">{% if rev.zoho_estimate_number %}Zoho {{ rev.zoho_estimate_number }}{% endif %}</span>
+                </a></li>
+                {% endwith %}
+                {% empty %}
+                <li class="px-4 py-8 text-center text-slate-500">No vendor quotes yet.</li>
+                {% endfor %}
+            </ul>
+        </div>
+
+        <form method="post" class="space-y-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+              x-data="{ q: '', results: [], err: '', id: '{{ enquiry.zoho_customer_id }}', name: '' ,
+                       async search() { if (this.q.length < 2) return; const r = await fetch('{% url 'vendor_quotes:zoho_customer_search' %}?q=' + encodeURIComponent(this.q)); const d = await r.json(); this.results = d.results; this.err = d.error || (d.results.length ? '' : 'No match'); } }">
+            {% csrf_token %}
+            <h2 class="font-semibold text-slate-800">Enquiry details</h2>
+            <div><label class="mb-1 block text-xs font-semibold text-slate-600">Customer name</label>
+                <input name="customer_name" value="{{ enquiry.customer_name }}" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"></div>
+            <div>
+                <label class="mb-1 block text-xs font-semibold text-slate-600">Zoho Books customer</label>
+                <input type="hidden" name="zoho_customer_id" :value="id">
+                {% if zoho_connected %}
+                <div class="flex gap-2"><input x-model="q" @keydown.enter.prevent="search()" placeholder="Search Zoho customers…" class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"><button type="button" @click="search()" class="rounded-lg border px-3 text-sm">Find</button></div>
+                <ul class="mt-2 max-h-40 overflow-y-auto text-sm">
+                    <template x-for="r in results" :key="r.id"><li><button type="button" @click="id = r.id; name = r.name; results = []" class="w-full rounded px-2 py-1 text-left hover:bg-blue-50" x-text="r.name"></button></li></template>
+                </ul>
+                <p class="text-xs text-red-600" x-text="err"></p>
+                {% endif %}
+                <p class="mt-1 text-xs text-slate-500" x-show="id">Linked: <span x-text="name || id"></span> <button type="button" class="ml-1 text-red-600" @click="id=''; name=''">remove</button></p>
+                <p class="mt-1 text-xs text-slate-500" x-show="!id">Not linked — the customer is matched by name when the Zoho draft is created.</p>
+            </div>
+            <div><label class="mb-1 block text-xs font-semibold text-slate-600">Notes</label>
+                <textarea name="notes" rows="3" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">{{ enquiry.notes }}</textarea></div>
+            <button class="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">Save</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

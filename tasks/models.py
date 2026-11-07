@@ -293,6 +293,7 @@ class Notification(models.Model):
         default="SYSTEM"
     )
     is_read = models.BooleanField(default=False)
+    link = models.CharField(max_length=255, blank=True, default="", help_text="Page to open for non-task notifications")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -309,6 +310,7 @@ class EmailLog(models.Model):
         ("REVIEW_REQUEST_MAIL", "Review Request Mail"),
         ("APPROVAL_STATUS_MAIL", "Approval Status Mail"),
         ("OVERDUE_ESCALATION_MAIL", "Overdue Escalation Mail"),
+        ("VENDOR_QUOTE_MAIL", "Vendor Quote Mail"),
     ]
 
     STATUS_CHOICES = [

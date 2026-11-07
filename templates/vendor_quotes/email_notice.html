@@ -1,0 +1,15 @@
+<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#1e293b">
+  <div style="background:#1e3a8a;color:#fff;padding:16px 20px;border-radius:8px 8px 0 0;font-weight:bold">Flow-Force Workspace · Vendor Quotes</div>
+  <div style="border:1px solid #e2e8f0;border-top:0;padding:20px;border-radius:0 0 8px 8px">
+    <p>Hello {{ name }},</p>
+    <p style="font-size:16px;font-weight:bold;margin:12px 0">{{ title }}</p>
+    <p>{{ message }}</p>
+    <table style="font-size:14px;margin:12px 0;border-collapse:collapse">
+      <tr><td style="color:#64748b;padding:2px 12px 2px 0">Enquiry</td><td>{{ quote.enquiry.number }}</td></tr>
+      <tr><td style="color:#64748b;padding:2px 12px 2px 0">Customer</td><td>{{ quote.enquiry.customer_name }}</td></tr>
+      <tr><td style="color:#64748b;padding:2px 12px 2px 0">Vendor</td><td>{{ quote.vendor.name }} {{ quote.vendor_quote_no }}</td></tr>
+    </table>
+    <p><a href="{{ url }}" style="display:inline-block;background:#2563eb;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:bold">Open the quote</a></p>
+    <p style="color:#94a3b8;font-size:12px">This is an automatic message from noreply@flowforceworkspace.cloud. Please don't reply.</p>
+  </div>
+</div>

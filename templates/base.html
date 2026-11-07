@@ -102,6 +102,15 @@
                                 </a>
                             </li>
                             {% endif %}
+                            {% if can_use_vendor_quotes %}
+                            <li>
+                                <a href="{% url 'vendor_quotes:quote_list' %}" class="nav-link {% if request.resolver_match.app_name == 'vendor_quotes' %}active{% endif %}">
+                                    <i class="fas fa-file-invoice-dollar"></i>
+                                    <span>Vendor Quotes</span>
+                                    {% if vendor_quotes_waiting %}<span class="ms-auto rounded-full bg-amber-400 px-2 text-xs font-bold text-slate-900">{{ vendor_quotes_waiting }}</span>{% endif %}
+                                </a>
+                            </li>
+                            {% endif %}
                             <li>
                                 <a href="{% url 'announcements_list' %}" class="nav-link {% if request.path|slice:':15' == '/announcements/' %}active{% endif %}">
                                     <i class="fas fa-bullhorn"></i>

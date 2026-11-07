@@ -1107,3 +1107,6 @@ body {
 .btn-password-toggle:hover {
     color: var(--primary-color);
 }
+
+/* Alpine: hide elements until Alpine has initialised them */
+[x-cloak] { display: none !important; }

@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.humanize',
 
     # Third Party Apps
     'channels',
@@ -64,6 +65,7 @@ INSTALLED_APPS = [
     'drawing_library',
     'tables',
     'tasks',
+    'vendor_quotes',
 ]
 
 # --------------------------------------------------
@@ -112,6 +114,7 @@ TEMPLATES = [
                 'django.contrib.messages.context_processors.messages',
                 'tasks.context_processors.global_context',
                 'drawing_library.context_processors.drawing_library_context',
+                'vendor_quotes.context_processors.vendor_quotes',
             ],
         },
     },
@@ -291,6 +294,17 @@ DATA_UPLOAD_MAX_NUMBER_FIELDS = 10000
 SITE_URL = os.getenv('SITE_URL', 'https://flowforceworkspace.cloud')
 
 # --------------------------------------------------
+# VENDOR QUOTES -> ZOHO BOOKS
+# --------------------------------------------------
+# Roles that can approve vendor quotes (members of the "Quote Approvers" group can too).
+VENDOR_QUOTE_APPROVER_ROLES = [r.strip() for r in os.getenv('VENDOR_QUOTE_APPROVER_ROLES', 'SUPER_ADMIN').split(',') if r.strip()]
+ZOHO_CLIENT_ID = os.getenv('ZOHO_CLIENT_ID', '')
+ZOHO_CLIENT_SECRET = os.getenv('ZOHO_CLIENT_SECRET', '')
+ZOHO_ACCOUNTS_URL = os.getenv('ZOHO_ACCOUNTS_URL', 'https://accounts.zoho.com')
+ZOHO_ORG_ID = os.getenv('ZOHO_ORG_ID', '741367552')
+ZOHO_REDIRECT_URI = os.getenv('ZOHO_REDIRECT_URI', SITE_URL.rstrip('/') + '/vendor-quotes/zoho/callback/')
+
+# --------------------------------------------------
 # LOGIN SETTINGS
 # --------------------------------------------------
 
@@ -404,3 +418,7 @@ DEVICE_RESTRICTION_TESTING = False
 
 
 
+
+# Bootstrap uses "danger" for errors; Django's default tag is "error".
+from django.contrib.messages import constants as message_constants
+MESSAGE_TAGS = {message_constants.ERROR: 'danger'}

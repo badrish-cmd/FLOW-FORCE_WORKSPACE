@@ -537,6 +537,8 @@ def notification_mark_read_view(request, notification_id):
                 return redirect(f"/tables/{notification.task.row.table_id}/?open_task_id={notification.task.id}")
             else:
                 return redirect(f"/tasks/{notification.task.id}/detail/")
+        if notification.link and notification.link.startswith("/"):
+            return redirect(notification.link)
         return redirect("/")
     except TasksNotification.DoesNotExist:
         pass

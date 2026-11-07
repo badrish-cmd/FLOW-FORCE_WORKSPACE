@@ -59,6 +59,11 @@ urlpatterns = [
         include("tasks.announcement_urls")
     ),
 
+    path(
+        "vendor-quotes/",
+        include("vendor_quotes.urls")
+    ),
+
 ]
 
 

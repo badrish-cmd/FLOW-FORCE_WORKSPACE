@@ -1,0 +1,5 @@
+{% if status == "DONE" %}<span class="inline-flex items-center gap-1 text-emerald-700 font-semibold"><i class="fas fa-check-circle"></i>Done</span>
+{% elif status == "PENDING" %}<span class="inline-flex items-center gap-1 text-blue-700 font-semibold"><i class="fas fa-spinner fa-spin"></i>Running…</span>
+{% elif status == "WAITING_CONNECTION" %}<span class="inline-flex items-center gap-1 text-amber-700 font-semibold"><i class="fas fa-plug"></i>Waiting for Zoho connection</span>
+{% elif status == "FAILED" %}<span class="inline-flex items-center gap-1 text-red-700 font-semibold"><i class="fas fa-exclamation-triangle"></i>Failed</span>
+{% else %}<span class="text-slate-400">Not started</span>{% endif %}
