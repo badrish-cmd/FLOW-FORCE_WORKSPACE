@@ -86,14 +86,17 @@ body {
 .btn-register {
     background: var(--accent);
     border: none;
+    color: #FFFFFF;
 
     height: 50px;
 
     font-weight: 600;
 }
 
-.btn-register:hover {
+.btn-register:hover,
+.btn-register:focus {
     background: #1D4ED8;
+    color: #FFFFFF;
 }
 
 .password-strength {

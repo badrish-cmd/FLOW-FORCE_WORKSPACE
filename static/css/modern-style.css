@@ -1035,3 +1035,75 @@ body {
     box-shadow: 0 12px 36px 0 rgba(15, 23, 42, 0.25), inset 0 1px 1px 0 rgba(255, 255, 255, 0.15);
 }
 
+
+/* ============================================================
+   UI POLISH (Nov 2026)
+   ============================================================ */
+/* Empty-state note inside the dark sidebar ("No tables shared yet") */
+.nav-empty-note {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px var(--spacing-lg);
+    font-size: 12.5px;
+    color: rgba(226, 232, 240, 0.6);
+}
+
+/* Inputs and selects share one height, radius and border so forms line up */
+.form-control {
+    padding: 8px 12px;
+    line-height: 1.5;
+}
+.form-select {
+    padding: 8px 36px 8px 12px;
+    font-size: var(--font-size-base);
+    line-height: 1.5;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--gray-300);
+}
+.form-select:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(6, 102, 255, 0.1);
+}
+.form-select.form-select-sm,
+.form-control.form-control-sm {
+    padding-top: 4px;
+    padding-bottom: 4px;
+    font-size: 13px;
+}
+
+/* Bootstrap switches need their left gutter back (the switch was hanging outside the card) */
+.form-check.form-switch {
+    padding-left: 2.75em;
+    min-height: 1.5rem;
+}
+.form-switch .form-check-input {
+    width: 2.25em;
+    height: 1.25em;
+    margin-left: -2.75em;
+    margin-top: 0.15em;
+    border-radius: 2em;
+}
+
+/* Password eye toggle (added by modern-app.js) sits inside the field */
+.password-field-wrapper {
+    position: relative;
+}
+.password-field-wrapper > input {
+    padding-right: 42px;
+}
+.btn-password-toggle {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+    border: 0;
+    background: transparent;
+    color: var(--gray-500);
+    padding: 4px 6px;
+    line-height: 1;
+    cursor: pointer;
+}
+.btn-password-toggle:hover {
+    color: var(--primary-color);
+}

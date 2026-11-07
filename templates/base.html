@@ -65,19 +65,19 @@
                         <div class="nav-label">MAIN</div>
                         <ul class="nav-menu">
                             <li>
-                                <a href="/" class="nav-link {% if request.resolver_match.app_name == 'dashboard' %}active{% endif %}">
+                                <a href="/" class="nav-link {% if request.path == '/' or request.resolver_match.url_name in 'super_admin_dashboard,admin_dashboard,department_dashboard,employee_dashboard' %}active{% endif %}">
                                     <i class="fas fa-chart-line"></i>
                                     <span>Dashboard</span>
                                 </a>
                             </li>
                             <li>
-                                <a href="{% url 'tables:table_list' %}" class="nav-link {% if request.resolver_match.view_name == 'tables:table_list' %}active{% endif %}">
+                                <a href="{% url 'tables:table_list' %}" class="nav-link {% if request.resolver_match.view_name == 'tables:table_list' or request.resolver_match.view_name == 'tables:table_spreadsheet' and user.role in 'SUPER_ADMIN,ADMIN' %}active{% endif %}">
                                     <i class="fas fa-table"></i>
                                     <span>Tables</span>
                                 </a>
                             </li>
                             <li>
-                                <a href="/employees/" class="nav-link {% if request.resolver_match.app_name == 'employee_management' %}active{% endif %}">
+                                <a href="/employees/" class="nav-link {% if request.path|slice:':11' == '/employees/' and request.resolver_match.url_name != 'global_activity_logs' %}active{% endif %}">
                                     <i class="fas fa-users"></i>
                                     <span>{% if user.role == 'EMPLOYEE' %}Co-workers{% else %}Employees{% endif %}</span>
                                 </a>
@@ -103,6 +103,12 @@
                             </li>
                             {% endif %}
                             <li>
+                                <a href="{% url 'announcements_list' %}" class="nav-link {% if request.path|slice:':15' == '/announcements/' %}active{% endif %}">
+                                    <i class="fas fa-bullhorn"></i>
+                                    <span>Announcements</span>
+                                </a>
+                            </li>
+                            <li>
                                 <a href="{% url 'help' %}" class="nav-link {% if request.resolver_match.view_name == 'help' %}active{% endif %}">
                                     <i class="fas fa-question-circle"></i>
                                     <span>Help & Guide</span>
@@ -124,7 +130,7 @@
                                 </a>
                             </li>
                             {% empty %}
-                            <li class="px-3 py-1 text-muted small"><i class="fas fa-info-circle me-1"></i>No tables shared.</li>
+                            <li class="nav-empty-note"><i class="fas fa-info-circle"></i>No tables shared yet</li>
                             {% endfor %}
                         </ul>
                     </div>

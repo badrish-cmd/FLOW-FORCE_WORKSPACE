@@ -3651,10 +3651,14 @@ class RowServiceTestCase(TestCase):
         """Verifies RowCreationValidationError on missing mandatory fields or invalid dates."""
         from tables.services import RowService, RowCreationValidationError
 
-        # Missing DUE_DATE
+        # Missing DUE_DATE is mandatory on structured tables (General tables allow tasks without a due date)
+        engineer_table = Table.objects.create(name="Engineer Table", job_type="ENGINEER", created_by=self.admin)
+        TableAccess.objects.create(table=engineer_table, user=self.admin, access_level="ADMIN")
         with self.assertRaises(RowCreationValidationError) as ctx:
-            RowService.create_row(table=self.table, user=self.admin, cells_data={"TASK_NAME": "Incomplete"})
+            RowService.create_row(table=engineer_table, user=self.admin, cells_data={"TASK_NAME": "Incomplete"})
         self.assertIn("DUE_DATE is mandatory", str(ctx.exception))
+        general_row = RowService.create_row(table=self.table, user=self.admin, cells_data={"TASK_NAME": "No due date"})
+        self.assertIsNone(general_row.task.due_date)
 
         # Invalid DUE_DATE format
         with self.assertRaises(RowCreationValidationError) as ctx2:

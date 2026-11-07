@@ -72,11 +72,12 @@ class RowMutationService:
                 continue
 
             # Enforce column level permissions
-            if check_permissions and table.job_type not in ["LIST_PID", "GENERAL"]:
+            if check_permissions:
                 if is_assigned:
                     if column.name == "S_NO" or column.name in ["INITIAL_MAIL", "ALERT_MAIL"]:
                         continue
                 else:
+                    # Column-level rules (READ_ONLY / HIDDEN set by an admin) apply to every table type.
                     perm = get_column_access_level(user, column)
                     if perm != "EDITABLE":
                         continue

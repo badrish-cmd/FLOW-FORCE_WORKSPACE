@@ -97,10 +97,9 @@
                                 {{ t.id }}
                             {% endfor %}
                         </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-semibold">
-                            {% for c in t.row.cells.all %}
-                                {% if c.column.name == 'TASK_NAME' %}{{ c.value }}{% endif %}
-                            {% endfor %}
+                        <td class="px-6 py-4 text-sm text-gray-900 font-semibold">
+                            {{ t.task_name|default:"—" }}
+                            <div class="text-xs font-normal text-gray-400">{{ t.row.table.name }}</div>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                             {{ t.due_date }}

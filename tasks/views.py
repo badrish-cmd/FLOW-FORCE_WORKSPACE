@@ -116,7 +116,7 @@ class TaskViewSet(viewsets.ModelViewSet):
                     user=admin,
                     task=task,
                     title="Task Ready for Review",
-                    description=f"Task '{task.row.cells.filter(column__name='TASK_NAME').first().value}' has been marked ready for review by {request.user.full_name}",
+                    description=f"Task '{task.task_name or 'Untitled'}' has been marked ready for review by {request.user.full_name}",
                     type="REVIEW"
                 )
 
@@ -697,7 +697,7 @@ def reports_view(request):
         for t in tasks:
             # Use pre-fetched cells list in-memory to prevent N+1 query loops
             task_name_cell = next((c for c in t.row.cells.all() if c.column.name == "TASK_NAME"), None)
-            task_name_val = task_name_cell.value if task_name_cell else "Unnamed"
+            task_name_val = (task_name_cell.value if task_name_cell and task_name_cell.value else None) or t.task_name or "Unnamed"
             assigned_to = ", ".join([u.full_name for u in t.assigned_to.all()])
             assigned_by = t.assigned_by.full_name if t.assigned_by else "System"
             dept_name = t.row.table.department.name if t.row.table.department else "Global"
@@ -729,7 +729,7 @@ def reports_view(request):
         for t in tasks:
             # Use pre-fetched cells list in-memory to prevent N+1 query loops
             task_name_cell = next((c for c in t.row.cells.all() if c.column.name == "TASK_NAME"), None)
-            task_name_val = task_name_cell.value if task_name_cell else "Unnamed"
+            task_name_val = (task_name_cell.value if task_name_cell and task_name_cell.value else None) or t.task_name or "Unnamed"
             assigned_to = ", ".join([u.full_name for u in t.assigned_to.all()])
             assigned_by = t.assigned_by.full_name if t.assigned_by else "System"
             dept_name = t.row.table.department.name if t.row.table.department else "Global"
@@ -850,7 +850,7 @@ def reports_view(request):
         for t in tasks:
             # Use pre-fetched cells list in-memory to prevent N+1 query loops
             task_name_cell = next((c for c in t.row.cells.all() if c.column.name == "TASK_NAME"), None)
-            task_name_val = task_name_cell.value if task_name_cell else "Unnamed"
+            task_name_val = (task_name_cell.value if task_name_cell and task_name_cell.value else None) or t.task_name or "Unnamed"
             assigned_to = ", ".join([u.full_name for u in t.assigned_to.all()])
             s_no_cell = next((c for c in t.row.cells.all() if c.column.name == "S_NO"), None)
             s_no_val = s_no_cell.value if s_no_cell else t.id

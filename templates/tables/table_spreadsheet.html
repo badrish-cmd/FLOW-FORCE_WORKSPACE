@@ -18,7 +18,7 @@
          x-transition:leave="transition ease-in duration-200"
          x-transition:leave-start="opacity-100"
          x-transition:leave-end="opacity-0"
-         class="fixed top-5 right-5 z-50 max-w-sm w-full bg-slate-900/95 backdrop-blur-md text-white rounded-xl shadow-2xl border border-slate-700/50 p-4 flex items-center gap-3">
+         class="fixed bottom-5 right-5 z-[1100] max-w-sm w-full bg-slate-900/95 backdrop-blur-md text-white rounded-xl shadow-2xl border border-slate-700/50 p-4 flex items-center gap-3">
          <div class="flex items-center justify-center bg-blue-500/20 text-blue-400 p-2.5 rounded-lg border border-blue-500/30">
              <i class="fas fa-info-circle text-lg animate-pulse"></i>
          </div>
@@ -68,7 +68,7 @@
         <div class="flex items-center gap-2 flex-wrap">
             <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200/80">
                 <i class="fas fa-layer-group text-[10px]"></i>
-                {{ table.department.name|default:"General Table" }}
+                {{ table.department.name|default:"All Departments" }}
             </span>
             <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
                 {{ table.job_type }}
@@ -1472,7 +1472,7 @@
                                 <h4 class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-3">Logs & History</h4>
                                 
                                 <div class="relative pl-4 border-l border-slate-200 space-y-3.5 ml-2.5">
-                                    <template x-for="fu in (activeRow.task_details ? activeRow.task_details.follow_ups : [])" :key="fu.id">
+                                    <template x-for="fu in ((activeRow && activeRow.task_details && activeRow.task_details.follow_ups) || [])" :key="fu.id">
                                         <div class="relative">
                                             <span class="absolute -left-[20.5px] top-1 bg-emerald-500 border-2 border-white h-2.5 w-2.5 rounded-full"></span>
                                             <div class="text-[11px] animate-fade-in">
@@ -1489,7 +1489,7 @@
                                             </div>
                                         </div>
                                     </template>
-                                    <template x-if="!activeRow.task_details || !activeRow.task_details.follow_ups || activeRow.task_details.follow_ups.length === 0">
+                                    <template x-if="!activeRow || !activeRow.task_details || !activeRow.task_details.follow_ups || activeRow.task_details.follow_ups.length === 0">
                                         <div class="text-center py-4 text-slate-400 italic text-[11px] -ml-4">
                                             No follow-up history logged yet.
                                         </div>

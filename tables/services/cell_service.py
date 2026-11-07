@@ -139,14 +139,14 @@ class CellMutationService:
                 raise CellPermissionDeniedError("No edit access to this table or task row")
 
             # Enforce column level permissions
-            if table.job_type not in ["LIST_PID", "GENERAL"]:
-                if is_assigned:
-                    if column.name == "S_NO" or column.name in ["INITIAL_MAIL", "ALERT_MAIL", "DAYS_OVERDUE"]:
-                        raise CellPermissionDeniedError(f"Column {column.name} is read-only for assignees")
-                else:
-                    perm = get_column_access_level(user, column)
-                    if perm != "EDITABLE":
-                        raise CellPermissionDeniedError(f"Column {column.name} is read-only or hidden for you")
+            if is_assigned:
+                if column.name == "S_NO" or column.name in ["INITIAL_MAIL", "ALERT_MAIL", "DAYS_OVERDUE"]:
+                    raise CellPermissionDeniedError(f"Column {column.name} is read-only for assignees")
+            else:
+                # Column-level rules (READ_ONLY / HIDDEN set by an admin) apply to every table type.
+                perm = get_column_access_level(user, column)
+                if perm != "EDITABLE":
+                    raise CellPermissionDeniedError(f"Column {column.name} is read-only or hidden for you")
 
         # Update CellValue
         cell, created = CellValue.objects.update_or_create(
@@ -185,7 +185,9 @@ class CellMutationService:
                             try:
                                 new_date = datetime.datetime.strptime(str(value).split("T")[0], "%Y-%m-%d").date()
                             except ValueError:
-                                if not is_general:
+                                # General tables allow free text in non-date columns whose name contains "DUE";
+                                # a real DATE column must always hold a valid date.
+                                if not is_general or column.data_type == "DATE":
                                     raise CellValidationError("Invalid date format")
 
                 if new_date:

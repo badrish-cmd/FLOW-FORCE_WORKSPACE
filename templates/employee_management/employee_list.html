@@ -90,7 +90,7 @@
                 <div class="col-md-2 relative" x-data="{ open: false, search: '', selected: '{{ filters.role }}', selectedLabel: '{% if filters.role %}{% for value, label in roles %}{% if filters.role == value %}{{ label }}{% endif %}{% endfor %}{% else %}All Roles{% endif %}' }" @click.away="open = false">
                     <input type="hidden" name="role" :value="selected">
                     <button type="button" @click="open = !open" class="form-select text-start flex justify-between items-center bg-white border border-gray-300 rounded-lg py-2 px-3 text-sm font-normal text-gray-700 w-full">
-                        <span x-text="selectedLabel"></span>
+                        <span class="truncate" x-text="selectedLabel"></span>
                     </button>
                     <div x-show="open" x-transition class="absolute left-0 mt-1 w-56 rounded-lg shadow-xl bg-white border border-gray-200 z-50 p-2 space-y-2" style="display: none;">
                         <div class="relative">
@@ -116,7 +116,7 @@
                 <div class="col-md-2 relative" x-data="{ open: false, search: '', selected: '{{ filters.status }}', selectedLabel: '{% if filters.status %}{% for value, label in statuses %}{% if filters.status == value %}{{ label }}{% endif %}{% endfor %}{% else %}All Statuses{% endif %}' }" @click.away="open = false">
                     <input type="hidden" name="status" :value="selected">
                     <button type="button" @click="open = !open" class="form-select text-start flex justify-between items-center bg-white border border-gray-300 rounded-lg py-2 px-3 text-sm font-normal text-gray-700 w-full">
-                        <span x-text="selectedLabel"></span>
+                        <span class="truncate" x-text="selectedLabel"></span>
                     </button>
                     <div x-show="open" x-transition class="absolute left-0 mt-1 w-56 rounded-lg shadow-xl bg-white border border-gray-200 z-50 p-2 space-y-2" style="display: none;">
                         <div class="relative">
@@ -142,7 +142,7 @@
                 <div class="col-md-2 relative" x-data="{ open: false, search: '', selected: '{{ filters.active }}', selectedLabel: '{% if filters.active == 'yes' %}Active{% elif filters.active == 'no' %}Inactive{% else %}All Activation Status{% endif %}' }" @click.away="open = false">
                     <input type="hidden" name="active" :value="selected">
                     <button type="button" @click="open = !open" class="form-select text-start flex justify-between items-center bg-white border border-gray-300 rounded-lg py-2 px-3 text-sm font-normal text-gray-700 w-full">
-                        <span x-text="selectedLabel"></span>
+                        <span class="truncate" x-text="selectedLabel"></span>
                     </button>
                     <div x-show="open" x-transition class="absolute left-0 mt-1 w-56 rounded-lg shadow-xl bg-white border border-gray-200 z-50 p-2 space-y-2" style="display: none;">
                         <div class="relative">
@@ -223,12 +223,7 @@
                     <tr {% if not limited_view %}data-href="{% url 'employee_detail' employee.id %}"{% endif %}>
                         <td>
                             <div class="d-flex align-items-center gap-2">
-                                <div class="avatar-sm">
-                                    <img src="https://ui-avatars.com/api/?name={{ employee.full_name }}&background=0D8ABC&color=fff" 
-                                         alt="{{ employee.full_name }}" 
-                                         class="rounded-circle"
-                                         style="width: 32px; height: 32px;">
-                                </div>
+                                <div class="avatar-sm" aria-hidden="true">{{ employee.full_name|default:employee.email|slice:":1"|upper }}</div>
                                 <div>
                                     <strong>{{ employee.full_name }}</strong>
                                 </div>
@@ -382,9 +377,15 @@
     .avatar-sm {
         width: 32px;
         height: 32px;
+        flex-shrink: 0;
         border-radius: 50%;
-        overflow: hidden;
-        background: #f0f0f0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: #DBEAFE;
+        color: #1D4ED8;
+        font-weight: 600;
+        font-size: 13px;
     }
 
     .table tbody tr {

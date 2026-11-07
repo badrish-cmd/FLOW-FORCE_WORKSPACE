@@ -138,7 +138,7 @@
                                             {% if item.last_login %}
                                                 <span class="text-slate-700 font-medium d-block">
                                                     <i class="far fa-clock me-1 text-blue-500"></i>
-                                                    {{ item.last_login|date:"M j, Y at g:i A" }}
+                                                    {{ item.last_login|date:"M j, Y \a\t g:i A" }}
                                                 </span>
                                                 <small class="text-muted text-xs">({{ item.last_login|timesince }} ago)</small>
                                             {% else %}

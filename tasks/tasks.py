@@ -84,7 +84,8 @@ def send_email_log_task(self, email_log_id):
 
     try:
         # Send mail
-        from_email = 'operations.flowforce@gmail.com' if email_log.email_type in ["INITIAL_MAIL", "ALERT_MAIL", "OVERDUE_ESCALATION_MAIL"] else settings.DEFAULT_FROM_EMAIL
+        # Every workspace email goes out from the single no-reply sender (DEFAULT_FROM_EMAIL).
+        from_email = settings.DEFAULT_FROM_EMAIL
         send_mail(
             subject=email_log.subject,
             message=email_log.body or "",  # plain text fallback

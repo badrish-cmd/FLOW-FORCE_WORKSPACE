@@ -5,7 +5,7 @@
 {% block content %}
 <div class="container-fluid py-6 max-w-7xl mx-auto">
     <div class="mb-6">
-        <h1 class="text-2xl font-bold text-gray-900">Welcome back, Admin {{ request.user.full_name }}</h1>
+        <h1 class="text-2xl font-bold text-gray-900">Welcome back, {{ request.user.full_name }}</h1>
         <p class="text-sm text-gray-500 mt-1">Department: {{ request.user.department|default:"Not assigned" }}</p>
     </div>
 

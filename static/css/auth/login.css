@@ -275,11 +275,12 @@ body {
     outline: none;
 }
 
-.form-control:invalid {
+/* Only flag a field as invalid after the user has typed in it (not on first page load) */
+.form-control:not(:placeholder-shown):invalid {
     border-color: var(--danger);
 }
 
-.form-control:invalid:focus {
+.form-control:not(:placeholder-shown):invalid:focus {
     box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
 }
 

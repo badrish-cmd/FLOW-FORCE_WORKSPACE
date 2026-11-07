@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.test import TestCase
 from django.contrib.auth import get_user_model
 from django.utils import timezone
@@ -177,7 +178,7 @@ class TasksTestCase(TestCase):
         self.assertFalse(EmailLog.objects.filter(task=task_1d, email_type="OVERDUE_ESCALATION_MAIL").exists())
         self.assertFalse(EmailLog.objects.filter(task=task_7d, email_type="OVERDUE_ESCALATION_MAIL").exists())
 
-        # Verify that the OVERDUE_ESCALATION_MAIL uses operations.flowforce@gmail.com
+        # Verify that the OVERDUE_ESCALATION_MAIL uses the workspace no-reply sender
         log = logs_6d.first()
         log.status = "PENDING"
         log.save()
@@ -185,7 +186,8 @@ class TasksTestCase(TestCase):
             send_email_log_task(log.id)
             mock_send.assert_called_once()
             kwargs = mock_send.call_args[1]
-            self.assertEqual(kwargs.get('from_email'), 'operations.flowforce@gmail.com')
+            self.assertEqual(kwargs.get('from_email'), settings.DEFAULT_FROM_EMAIL)
+            self.assertNotIn('operations.flowforce@gmail.com', kwargs.get('from_email'))
 
     def test_email_retry_logic(self):
         """Simulate email send failure, verify exponential backoff and retry success"""
