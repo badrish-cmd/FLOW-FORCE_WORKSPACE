@@ -1,5 +1,6 @@
 import io
 import json
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 import openpyxl
@@ -13,8 +14,9 @@ from auth_app.models import EmployeeUser
 from employee_management.models import Department, EmployeeActivityLog
 from tasks.models import EmailLog, Notification
 
-from .models import (Enquiry, MasterSheet, QuoteChange, QuoteEvent, QuoteRevision, Vendor,
-                     VendorMasterFile, VendorQuote, ZohoConnection)
+from .models import (AIBudgetNotification, AIRequestLog, Enquiry, MasterSheet, QuoteChange,
+                     QuoteEvent, QuoteRevision, Vendor, VendorMasterFile, VendorQuote,
+                     ZohoConnection)
 from .services import sheet as sheet_svc
 from .services import workflow, zoho
 from .services.ai_extract import (AIExtractError, excel_to_text, extract_quote,
@@ -960,3 +962,215 @@ class DeleteAndVoidTests(TestCase):
         })
         self.assertEqual(resp.status_code, 302)
         self.assertFalse(MasterSheet.objects.filter(id=ms2.id).exists())
+
+
+@override_settings(CELERY_TASK_ALWAYS_EAGER=True, EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+                   ZOHO_CLIENT_ID="", ZOHO_CLIENT_SECRET="", GEMINI_API_KEY="dummy-key")
+class AIUsageTrackerTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(name="VQ AI Dept", slug="vq-ai-dept")
+        self.gm = EmployeeUser.objects.create_user(
+            email="gm_ai_usage@example.com", password="x", role="SUPER_ADMIN",
+            department=self.dept, full_name="GM Approver", status="APPROVED"
+        )
+        self.ibrahim = EmployeeUser.objects.create_user(
+            email="ibrahim_ai_usage@example.com", password="x", role="ADMIN",
+            department=self.dept, full_name="Ibrahim Admin", status="APPROVED"
+        )
+        vq_group, _ = Group.objects.get_or_create(name="Vendor Quotes")
+        self.editor = EmployeeUser.objects.create_user(
+            email="editor_ai_usage@example.com", password="x", role="EMPLOYEE",
+            department=self.dept, full_name="Editor Staff", status="APPROVED"
+        )
+        self.editor.groups.add(vq_group)
+        self.emp = EmployeeUser.objects.create_user(
+            email="emp_ai_usage@example.com", password="x", role="EMPLOYEE",
+            department=self.dept, full_name="Emp Staff", status="APPROVED"
+        )
+        self.vendor = Vendor.objects.create(
+            name="AI Vendor", code="AIV", currency="EUR", default_exchange_rate=22000
+        )
+        self.quote, self.rev = workflow.create_quote(
+            enquiry_number="ENQ/2026/11/AI-1", customer_name="Customer AI",
+            vendor=self.vendor, vendor_quote_no="Q-AI",
+            quote_file=SimpleUploadedFile("ai_quote.pdf", b"%PDF-dummy bytes"),
+            user=self.editor
+        )
+
+    @override_settings(
+        GEMINI_PRICE_INPUT_PER_M=Decimal("0.10"),
+        GEMINI_PRICE_OUTPUT_PER_M=Decimal("0.40")
+    )
+    @patch("google.genai.Client")
+    def test_ai_extract_success_creates_log_with_tokens_and_cost(self, mock_client_cls):
+        mock_client = mock_client_cls.return_value
+        mock_response = MagicMock()
+        mock_response.parsed = None
+        mock_response.text = json.dumps({
+            "vendor_quote_no": "VQ-AI-100",
+            "currency": "EUR",
+            "lines": [
+                {"line_no": 1, "part_no": "A-1", "description": "Widget", "qty": 5, "unit_price": 20.0}
+            ],
+            "warnings": [],
+        })
+        mock_response.usage_metadata = MagicMock(
+            prompt_token_count=1000,
+            candidates_token_count=500,
+            total_token_count=1500
+        )
+        mock_client.models.generate_content.return_value = mock_response
+
+        res = extract_quote(b"%PDF content", "quote.pdf", user=self.editor, quote=self.quote)
+        self.assertEqual(res["vendor_quote_no"], "VQ-AI-100")
+
+        log = AIRequestLog.objects.filter(quote=self.quote).latest("created_at")
+        self.assertEqual(log.status, AIRequestLog.STATUS_SUCCESS)
+        self.assertEqual(log.user, self.editor)
+        self.assertEqual(log.quote, self.quote)
+        self.assertEqual(log.file_name, "quote.pdf")
+        self.assertEqual(log.file_type, "pdf")
+        self.assertEqual(log.input_tokens, 1000)
+        self.assertEqual(log.output_tokens, 500)
+        self.assertEqual(log.total_tokens, 1500)
+        self.assertEqual(log.lines_extracted, 1)
+        # Cost: 1000/1M * 0.10 + 500/1M * 0.40 = 0.000100 + 0.000200 = 0.000300
+        self.assertEqual(log.estimated_cost_usd, Decimal("0.000300"))
+
+    @patch("google.genai.Client")
+    def test_ai_extract_failure_creates_failed_log(self, mock_client_cls):
+        mock_client = mock_client_cls.return_value
+        mock_client.models.generate_content.side_effect = Exception("Simulated Gemini API Timeout")
+
+        with self.assertRaises(AIExtractError):
+            extract_quote(b"%PDF content", "quote.pdf", user=self.editor, quote=self.quote)
+
+        log = AIRequestLog.objects.filter(quote=self.quote).latest("created_at")
+        self.assertEqual(log.status, AIRequestLog.STATUS_FAILED)
+        self.assertIn("Simulated Gemini API Timeout", log.error_message)
+        self.assertEqual(log.input_tokens, 0)
+        self.assertEqual(log.output_tokens, 0)
+        self.assertEqual(log.estimated_cost_usd, Decimal("0"))
+
+    @patch("google.genai.Client")
+    def test_logging_error_does_not_break_extraction(self, mock_client_cls):
+        mock_client = mock_client_cls.return_value
+        mock_response = MagicMock()
+        mock_response.parsed = None
+        mock_response.text = json.dumps({
+            "vendor_quote_no": "VQ-OK",
+            "lines": [{"line_no": 1, "part_no": "P1", "description": "Item", "qty": 1, "unit_price": 10.0}],
+        })
+        mock_response.usage_metadata = MagicMock(prompt_token_count=100, candidates_token_count=50, total_token_count=150)
+        mock_client.models.generate_content.return_value = mock_response
+
+        with patch("vendor_quotes.services.ai_extract._record_request_log", side_effect=RuntimeError("Logging DB crashed")):
+            res = extract_quote(b"%PDF content", "quote.pdf", user=self.editor, quote=self.quote)
+            self.assertEqual(res["vendor_quote_no"], "VQ-OK")
+
+    def test_ai_usage_page_permissions(self):
+        # Approver and Admin can access
+        self.client.force_login(self.gm)
+        resp = self.client.get(reverse("vendor_quotes:ai_usage"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "AI Usage &amp; Cost Tracker")
+
+        self.client.force_login(self.ibrahim)
+        resp = self.client.get(reverse("vendor_quotes:ai_usage"))
+        self.assertEqual(resp.status_code, 200)
+
+        # Standard employee is forbidden (403)
+        self.client.force_login(self.emp)
+        resp = self.client.get(reverse("vendor_quotes:ai_usage"))
+        self.assertEqual(resp.status_code, 403)
+
+    def test_ai_usage_csv_export(self):
+        AIRequestLog.objects.create(
+            user=self.editor, quote=self.quote, model="gemini-2.5-flash",
+            file_name="vendor_quote.pdf", file_type="pdf", status="SUCCESS",
+            duration_ms=1500, input_tokens=1000, output_tokens=200, total_tokens=1200,
+            estimated_cost_usd=Decimal("0.001500")
+        )
+        self.client.force_login(self.gm)
+        resp = self.client.get(reverse("vendor_quotes:ai_usage_export"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["Content-Type"], "text/csv")
+        self.assertIn("attachment; filename=", resp["Content-Disposition"])
+        content = resp.content.decode("utf-8")
+        self.assertIn("Timestamp (UTC)", content)
+        self.assertIn("vendor_quote.pdf", content)
+        self.assertIn("0.001500", content)
+
+    @override_settings(AI_MONTHLY_BUDGET_USD=Decimal("10.00"))
+    def test_budget_notifications_sent_once_per_threshold(self):
+        # Initial: cost under 80% ($5.00)
+        AIRequestLog.objects.create(
+            user=self.editor, quote=self.quote, model="gemini-2.5-flash",
+            status="SUCCESS", estimated_cost_usd=Decimal("5.00")
+        )
+        workflow.check_ai_budget_alerts(quote=self.quote)
+        self.assertFalse(AIBudgetNotification.objects.filter(threshold=80).exists())
+        self.assertFalse(Notification.objects.filter(title__contains="80%").exists())
+
+        # Now cross 80% ($8.50)
+        AIRequestLog.objects.create(
+            user=self.editor, quote=self.quote, model="gemini-2.5-flash",
+            status="SUCCESS", estimated_cost_usd=Decimal("3.50")
+        )
+        workflow.check_ai_budget_alerts(quote=self.quote)
+        self.assertTrue(AIBudgetNotification.objects.filter(threshold=80).exists())
+        self.assertTrue(Notification.objects.filter(user=self.gm, title__contains="80%").exists())
+        self.assertEqual(Notification.objects.filter(user=self.gm, title__contains="80%").count(), 1)
+
+        # Call again: notification for 80% must NOT be sent again
+        workflow.check_ai_budget_alerts(quote=self.quote)
+        self.assertEqual(Notification.objects.filter(user=self.gm, title__contains="80%").count(), 1)
+
+        # Now cross 100% ($10.50)
+        AIRequestLog.objects.create(
+            user=self.editor, quote=self.quote, model="gemini-2.5-flash",
+            status="SUCCESS", estimated_cost_usd=Decimal("2.00")
+        )
+        workflow.check_ai_budget_alerts(quote=self.quote)
+        self.assertTrue(AIBudgetNotification.objects.filter(threshold=100).exists())
+        self.assertTrue(Notification.objects.filter(user=self.gm, title__contains="100%").exists())
+        self.assertEqual(Notification.objects.filter(user=self.gm, title__contains="100%").count(), 1)
+
+        # Re-check 100%: no duplicates
+        workflow.check_ai_budget_alerts(quote=self.quote)
+        self.assertEqual(Notification.objects.filter(user=self.gm, title__contains="100%").count(), 1)
+
+    @override_settings(AI_MONTHLY_BUDGET_USD=Decimal("5.00"), AI_BLOCK_OVER_BUDGET=True)
+    def test_block_over_budget_refuses(self):
+        AIRequestLog.objects.create(
+            user=self.editor, quote=self.quote, model="gemini-2.5-flash",
+            status="SUCCESS", estimated_cost_usd=Decimal("6.00")
+        )
+        self.assertTrue(workflow.is_ai_budget_blocked())
+
+        self.client.force_login(self.editor)
+        resp = self.client.post(reverse("vendor_quotes:quote_ai_read", args=[self.quote.id]))
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()["ok"], False)
+        self.assertIn("Monthly AI budget reached", resp.json()["error"])
+
+        # Check quote_detail page displays button message
+        page = self.client.get(reverse("vendor_quotes:quote_detail", args=[self.quote.id]))
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, "Monthly AI budget reached")
+
+    def test_quote_page_displays_ai_usage_summary(self):
+        AIRequestLog.objects.create(
+            user=self.editor, quote=self.quote, model="gemini-2.5-flash",
+            status="SUCCESS", total_tokens=500, estimated_cost_usd=Decimal("0.0050")
+        )
+        AIRequestLog.objects.create(
+            user=self.editor, quote=self.quote, model="gemini-2.5-flash",
+            status="SUCCESS", total_tokens=700, estimated_cost_usd=Decimal("0.0070")
+        )
+        self.client.force_login(self.editor)
+        page = self.client.get(reverse("vendor_quotes:quote_detail", args=[self.quote.id]))
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, "AI used 2 times on this quote")
+        self.assertContains(page, "1200 tokens")
+        self.assertContains(page, "0.0120")

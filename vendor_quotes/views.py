@@ -1,22 +1,30 @@
+import csv
 import json
 import os
 import secrets
+from datetime import datetime, timedelta
+from decimal import Decimal
 
 from django.conf import settings
 from django.contrib import messages
+from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db.models import Count, Prefetch, Q
-from django.http import FileResponse, Http404, HttpResponseForbidden, JsonResponse
+from django.db.models import Avg, Count, Prefetch, Q, Sum
+from django.http import FileResponse, Http404, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from .forms import MasterUploadForm, QuoteCreateForm, VendorForm
-from .models import (Enquiry, MasterSheet, QuoteRevision, Vendor, VendorMasterFile, VendorQuote,
+from .models import (AIRequestLog, Enquiry, MasterSheet, QuoteRevision, Vendor, VendorMasterFile, VendorQuote,
                      ZohoConnection)
 from .services import workflow, zoho
 from .services.sheet import extract_lines
+
+
+User = get_user_model()
 
 
 def _guard(request, approve=False):
@@ -149,6 +157,12 @@ def quote_detail(request, pk):
     can_revise = workflow.can_edit(request.user) and (last_approved_rev is not None and rev.id == last_approved_rev.id) and not has_open_revision
     next_revision_number = (revisions[-1].number + 1) if revisions else 1
 
+    ai_logs = quote.ai_request_logs.all()
+    quote_ai_count = ai_logs.count()
+    quote_ai_tokens = sum(l.total_tokens for l in ai_logs)
+    quote_ai_cost = sum((l.estimated_cost_usd for l in ai_logs), Decimal("0"))
+    is_budget_blocked = workflow.is_ai_budget_blocked()
+
     return render(request, "vendor_quotes/quote_detail.html", _ctx(
         request, quote=quote, rev=rev, revisions=revisions, editable=editable,
         is_latest=(rev.number == revisions[-1].number), lines=lines, problems=problems, total=total,
@@ -159,7 +173,9 @@ def quote_detail(request, pk):
         ai_lines_count=ai_lines_count, ai_warnings=ai_warnings, ai_quote_total=ai_quote_total,
         can_delete=can_delete, has_approved_or_void=has_approved_or_void,
         can_discard=can_discard, can_void=can_void, can_revise=can_revise,
-        next_revision_number=next_revision_number))
+        next_revision_number=next_revision_number,
+        quote_ai_count=quote_ai_count, quote_ai_tokens=quote_ai_tokens,
+        quote_ai_cost=quote_ai_cost, is_budget_blocked=is_budget_blocked))
 
 
 @login_required
@@ -280,6 +296,9 @@ def quote_ai_read(request, pk):
             return JsonResponse({"ok": False, "error": "Quote file exceeds the 20 MB limit for AI processing."}, status=400)
     except Exception:
         pass
+
+    if workflow.is_ai_budget_blocked():
+        return JsonResponse({"ok": False, "error": "Monthly AI budget reached."}, status=400)
 
     api_key = getattr(settings, "GEMINI_API_KEY", "").strip() or os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
@@ -618,3 +637,237 @@ def zoho_customer_search(request):
         return JsonResponse({"results": zoho.search_customers(text)})
     except zoho.ZohoError as e:
         return JsonResponse({"results": [], "error": str(e)}, status=200)
+
+
+def _guard_ai_usage(request):
+    is_allowed = (
+        workflow.can_approve(request.user)
+        or getattr(request.user, "role", None) in ("SUPER_ADMIN", "ADMIN")
+        or getattr(request.user, "is_superuser", False)
+    )
+    return None if is_allowed else HttpResponseForbidden("Only admins and approvers can access AI usage.")
+
+
+def _generate_csv_response(qs, filename="ai_usage.csv"):
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    writer = csv.writer(response)
+    writer.writerow([
+        "Timestamp (UTC)",
+        "User",
+        "Email",
+        "Quote ID",
+        "Vendor",
+        "Vendor Quote No",
+        "Enquiry",
+        "Feature",
+        "Provider",
+        "Model",
+        "File Name",
+        "File Type",
+        "File Size (Bytes)",
+        "Status",
+        "Duration (Seconds)",
+        "Input Tokens",
+        "Output Tokens",
+        "Total Tokens",
+        "Lines Extracted",
+        "Warnings Count",
+        "Cost (USD)",
+        "Error Message",
+    ])
+    for item in qs.order_by("-created_at"):
+        writer.writerow([
+            item.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            item.user.full_name if item.user else "System",
+            item.user.email if item.user else "",
+            item.quote_id or "",
+            item.quote.vendor.name if item.quote and item.quote.vendor else "",
+            item.quote.vendor_quote_no if item.quote else "",
+            item.quote.enquiry.number if item.quote and item.quote.enquiry else "",
+            item.feature,
+            item.provider,
+            item.model,
+            item.file_name,
+            item.file_type,
+            item.file_size_bytes,
+            item.status,
+            round(item.duration_ms / 1000.0, 3),
+            item.input_tokens,
+            item.output_tokens,
+            item.total_tokens,
+            item.lines_extracted,
+            item.warnings_count,
+            f"{item.estimated_cost_usd:.6f}",
+            item.error_message,
+        ])
+    return response
+
+
+@login_required
+def ai_usage(request):
+    if (resp := _guard_ai_usage(request)):
+        return resp
+
+    if request.GET.get("export") == "csv":
+        return ai_usage_export_csv(request)
+
+    now = timezone.now()
+    today = now.date()
+
+    # Month filter
+    month_param = (request.GET.get("month") or "").strip()
+    if not month_param:
+        month_param = now.strftime("%Y-%m")
+
+    filter_year = None
+    filter_month = None
+    if month_param != "all":
+        try:
+            parts = month_param.split("-")
+            filter_year = int(parts[0])
+            filter_month = int(parts[1])
+        except (ValueError, IndexError):
+            filter_year = now.year
+            filter_month = now.month
+            month_param = now.strftime("%Y-%m")
+
+    user_id = (request.GET.get("user_id") or "").strip()
+    status_filter = (request.GET.get("status") or "").strip().upper()
+
+    # Base QS for recent requests table
+    qs = AIRequestLog.objects.select_related("user", "quote__vendor", "quote__enquiry")
+    if filter_year and filter_month:
+        qs = qs.filter(created_at__year=filter_year, created_at__month=filter_month)
+    if user_id:
+        qs = qs.filter(user_id=user_id)
+    if status_filter in (AIRequestLog.STATUS_SUCCESS, AIRequestLog.STATUS_FAILED):
+        qs = qs.filter(status=status_filter)
+
+    # Top summary cards (current month & today)
+    requests_today = AIRequestLog.objects.filter(created_at__date=today).count()
+    month_qs = AIRequestLog.objects.filter(created_at__year=now.year, created_at__month=now.month)
+    requests_month = month_qs.count()
+    success_month = month_qs.filter(status=AIRequestLog.STATUS_SUCCESS).count()
+    success_rate_month = round((success_month / requests_month * 100), 1) if requests_month > 0 else 100.0
+
+    tokens_month = month_qs.aggregate(s=Sum("total_tokens"))["s"] or 0
+    cost_month_usd = month_qs.aggregate(s=Sum("estimated_cost_usd"))["s"] or Decimal("0")
+    usd_to_idr = getattr(settings, "AI_USD_TO_IDR", Decimal("16000"))
+    cost_month_idr = cost_month_usd * usd_to_idr
+
+    avg_ms = month_qs.aggregate(a=Avg("duration_ms"))["a"] or 0
+    avg_duration_seconds = round(avg_ms / 1000.0, 2)
+
+    budget_usd = getattr(settings, "AI_MONTHLY_BUDGET_USD", Decimal("0"))
+    budget_pct = int(round((cost_month_usd / budget_usd) * 100)) if budget_usd > 0 else 0
+    is_budget_blocked = workflow.is_ai_budget_blocked()
+
+    # 30-Day Trend Chart
+    past_30_start = today - timedelta(days=29)
+    trend_qs = AIRequestLog.objects.filter(created_at__date__gte=past_30_start)
+    from collections import defaultdict
+    daily_stats = defaultdict(lambda: {"count": 0, "cost": Decimal("0")})
+    for log in trend_qs.only("created_at", "estimated_cost_usd"):
+        d = log.created_at.date()
+        daily_stats[d]["count"] += 1
+        daily_stats[d]["cost"] += log.estimated_cost_usd
+
+    chart_labels = []
+    chart_requests = []
+    chart_costs = []
+    for i in reversed(range(30)):
+        d = today - timedelta(days=i)
+        chart_labels.append(d.strftime("%b %d"))
+        chart_requests.append(daily_stats[d]["count"])
+        chart_costs.append(float(round(daily_stats[d]["cost"], 4)))
+
+    daily_chart_json = json.dumps({
+        "labels": chart_labels,
+        "requests": chart_requests,
+        "costs": chart_costs,
+    })
+
+    # Table "By user" for the selected month
+    target_year = filter_year or now.year
+    target_month = filter_month or now.month
+    by_user_qs = (
+        AIRequestLog.objects.filter(created_at__year=target_year, created_at__month=target_month)
+        .values("user__id", "user__full_name", "user__email")
+        .annotate(
+            total_req=Count("id"),
+            failed_req=Count("id", filter=Q(status=AIRequestLog.STATUS_FAILED)),
+            tokens=Sum("total_tokens"),
+            cost=Sum("estimated_cost_usd"),
+        )
+        .order_by("-cost", "-total_req")
+    )
+
+    # Pagination for recent requests table
+    paginator = Paginator(qs.order_by("-created_at"), 50)
+    page_obj = paginator.get_page(request.GET.get("page"))
+
+    # Past 12 months for month dropdown
+    month_options = []
+    for i in range(12):
+        m_date = (today.replace(day=1) - timedelta(days=i * 28)).replace(day=1)
+        val = m_date.strftime("%Y-%m")
+        if val not in [o["value"] for o in month_options]:
+            month_options.append({"value": val, "label": m_date.strftime("%B %Y")})
+
+    filter_users = User.objects.filter(ai_request_logs__isnull=False).distinct().order_by("full_name", "email")
+
+    return render(
+        request,
+        "vendor_quotes/ai_usage.html",
+        _ctx(
+            request,
+            nav="ai_usage",
+            requests_today=requests_today,
+            requests_month=requests_month,
+            success_rate_month=success_rate_month,
+            tokens_month=tokens_month,
+            cost_month_usd=cost_month_usd,
+            cost_month_idr=cost_month_idr,
+            avg_duration_seconds=avg_duration_seconds,
+            budget_usd=budget_usd,
+            budget_pct=budget_pct,
+            is_budget_blocked=is_budget_blocked,
+            daily_chart_json=daily_chart_json,
+            by_user=by_user_qs,
+            page_obj=page_obj,
+            month_options=month_options,
+            filter_users=filter_users,
+            selected_month=month_param,
+            selected_user_id=user_id,
+            selected_status=status_filter,
+            target_year=target_year,
+            target_month=target_month,
+        ),
+    )
+
+
+@login_required
+def ai_usage_export_csv(request):
+    if (resp := _guard_ai_usage(request)):
+        return resp
+
+    now = timezone.now()
+    month_param = (request.GET.get("month") or "").strip()
+    user_id = (request.GET.get("user_id") or "").strip()
+    status_filter = (request.GET.get("status") or "").strip().upper()
+
+    qs = AIRequestLog.objects.select_related("user", "quote__vendor", "quote__enquiry")
+    if month_param and month_param != "all":
+        try:
+            parts = month_param.split("-")
+            qs = qs.filter(created_at__year=int(parts[0]), created_at__month=int(parts[1]))
+        except (ValueError, IndexError):
+            pass
+    if user_id:
+        qs = qs.filter(user_id=user_id)
+    if status_filter in (AIRequestLog.STATUS_SUCCESS, AIRequestLog.STATUS_FAILED):
+        qs = qs.filter(status=status_filter)
+
+    fname_suffix = month_param if month_param else now.strftime("%Y-%m")
+    return _generate_csv_response(qs, filename=f"ai_usage_{fname_suffix}.csv")

@@ -2,6 +2,7 @@
 Django settings for flowforce project.
 """
 
+from decimal import Decimal
 from pathlib import Path
 import os
 from dotenv import load_dotenv
@@ -307,6 +308,12 @@ ZOHO_REDIRECT_URI = os.getenv('ZOHO_REDIRECT_URI', SITE_URL.rstrip('/') + '/vend
 # Google Gemini (AI Vendor Quote Reading)
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
 GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
+# Gemini pricing (USD per 1,000,000 tokens) - must be set from Google's current Gemini pricing page for the active GEMINI_MODEL
+GEMINI_PRICE_INPUT_PER_M = Decimal(os.getenv('GEMINI_PRICE_INPUT_PER_M', '0'))
+GEMINI_PRICE_OUTPUT_PER_M = Decimal(os.getenv('GEMINI_PRICE_OUTPUT_PER_M', '0'))
+AI_USD_TO_IDR = Decimal(os.getenv('AI_USD_TO_IDR', '16000'))
+AI_MONTHLY_BUDGET_USD = Decimal(os.getenv('AI_MONTHLY_BUDGET_USD', '0'))
+AI_BLOCK_OVER_BUDGET = os.getenv('AI_BLOCK_OVER_BUDGET', 'False').lower() in ('true', '1', 'yes')
 
 # --------------------------------------------------
 # LOGIN SETTINGS

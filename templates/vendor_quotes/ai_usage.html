@@ -1,0 +1,385 @@
+{% extends 'base.html' %}
+{% load humanize %}
+{% block title %}AI Usage &amp; Cost - Vendor Quotes{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-7xl">
+    <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">AI Usage &amp; Cost Tracker</h1>
+            <p class="text-sm text-slate-500">Monitor Google Gemini token consumption, response latency, and expenditure across vendor quote readings.</p>
+        </div>
+        <div class="flex items-center gap-2">
+            <a href="{% url 'vendor_quotes:ai_usage_export' %}?month={{ selected_month }}&user_id={{ selected_user_id }}&status={{ selected_status }}" class="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50">
+                <i class="fas fa-file-csv mr-1.5 text-emerald-600"></i>Export CSV
+            </a>
+        </div>
+    </div>
+
+    {% with nav='ai_usage' %}{% include 'vendor_quotes/_nav.html' %}{% endwith %}
+
+    <!-- Monthly Budget Alert Banner if set -->
+    {% if budget_usd > 0 %}
+    <div class="mb-5 rounded-xl border p-4 shadow-sm {% if budget_pct >= 100 %}border-red-300 bg-red-50 text-red-950{% elif budget_pct >= 80 %}border-amber-300 bg-amber-50 text-amber-950{% else %}border-blue-200 bg-blue-50 text-blue-950{% endif %}">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+                <i class="fas {% if budget_pct >= 100 %}fa-exclamation-triangle text-red-600{% elif budget_pct >= 80 %}fa-bell text-amber-600{% else %}fa-shield-halved text-blue-600{% endif %} text-xl"></i>
+                <div>
+                    <div class="font-semibold">
+                        Monthly AI Budget: ${{ budget_usd|floatformat:2 }} USD
+                        <span class="ml-2 text-xs font-normal">
+                            (Current spend: <strong>${{ cost_month_usd|floatformat:4 }}</strong> · {{ budget_pct }}%)
+                        </span>
+                    </div>
+                    <div class="text-xs opacity-80">
+                        {% if budget_pct >= 100 %}
+                            {% if is_budget_blocked %}
+                                <span class="font-semibold text-red-700">100% threshold reached. New AI extractions are currently BLOCKED (AI_BLOCK_OVER_BUDGET is active).</span>
+                            {% else %}
+                                100% threshold crossed. AI reading is still permitted (AI_BLOCK_OVER_BUDGET is off).
+                            {% endif %}
+                        {% elif budget_pct >= 80 %}
+                            80% threshold reached. Approvers have been notified.
+                        {% else %}
+                            Budget status normal. Notifications trigger automatically at 80% and 100% thresholds.
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="w-48">
+                <div class="h-2 w-full overflow-hidden rounded-full bg-black/10">
+                    <div class="h-full rounded-full {% if budget_pct >= 100 %}bg-red-600{% elif budget_pct >= 80 %}bg-amber-500{% else %}bg-blue-600{% endif %}" style="width: {% if budget_pct > 100 %}100{% else %}{{ budget_pct }}{% endif %}%;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Top KPI Cards -->
+    <div class="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+        <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div class="flex items-center justify-between text-xs font-medium text-slate-500">
+                <span>Requests Today</span>
+                <i class="fas fa-bolt text-blue-500"></i>
+            </div>
+            <div class="mt-2 text-2xl font-bold text-slate-900">{{ requests_today }}</div>
+            <div class="mt-1 text-[11px] text-slate-400">Total calls today</div>
+        </div>
+
+        <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div class="flex items-center justify-between text-xs font-medium text-slate-500">
+                <span>Requests Month</span>
+                <i class="fas fa-calendar-alt text-indigo-500"></i>
+            </div>
+            <div class="mt-2 text-2xl font-bold text-slate-900">{{ requests_month }}</div>
+            <div class="mt-1 text-[11px] text-slate-400">This calendar month</div>
+        </div>
+
+        <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div class="flex items-center justify-between text-xs font-medium text-slate-500">
+                <span>Success Rate</span>
+                <i class="fas fa-check-circle text-emerald-500"></i>
+            </div>
+            <div class="mt-2 text-2xl font-bold text-slate-900">{{ success_rate_month }}%</div>
+            <div class="mt-1 text-[11px] text-slate-400">Completed without error</div>
+        </div>
+
+        <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div class="flex items-center justify-between text-xs font-medium text-slate-500">
+                <span>Tokens Month</span>
+                <i class="fas fa-coins text-amber-500"></i>
+            </div>
+            <div class="mt-2 text-2xl font-bold text-slate-900">{{ tokens_month }}</div>
+            <div class="mt-1 text-[11px] text-slate-400">Prompt + candidates</div>
+        </div>
+
+        <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div class="flex items-center justify-between text-xs font-medium text-slate-500">
+                <span>Cost Month</span>
+                <i class="fas fa-dollar-sign text-emerald-600"></i>
+            </div>
+            <div class="mt-2 text-2xl font-bold text-slate-900">${{ cost_month_usd|floatformat:4 }}</div>
+            <div class="mt-1 text-[11px] text-slate-500">≈ Rp {{ cost_month_idr|floatformat:0 }}</div>
+        </div>
+
+        <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div class="flex items-center justify-between text-xs font-medium text-slate-500">
+                <span>Avg Latency</span>
+                <i class="fas fa-stopwatch text-purple-500"></i>
+            </div>
+            <div class="mt-2 text-2xl font-bold text-slate-900">{{ avg_duration_seconds }}s</div>
+            <div class="mt-1 text-[11px] text-slate-400">Seconds per call</div>
+        </div>
+    </div>
+
+    <!-- 30-Day Trend Chart -->
+    <div class="mb-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div class="mb-3 flex items-center justify-between">
+            <div>
+                <h2 class="font-semibold text-slate-800">Daily Activity (Last 30 Days)</h2>
+                <p class="text-xs text-slate-500">Requests volume and estimated cost in USD per day.</p>
+            </div>
+            <div class="flex items-center gap-4 text-xs font-medium text-slate-600">
+                <span class="flex items-center gap-1.5"><span class="h-3 w-3 rounded-sm bg-blue-500 inline-block"></span>Requests</span>
+                <span class="flex items-center gap-1.5"><span class="h-3 w-3 rounded-sm bg-emerald-500 inline-block"></span>Cost (USD)</span>
+            </div>
+        </div>
+        <div class="relative h-64 w-full">
+            <canvas id="aiUsageChart"></canvas>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <!-- Table "By User" for selected month -->
+        <div class="rounded-xl border border-slate-200 bg-white shadow-sm lg:col-span-1">
+            <div class="border-b border-slate-100 p-4">
+                <h2 class="font-semibold text-slate-800">Usage by User</h2>
+                <p class="text-xs text-slate-500">For {{ target_month }}/{{ target_year }}</p>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-slate-100 text-sm">
+                    <thead class="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
+                        <tr>
+                            <th class="px-4 py-2.5">User</th>
+                            <th class="px-3 py-2.5 text-right">Reqs</th>
+                            <th class="px-3 py-2.5 text-right">Fail</th>
+                            <th class="px-3 py-2.5 text-right">Tokens</th>
+                            <th class="px-4 py-2.5 text-right">Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        {% for u in by_user %}
+                        <tr class="hover:bg-slate-50">
+                            <td class="px-4 py-2 font-medium text-slate-900">
+                                <div>{{ u.user__full_name|default:u.user__email|default:"System / Unknown" }}</div>
+                                {% if u.user__full_name and u.user__email %}
+                                <div class="text-[11px] text-slate-400">{{ u.user__email }}</div>
+                                {% endif %}
+                            </td>
+                            <td class="px-3 py-2 text-right">{{ u.total_req }}</td>
+                            <td class="px-3 py-2 text-right {% if u.failed_req > 0 %}font-semibold text-red-600{% else %}text-slate-400{% endif %}">{{ u.failed_req }}</td>
+                            <td class="px-3 py-2 text-right text-xs text-slate-600">{{ u.tokens }}</td>
+                            <td class="px-4 py-2 text-right font-medium text-slate-800">${{ u.cost|floatformat:4 }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="5" class="px-4 py-6 text-center text-xs text-slate-500">No usage recorded for this month.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Recent Requests Log with Filters -->
+        <div class="rounded-xl border border-slate-200 bg-white shadow-sm lg:col-span-2">
+            <!-- Filter Bar -->
+            <form method="get" class="flex flex-wrap items-center gap-3 border-b border-slate-100 p-4">
+                <div>
+                    <label class="block text-[11px] font-semibold text-slate-500">Month</label>
+                    <select name="month" class="rounded-lg border border-slate-300 px-2.5 py-1 text-xs">
+                        <option value="all" {% if selected_month == 'all' %}selected{% endif %}>All Months</option>
+                        {% for m in month_options %}
+                        <option value="{{ m.value }}" {% if selected_month == m.value %}selected{% endif %}>{{ m.label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-[11px] font-semibold text-slate-500">User</label>
+                    <select name="user_id" class="rounded-lg border border-slate-300 px-2.5 py-1 text-xs">
+                        <option value="">All Users</option>
+                        {% for u in filter_users %}
+                        <option value="{{ u.id }}" {% if selected_user_id == u.id|stringformat:"s" %}selected{% endif %}>{{ u.full_name|default:u.email }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-[11px] font-semibold text-slate-500">Status</label>
+                    <select name="status" class="rounded-lg border border-slate-300 px-2.5 py-1 text-xs">
+                        <option value="">All Statuses</option>
+                        <option value="SUCCESS" {% if selected_status == 'SUCCESS' %}selected{% endif %}>Success</option>
+                        <option value="FAILED" {% if selected_status == 'FAILED' %}selected{% endif %}>Failed</option>
+                    </select>
+                </div>
+
+                <div class="self-end">
+                    <button type="submit" class="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-900">
+                        Filter
+                    </button>
+                    {% if selected_month != '' or selected_user_id != '' or selected_status != '' %}
+                    <a href="{% url 'vendor_quotes:ai_usage' %}" class="ml-1 text-xs text-slate-500 hover:underline">Reset</a>
+                    {% endif %}
+                </div>
+            </form>
+
+            <!-- Table -->
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-slate-100 text-sm">
+                    <thead class="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
+                        <tr>
+                            <th class="px-4 py-2.5">Time</th>
+                            <th class="px-3 py-2.5">User</th>
+                            <th class="px-3 py-2.5">Quote</th>
+                            <th class="px-3 py-2.5">File</th>
+                            <th class="px-3 py-2.5">Status</th>
+                            <th class="px-3 py-2.5 text-right">Sec</th>
+                            <th class="px-3 py-2.5 text-right">Tokens</th>
+                            <th class="px-4 py-2.5 text-right">Cost</th>
+                            <th class="px-3 py-2.5">Details</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        {% for log in page_obj %}
+                        <tr class="hover:bg-slate-50 text-xs">
+                            <td class="whitespace-nowrap px-4 py-2.5 text-slate-600 font-mono">{{ log.created_at|date:"M j, H:i:s" }}</td>
+                            <td class="px-3 py-2.5 text-slate-800 font-medium">{{ log.user.full_name|default:log.user.email|default:"System" }}</td>
+                            <td class="px-3 py-2.5">
+                                {% if log.quote %}
+                                <a href="{% url 'vendor_quotes:quote_detail' log.quote.id %}" class="font-medium text-blue-600 hover:underline" title="{{ log.quote.enquiry.customer_name }}">
+                                    {{ log.quote.enquiry.number }} · {{ log.quote.vendor.code|default:log.quote.vendor.name }}
+                                </a>
+                                {% else %}
+                                <span class="text-slate-400">—</span>
+                                {% endif %}
+                            </td>
+                            <td class="px-3 py-2.5 text-slate-700">
+                                <span class="truncate max-w-[120px] inline-block align-bottom" title="{{ log.file_name }}">{{ log.file_name|default:"—" }}</span>
+                                {% if log.file_type %}
+                                <span class="ml-1 rounded bg-slate-100 px-1 py-0.5 text-[10px] text-slate-500 uppercase">{{ log.file_type }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="px-3 py-2.5">
+                                {% if log.status == 'SUCCESS' %}
+                                <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">SUCCESS</span>
+                                {% else %}
+                                <span class="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700">FAILED</span>
+                                {% endif %}
+                            </td>
+                            <td class="px-3 py-2.5 text-right text-slate-600 font-mono">{{ log.duration_seconds }}s</td>
+                            <td class="px-3 py-2.5 text-right text-slate-600 font-mono" title="Prompt: {{ log.input_tokens }} / Output: {{ log.output_tokens }}">
+                                {{ log.total_tokens }}
+                            </td>
+                            <td class="px-4 py-2.5 text-right font-medium text-slate-900 font-mono">${{ log.estimated_cost_usd|floatformat:4 }}</td>
+                            <td class="px-3 py-2.5 text-slate-500">
+                                {% if log.status == 'SUCCESS' %}
+                                <span class="text-[11px] text-slate-500">{{ log.lines_extracted }} line{{ log.lines_extracted|pluralize }}{% if log.warnings_count %}, {{ log.warnings_count }} warn{% endif %}</span>
+                                {% elif log.error_message %}
+                                <span class="cursor-help text-red-600" title="{{ log.error_message }}">{{ log.error_message|truncatechars:28 }}</span>
+                                {% else %}
+                                —
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="9" class="px-4 py-8 text-center text-slate-500">No AI requests found matching the selected filters.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Pagination -->
+            {% if page_obj.has_other_pages %}
+            <div class="flex items-center justify-between border-t border-slate-100 p-4 text-xs text-slate-600">
+                <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }} ({{ page_obj.paginator.count }} total requests)</span>
+                <div class="flex gap-2">
+                    {% if page_obj.has_previous %}
+                    <a href="?month={{ selected_month }}&user_id={{ selected_user_id }}&status={{ selected_status }}&page={{ page_obj.previous_page_number }}" class="rounded-lg border px-3 py-1 hover:bg-slate-50">Previous</a>
+                    {% endif %}
+                    {% if page_obj.has_next %}
+                    <a href="?month={{ selected_month }}&user_id={{ selected_user_id }}&status={{ selected_status }}&page={{ page_obj.next_page_number }}" class="rounded-lg border px-3 py-1 hover:bg-slate-50">Next</a>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const chartData = JSON.parse('{{ daily_chart_json|escapejs }}');
+    const ctx = document.getElementById('aiUsageChart').getContext('2d');
+
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: chartData.labels,
+            datasets: [
+                {
+                    label: 'Requests',
+                    data: chartData.requests,
+                    backgroundColor: 'rgba(59, 130, 246, 0.75)',
+                    borderColor: 'rgb(59, 130, 246)',
+                    borderWidth: 1,
+                    yAxisID: 'yRequests',
+                    order: 2,
+                    borderRadius: 4,
+                },
+                {
+                    label: 'Cost (USD)',
+                    data: chartData.costs,
+                    type: 'line',
+                    borderColor: 'rgb(16, 185, 129)',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    borderWidth: 2,
+                    pointRadius: 2,
+                    fill: false,
+                    yAxisID: 'yCost',
+                    order: 1,
+                    tension: 0.25,
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    ticks: { maxTicksLimit: 15, font: { size: 10 } }
+                },
+                yRequests: {
+                    type: 'linear',
+                    position: 'left',
+                    beginAtZero: true,
+                    ticks: { precision: 0, font: { size: 10 } },
+                    title: { display: true, text: 'Requests', font: { size: 11 } }
+                },
+                yCost: {
+                    type: 'linear',
+                    position: 'right',
+                    beginAtZero: true,
+                    grid: { drawOnChartArea: false },
+                    ticks: {
+                        callback: function(val) { return '$' + Number(val).toFixed(3); },
+                        font: { size: 10 }
+                    },
+                    title: { display: true, text: 'Cost (USD)', font: { size: 11 } }
+                }
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            if (context.dataset.yAxisID === 'yCost') {
+                                return 'Cost: $' + Number(context.raw).toFixed(4) + ' USD';
+                            }
+                            return 'Requests: ' + context.raw;
+                        }
+                    }
+                }
+            }
+        }
+    });
+});
+</script>
+{% endblock %}
+

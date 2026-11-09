@@ -7,6 +7,7 @@ then the approved sheet is written into the vendor's master workbook and a draft
 quotation is created in Zoho Books. Customer revisions create R1, R2, ...
 """
 import os
+from decimal import Decimal
 
 from django.conf import settings
 from django.db import models
@@ -273,3 +274,61 @@ class ZohoConnection(models.Model):
     @property
     def is_connected(self):
         return bool(self.refresh_token)
+
+
+class AIRequestLog(models.Model):
+    """Log of every AI request made to providers (e.g. Gemini) with token usage and cost tracking."""
+    STATUS_SUCCESS = "SUCCESS"
+    STATUS_FAILED = "FAILED"
+    STATUS_CHOICES = [
+        (STATUS_SUCCESS, "Success"),
+        (STATUS_FAILED, "Failed"),
+    ]
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="ai_request_logs", db_index=True)
+    quote = models.ForeignKey(VendorQuote, null=True, blank=True, on_delete=models.SET_NULL, related_name="ai_request_logs")
+    feature = models.CharField(max_length=50, default="quote_reading")
+    provider = models.CharField(max_length=50, default="gemini")
+    model = models.CharField(max_length=100, blank=True)
+    file_name = models.CharField(max_length=255, blank=True)
+    file_type = models.CharField(max_length=50, blank=True)
+    file_size_bytes = models.BigIntegerField(default=0)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, db_index=True)
+    error_message = models.TextField(blank=True)
+    duration_ms = models.IntegerField(default=0)
+    input_tokens = models.IntegerField(default=0)
+    output_tokens = models.IntegerField(default=0)
+    total_tokens = models.IntegerField(default=0)
+    lines_extracted = models.IntegerField(default=0)
+    warnings_count = models.IntegerField(default=0)
+    estimated_cost_usd = models.DecimalField(max_digits=12, decimal_places=6, default=Decimal("0"))
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["created_at"]),
+            models.Index(fields=["user"]),
+            models.Index(fields=["status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.created_at:%Y-%m-%d %H:%M} {self.model} ({self.status})"
+
+    @property
+    def duration_seconds(self):
+        return round(self.duration_ms / 1000.0, 2)
+
+
+class AIBudgetNotification(models.Model):
+    """Tracks monthly threshold notifications (80%, 100%) sent to approvers to prevent duplicates."""
+    year_month = models.CharField(max_length=7, db_index=True)  # e.g. "2026-11"
+    threshold = models.IntegerField()  # 80 or 100
+    sent_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("year_month", "threshold")]
+
+    def __str__(self):
+        return f"{self.year_month} - {self.threshold}% alert at {self.sent_at}"

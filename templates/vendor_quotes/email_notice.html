@@ -4,12 +4,16 @@
     <p>Hello {{ name }},</p>
     <p style="font-size:16px;font-weight:bold;margin:12px 0">{{ title }}</p>
     <p>{{ message }}</p>
+    {% if quote %}
     <table style="font-size:14px;margin:12px 0;border-collapse:collapse">
       <tr><td style="color:#64748b;padding:2px 12px 2px 0">Enquiry</td><td>{{ quote.enquiry.number }}</td></tr>
       <tr><td style="color:#64748b;padding:2px 12px 2px 0">Customer</td><td>{{ quote.enquiry.customer_name }}</td></tr>
       <tr><td style="color:#64748b;padding:2px 12px 2px 0">Vendor</td><td>{{ quote.vendor.name }} {{ quote.vendor_quote_no }}</td></tr>
     </table>
     <p><a href="{{ url }}" style="display:inline-block;background:#2563eb;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:bold">Open the quote</a></p>
+    {% else %}
+    <p><a href="{{ url }}" style="display:inline-block;background:#2563eb;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:bold">View AI Usage</a></p>
+    {% endif %}
     <p style="color:#94a3b8;font-size:12px">This is an automatic message from noreply@flowforceworkspace.cloud. Please don't reply.</p>
   </div>
 </div>

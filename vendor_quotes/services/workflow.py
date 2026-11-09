@@ -1,6 +1,7 @@
 """Business actions for vendor quotes: create, save, submit, approve, send back, reject, revise."""
 import logging
 import os
+from decimal import Decimal
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -10,8 +11,8 @@ from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 
-from ..models import (Enquiry, MasterSheet, QuoteChange, QuoteEvent, QuoteRevision, Vendor,
-                      VendorMasterFile, VendorQuote)
+from ..models import (AIBudgetNotification, AIRequestLog, Enquiry, MasterSheet, QuoteChange,
+                      QuoteEvent, QuoteRevision, Vendor, VendorMasterFile, VendorQuote)
 from . import zoho
 from .excel_io import append_to_master, build_single_workbook, import_master
 from .sheet import (build_standard_snapshot, cell_number, cell_text, diff_snapshots,
@@ -78,11 +79,14 @@ def _site():
     return getattr(settings, "SITE_URL", "https://flowforceworkspace.cloud").rstrip("/")
 
 
-def notify(users, title, message, quote, kind="SYSTEM"):
+def notify(users, title, message, quote=None, kind="SYSTEM"):
     """Workspace bell + email (sent from DEFAULT_FROM_EMAIL via the existing EmailLog queue)."""
     from tasks.models import EmailLog, Notification
     from tasks.tasks import send_email_log_task
-    link = reverse("vendor_quotes:quote_detail", args=[quote.id])
+    if quote:
+        link = reverse("vendor_quotes:quote_detail", args=[quote.id])
+    else:
+        link = reverse("vendor_quotes:ai_usage")
     for u in {u.id: u for u in users if u and u.is_active}.values():
         Notification.objects.create(user=u, title=title, description=message, type=kind, link=link)
         if not u.email:
@@ -94,6 +98,84 @@ def notify(users, title, message, quote, kind="SYSTEM"):
         log = EmailLog.objects.create(recipient_email=u.email, subject=f"[Flow-Force] {title}", body=html,
                                       email_type="VENDOR_QUOTE_MAIL", status="PENDING", max_retries=3)
         transaction.on_commit(lambda log_id=log.id: send_email_log_task.delay(log_id))
+
+
+def check_ai_budget_alerts(quote=None):
+    """
+    Check if current month's AI usage has crossed 80% or 100% of AI_MONTHLY_BUDGET_USD.
+    Sends at most one notification per threshold per month to approvers.
+    """
+    try:
+        from django.db.models import Sum
+        budget = getattr(settings, "AI_MONTHLY_BUDGET_USD", Decimal("0"))
+        if not isinstance(budget, Decimal):
+            budget = Decimal(str(budget))
+        if budget <= 0:
+            return
+
+        now = timezone.now()
+        year_month = now.strftime("%Y-%m")
+
+        total_cost = AIRequestLog.objects.filter(
+            created_at__year=now.year,
+            created_at__month=now.month,
+            status=AIRequestLog.STATUS_SUCCESS,
+        ).aggregate(s=Sum("estimated_cost_usd"))["s"] or Decimal("0")
+
+        # 100% threshold
+        if total_cost >= budget:
+            _send_budget_alert(100, year_month, total_cost, budget, quote)
+        # 80% threshold
+        elif total_cost >= budget * Decimal("0.8"):
+            _send_budget_alert(80, year_month, total_cost, budget, quote)
+
+    except Exception as e:
+        logger.warning("Could not check AI budget alerts: %s", e)
+
+
+def _send_budget_alert(threshold, year_month, total_cost, budget, quote=None):
+    created = False
+    try:
+        _, created = AIBudgetNotification.objects.get_or_create(
+            year_month=year_month,
+            threshold=threshold,
+        )
+    except Exception:
+        return
+
+    if created:
+        approver_list = list(approvers())
+        pct = int(round((total_cost / budget) * 100))
+        title = f"AI Budget Alert: {threshold}% Reached"
+        message = (
+            f"Monthly AI spend for {year_month} has reached ${total_cost:.4f} USD "
+            f"({pct}% of the ${budget:.2f} monthly budget). Threshold {threshold}% crossed."
+        )
+        notify(approver_list, title, message, quote=quote, kind="WARNING")
+
+
+def is_ai_budget_blocked():
+    """
+    Returns True if AI_BLOCK_OVER_BUDGET is True and current month's cost >= AI_MONTHLY_BUDGET_USD > 0.
+    """
+    from django.db.models import Sum
+
+    budget = getattr(settings, "AI_MONTHLY_BUDGET_USD", Decimal("0"))
+    if not isinstance(budget, Decimal):
+        budget = Decimal(str(budget))
+    block = getattr(settings, "AI_BLOCK_OVER_BUDGET", False)
+
+    if not block or budget <= 0:
+        return False
+
+    now = timezone.now()
+    total_cost = AIRequestLog.objects.filter(
+        created_at__year=now.year,
+        created_at__month=now.month,
+        status=AIRequestLog.STATUS_SUCCESS,
+    ).aggregate(s=Sum("estimated_cost_usd"))["s"] or Decimal("0")
+
+    return total_cost >= budget
 
 
 def event(quote, action, message="", user=None, revision=None):

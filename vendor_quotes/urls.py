@@ -39,4 +39,6 @@ urlpatterns = [
     path("zoho/callback/", views.zoho_callback, name="zoho_callback"),
     path("zoho/disconnect/", views.zoho_disconnect, name="zoho_disconnect"),
     path("zoho/customers/", views.zoho_customer_search, name="zoho_customer_search"),
+    path("ai-usage/", views.ai_usage, name="ai_usage"),
+    path("ai-usage/export/", views.ai_usage_export_csv, name="ai_usage_export"),
 ]

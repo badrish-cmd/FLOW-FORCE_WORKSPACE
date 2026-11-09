@@ -74,7 +74,7 @@ def read_vendor_quote_with_ai(quote_id, user_id):
             quote.quote_file.close()
 
         filename = os.path.basename(quote.quote_file.name)
-        result = ai_extract.extract_quote(file_bytes, filename)
+        result = ai_extract.extract_quote(file_bytes, filename, user=user, quote=quote)
     except ai_extract.AIExtractError as e:
         quote.ai_status = VendorQuote.AI_FAILED
         quote.ai_error = str(e)

@@ -33,7 +33,11 @@
             <button type="button" @click="save()" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50" title="Ctrl+S"><i class="fas fa-save mr-1.5"></i>Save</button>
             {% endif %}
             {% if editable and rev.status != 'IN_REVIEW' and quote.quote_file %}
-            {% if has_gemini_key %}
+            {% if is_budget_blocked %}
+            <button type="button" disabled class="rounded-lg border border-slate-300 bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-400 cursor-not-allowed opacity-60" title="Monthly AI budget reached">
+                <i class="fas fa-ban mr-1.5 text-slate-400"></i>Monthly AI budget reached
+            </button>
+            {% elif has_gemini_key %}
             <button type="button" @click="startAiRead()" :disabled="aiRunning" class="rounded-lg border border-purple-300 bg-purple-50 px-3 py-2 text-sm font-semibold text-purple-700 hover:bg-purple-100 disabled:opacity-50">
                 <template x-if="aiRunning">
                     <span><i class="fas fa-spinner fa-spin mr-1.5"></i>Reading with AI...</span>
@@ -139,6 +143,13 @@
             </div>
             <button type="button" @click="showAiError = false" class="text-red-500 hover:text-red-700 text-xs px-2 py-1" title="Dismiss"><i class="fas fa-times"></i></button>
         </div>
+    </div>
+    {% endif %}
+
+    {% if quote_ai_count > 0 %}
+    <div class="mb-3 text-xs text-slate-500 flex items-center gap-1.5">
+        <i class="fas fa-microchip text-slate-400"></i>
+        <span>AI used {{ quote_ai_count }} time{{ quote_ai_count|pluralize }} on this quote · {{ quote_ai_tokens }} tokens · ≈ ${{ quote_ai_cost|floatformat:4 }}</span>
     </div>
     {% endif %}
 

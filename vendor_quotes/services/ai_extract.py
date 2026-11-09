@@ -8,6 +8,8 @@ import io
 import json
 import logging
 import os
+import time
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from django.conf import settings
@@ -185,123 +187,228 @@ def validate_and_clean_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def extract_quote(file_bytes: bytes, filename: str) -> Dict[str, Any]:
+def extract_quote(file_bytes: bytes, filename: str, user=None, quote=None) -> Dict[str, Any]:
     """
     Extract structured quotation data from a vendor file using Google Gemini.
+    Every call attempt is logged to AIRequestLog (success or failure) with tokens and cost.
 
     Args:
         file_bytes: Raw binary bytes of the uploaded file.
         filename: Name of the file (e.g. quote.pdf, quote.xlsx, quote.jpg).
+        user: Optional User initiating the extraction.
+        quote: Optional VendorQuote instance.
 
     Returns:
-        dict: {
-            "vendor_quote_no": str | None,
-            "quote_date": str | None,
-            "currency": str | None,
-            "freight_or_courier": float | None,
-            "quote_total": float | None,
-            "lines": list of line dicts,
-            "warnings": list of warning strings,
-        }
+        dict: Validated quote data.
 
     Raises:
         AIExtractError: If the key is missing, file is unreadable, or extraction fails.
     """
-    if not file_bytes:
-        raise AIExtractError("The uploaded file is empty.")
-
-    if len(file_bytes) > MAX_FILE_SIZE_BYTES:
-        raise AIExtractError(
-            f"File size ({len(file_bytes) / (1024 * 1024):.1f} MB) exceeds the 20 MB limit."
-        )
-
-    api_key = _get_api_key()
-    if not api_key:
-        raise AIExtractError("Gemini API key is not configured. Set GEMINI_API_KEY in environment.")
+    t0 = time.time()
+    file_size = len(file_bytes) if file_bytes else 0
+    ext = os.path.splitext(filename.lower())[1] if filename else ""
+    if ext in (".xlsx", ".xls"):
+        file_type = "xlsx"
+    elif ext == ".pdf":
+        file_type = "pdf"
+    elif ext in (".png", ".jpg", ".jpeg", ".webp", ".heic", ".tiff", ".tif"):
+        file_type = "image"
+    else:
+        file_type = ext.lstrip(".") or "unknown"
 
     model_name = _get_model_name()
+    input_tokens = 0
+    output_tokens = 0
+    total_tokens = 0
+    lines_extracted = 0
+    warnings_count = 0
+    status = "SUCCESS"
+    error_msg = ""
 
-    ext = os.path.splitext(filename.lower())[1]
-    is_excel = ext in (".xlsx", ".xls")
-    is_pdf = ext == ".pdf"
-    is_image = ext in (".png", ".jpg", ".jpeg", ".webp", ".heic", ".tiff", ".tif")
-
-    if not (is_excel or is_pdf or is_image):
-        raise AIExtractError(
-            f"Unsupported file format '{ext}'. Please upload a PDF, Excel spreadsheet (.xlsx/.xls), or image (PNG, JPEG, WEBP)."
-        )
-
-    # Initialize Gemini client
     try:
-        from google import genai
-        from google.genai import types
-        # Structured JSON output (response_schema) is only available on the v1beta API;
-        # google-genai 3.x defaults to v1, which rejects it with "JSON mode is not enabled".
-        client = genai.Client(api_key=api_key, http_options=types.HttpOptions(api_version="v1beta"))
-    except Exception as e:
-        raise AIExtractError(f"Failed to initialize Gemini client: {e}")
+        if not file_bytes:
+            raise AIExtractError("The uploaded file is empty.")
 
-    # Prepare contents
-    contents = []
-    if is_excel:
-        sheet_text = excel_to_text(file_bytes, filename)
-        contents.append(
-            f"Here is the text extracted from the vendor quote Excel file '{filename}':\n\n{sheet_text}\n\n{EXTRACTION_PROMPT}"
-        )
-    else:
-        mime_map = {
-            ".pdf": "application/pdf",
-            ".png": "image/png",
-            ".jpg": "image/jpeg",
-            ".jpeg": "image/jpeg",
-            ".webp": "image/webp",
-            ".heic": "image/heic",
-            ".tiff": "image/tiff",
-            ".tif": "image/tiff",
-        }
-        mime_type = mime_map.get(ext, "application/pdf")
+        if len(file_bytes) > MAX_FILE_SIZE_BYTES:
+            raise AIExtractError(
+                f"File size ({len(file_bytes) / (1024 * 1024):.1f} MB) exceeds the 20 MB limit."
+            )
+
+        api_key = _get_api_key()
+        if not api_key:
+            raise AIExtractError("Gemini API key is not configured. Set GEMINI_API_KEY in environment.")
+
+        is_excel = ext in (".xlsx", ".xls")
+        is_pdf = ext == ".pdf"
+        is_image = ext in (".png", ".jpg", ".jpeg", ".webp", ".heic", ".tiff", ".tif")
+
+        if not (is_excel or is_pdf or is_image):
+            raise AIExtractError(
+                f"Unsupported file format '{ext}'. Please upload a PDF, Excel spreadsheet (.xlsx/.xls), or image (PNG, JPEG, WEBP)."
+            )
+
+        # Initialize Gemini client
         try:
-            file_part = types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
+            from google import genai
+            from google.genai import types
+            # Structured JSON output (response_schema) is only available on the v1beta API;
+            # google-genai 3.x defaults to v1, which rejects it with "JSON mode is not enabled".
+            client = genai.Client(api_key=api_key, http_options=types.HttpOptions(api_version="v1beta"))
         except Exception as e:
-            raise AIExtractError(f"Failed to prepare file for Gemini: {e}")
+            raise AIExtractError(f"Failed to initialize Gemini client: {e}")
 
-        contents.append(file_part)
-        contents.append(EXTRACTION_PROMPT)
+        # Prepare contents
+        contents = []
+        if is_excel:
+            sheet_text = excel_to_text(file_bytes, filename)
+            contents.append(
+                f"Here is the text extracted from the vendor quote Excel file '{filename}':\n\n{sheet_text}\n\n{EXTRACTION_PROMPT}"
+            )
+        else:
+            mime_map = {
+                ".pdf": "application/pdf",
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".webp": "image/webp",
+                ".heic": "image/heic",
+                ".tiff": "image/tiff",
+                ".tif": "image/tiff",
+            }
+            mime_type = mime_map.get(ext, "application/pdf")
+            try:
+                file_part = types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
+            except Exception as e:
+                raise AIExtractError(f"Failed to prepare file for Gemini: {e}")
 
-    # Call Gemini model with structured output
-    try:
-        config = types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=QuoteExtractSchema,
-            temperature=0.0,
-        )
-        response = client.models.generate_content(
-            model=model_name,
-            contents=contents,
-            config=config,
-        )
-    except Exception as e:
-        logger.exception("Gemini API call failed for file %s", filename)
-        raise AIExtractError(f"Gemini API request failed: {e}")
+            contents.append(file_part)
+            contents.append(EXTRACTION_PROMPT)
 
-    # Parse response
-    raw_data = None
-    parsed = getattr(response, "parsed", None)
-    if isinstance(parsed, BaseModel):
-        raw_data = parsed.model_dump()
-    elif isinstance(parsed, dict):
-        raw_data = parsed
-
-    if raw_data is None:
-        response_text = getattr(response, "text", "") or ""
+        # Call Gemini model with structured output
         try:
-            raw_data = json.loads(response_text)
+            config = types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=QuoteExtractSchema,
+                temperature=0.0,
+            )
+            response = client.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=config,
+            )
         except Exception as e:
-            logger.error("Gemini returned invalid JSON: %s", response_text[:500])
-            raise AIExtractError(f"Gemini returned invalid JSON: {e}")
+            logger.exception("Gemini API call failed for file %s", filename)
+            raise AIExtractError(f"Gemini API request failed: {e}")
 
-    if not isinstance(raw_data, dict):
-        raise AIExtractError("Gemini returned an unexpected response structure.")
+        # Read usage_metadata (tokens)
+        usage = getattr(response, "usage_metadata", None)
+        if usage:
+            if isinstance(usage, dict):
+                input_tokens = usage.get("prompt_token_count", 0) or 0
+                output_tokens = usage.get("candidates_token_count", 0) or 0
+                total_tokens = usage.get("total_token_count", 0) or 0
+            else:
+                input_tokens = getattr(usage, "prompt_token_count", 0) or 0
+                output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+                total_tokens = getattr(usage, "total_token_count", 0) or 0
+        if total_tokens == 0 and (input_tokens + output_tokens) > 0:
+            total_tokens = input_tokens + output_tokens
 
-    # Validate and clean data
-    return validate_and_clean_data(raw_data)
+        # Parse response
+        raw_data = None
+        parsed = getattr(response, "parsed", None)
+        if isinstance(parsed, BaseModel):
+            raw_data = parsed.model_dump()
+        elif isinstance(parsed, dict):
+            raw_data = parsed
+
+        if raw_data is None:
+            response_text = getattr(response, "text", "") or ""
+            try:
+                raw_data = json.loads(response_text)
+            except Exception as e:
+                logger.error("Gemini returned invalid JSON: %s", response_text[:500])
+                raise AIExtractError(f"Gemini returned invalid JSON: {e}")
+
+        if not isinstance(raw_data, dict):
+            raise AIExtractError("Gemini returned an unexpected response structure.")
+
+        # Validate and clean data
+        result = validate_and_clean_data(raw_data)
+        lines_extracted = len(result.get("lines") or [])
+        warnings_count = len(result.get("warnings") or [])
+        return result
+
+    except Exception as e:
+        status = "FAILED"
+        error_msg = str(e)
+        raise
+    finally:
+        duration_ms = int((time.time() - t0) * 1000)
+        try:
+            _record_request_log(
+                user=user,
+                quote=quote,
+                model_name=model_name,
+                filename=filename,
+                file_type=file_type,
+                file_size=file_size,
+                status=status,
+                error_msg=error_msg,
+                duration_ms=duration_ms,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                lines_extracted=lines_extracted,
+                warnings_count=warnings_count,
+            )
+        except Exception as log_exc:
+            logger.warning("Could not record AIRequestLog: %s", log_exc)
+
+
+def _record_request_log(
+    user, quote, model_name, filename, file_type, file_size, status,
+    error_msg, duration_ms, input_tokens, output_tokens, total_tokens,
+    lines_extracted, warnings_count
+):
+    from django.utils import timezone
+    from ..models import AIRequestLog
+
+    price_in = getattr(settings, "GEMINI_PRICE_INPUT_PER_M", Decimal("0"))
+    if not isinstance(price_in, Decimal):
+        price_in = Decimal(str(price_in))
+    price_out = getattr(settings, "GEMINI_PRICE_OUTPUT_PER_M", Decimal("0"))
+    if not isinstance(price_out, Decimal):
+        price_out = Decimal(str(price_out))
+
+    cost = (Decimal(input_tokens) / Decimal(1000000)) * price_in + (Decimal(output_tokens) / Decimal(1000000)) * price_out
+
+    log_entry = AIRequestLog.objects.create(
+        user=user if (user and getattr(user, "is_authenticated", False)) else None,
+        quote=quote,
+        feature="quote_reading",
+        provider="gemini",
+        model=model_name,
+        file_name=filename or "",
+        file_type=file_type or "",
+        file_size_bytes=file_size,
+        status=status,
+        error_message=error_msg,
+        duration_ms=duration_ms,
+        finished_at=timezone.now(),
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        lines_extracted=lines_extracted,
+        warnings_count=warnings_count,
+        estimated_cost_usd=cost,
+    )
+
+    if status == AIRequestLog.STATUS_SUCCESS:
+        try:
+            from . import workflow
+            workflow.check_ai_budget_alerts(quote=quote)
+        except Exception as e:
+            logger.warning("Could not run check_ai_budget_alerts: %s", e)
+
+    return log_entry
