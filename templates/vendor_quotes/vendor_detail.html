@@ -2,9 +2,39 @@
 {% block title %}{{ vendor.name }} - Vendor Quotes{% endblock %}
 {% block content %}
 <div class="mx-auto max-w-7xl">
-    <div class="mb-4">
-        <a href="{% url 'vendor_quotes:vendor_list' %}" class="text-sm text-slate-500 hover:text-blue-600"><i class="fas fa-arrow-left mr-1"></i>Vendors</a>
-        <h1 class="mt-1 text-2xl font-bold text-gray-900">{{ vendor.name }}</h1>
+    <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+            <a href="{% url 'vendor_quotes:vendor_list' %}" class="text-sm text-slate-500 hover:text-blue-600"><i class="fas fa-arrow-left mr-1"></i>Vendors</a>
+            <h1 class="mt-1 text-2xl font-bold text-gray-900">{{ vendor.name }}{% if not vendor.is_active %} <span class="ml-2 rounded bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-500">inactive</span>{% endif %}</h1>
+        </div>
+        <div class="flex items-center gap-2">
+            {% if is_admin %}
+                {% if can_delete_vendor %}
+                <form method="post" action="{% url 'vendor_quotes:vendor_delete' vendor.id %}" onsubmit="return confirm('Permanently delete vendor \'{{ vendor.name|escapejs }}\' and its master files?');">
+                    {% csrf_token %}
+                    <button type="submit" class="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-sm font-semibold text-red-600 shadow-sm hover:bg-red-50">
+                        <i class="fas fa-trash mr-1.5"></i>Delete vendor
+                    </button>
+                </form>
+                {% else %}
+                <form method="post" action="{% url 'vendor_quotes:vendor_toggle_active' vendor.id %}" class="inline-block">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{% url 'vendor_quotes:vendor_detail' vendor.id %}">
+                    <span title="Cannot delete vendor with existing quotes. You can deactivate it instead.">
+                        {% if vendor.is_active %}
+                        <button type="submit" class="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-sm font-semibold text-amber-700 shadow-sm hover:bg-amber-50">
+                            Deactivate vendor
+                        </button>
+                        {% else %}
+                        <button type="submit" class="rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-sm font-semibold text-emerald-700 shadow-sm hover:bg-emerald-50">
+                            Activate vendor
+                        </button>
+                        {% endif %}
+                    </span>
+                </form>
+                {% endif %}
+            {% endif %}
+        </div>
     </div>
     {% with nav='vendors' %}{% include 'vendor_quotes/_nav.html' %}{% endwith %}
 
@@ -47,32 +77,91 @@
                 <p class="text-xs text-slate-500">Uploading splits the workbook sheet by sheet into past quotes. It replaces the list below; earlier master files stay in the history.</p>
                 <button class="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"><i class="fas fa-upload mr-1.5"></i>Upload &amp; split</button>
                 {% if masters|length > 1 %}
-                <details class="text-xs text-slate-500"><summary class="cursor-pointer">History ({{ masters|length }})</summary>
-                    <ul class="mt-2 space-y-1">{% for m in masters %}<li><a class="text-blue-600" href="{% url 'vendor_quotes:master_file_download' m.id %}">{{ m.created_at|date:"M j, Y H:i" }}</a> · {{ m.note }}</li>{% endfor %}</ul>
+                <details class="text-xs text-slate-500" open><summary class="cursor-pointer font-medium text-slate-700">Workbook versions ({{ masters|length }})</summary>
+                    <ul class="mt-2 space-y-2 divide-y divide-slate-100">
+                        {% for m in masters %}
+                        <li class="pt-1.5 flex items-center justify-between gap-2">
+                            <div>
+                                <a class="font-medium text-blue-600 hover:underline" href="{% url 'vendor_quotes:master_file_download' m.id %}">{{ m.created_at|date:"M j, Y H:i" }}</a>
+                                {% if m.id == current_master.id %}<span class="ml-1 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800">Active</span>{% endif %}
+                                <div class="text-[11px] text-slate-400">{{ m.note|default:"Uploaded master" }} ({{ m.sheet_count }} sheets)</div>
+                            </div>
+                            {% if m.id != current_master.id and can_approve %}
+                            <div class="flex items-center gap-1 shrink-0">
+                                <form method="post" action="{% url 'vendor_quotes:master_file_restore' m.id %}" onsubmit="return confirm('Restore this version as the newest master workbook?');" class="inline">
+                                    {% csrf_token %}
+                                    <button type="submit" class="rounded px-2 py-0.5 text-[11px] font-medium text-slate-600 border border-slate-300 hover:bg-slate-100" title="Restore this version">Restore</button>
+                                </form>
+                                <form method="post" action="{% url 'vendor_quotes:master_file_delete' m.id %}" onsubmit="return confirm('Permanently delete this master file version from storage?');" class="inline">
+                                    {% csrf_token %}
+                                    <button type="submit" class="rounded p-1 text-slate-400 hover:text-red-600" title="Delete version"><i class="fas fa-trash"></i></button>
+                                </form>
+                            </div>
+                            {% endif %}
+                        </li>
+                        {% endfor %}
+                    </ul>
                 </details>
                 {% endif %}
             </form>
         </div>
 
-        <div class="lg:col-span-2 rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div class="lg:col-span-2 rounded-xl border border-slate-200 bg-white shadow-sm" x-data="{ selected: [], allChecked: false, toggleAll() { const cbs = document.querySelectorAll('.sheet-cb'); this.selected = this.allChecked ? Array.from(cbs).map(c => c.value) : []; } }">
+            <form id="bulk-delete-form" method="post" action="{% url 'vendor_quotes:master_sheets_bulk_delete' vendor.id %}" onsubmit="return confirm('Delete ' + selected.length + ' selected past quote sheet(s)? This only removes workspace records, not the Excel file.');">
+                {% csrf_token %}
+            </form>
             <div class="flex flex-wrap items-center gap-2 border-b border-slate-100 p-4">
                 <h2 class="mr-auto font-semibold text-slate-800">Past quotes ({{ page.paginator.count }})</h2>
+                {% if can_edit %}
+                <button form="bulk-delete-form" type="submit" x-show="selected.length > 0" style="display: none;" class="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-red-700 transition">
+                    <i class="fas fa-trash mr-1"></i>Delete selected (<span x-text="selected.length"></span>)
+                </button>
+                {% endif %}
                 {% if missing %}<a href="?missing=1" class="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">{{ missing }} without ENQ no.</a>{% endif %}
                 <form method="get" class="flex gap-2"><input name="q" value="{{ q }}" placeholder="ENQ, customer, quote no." class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm"><button class="rounded-lg bg-slate-800 px-3 py-1.5 text-sm text-white">Search</button></form>
             </div>
             <table class="min-w-full divide-y divide-slate-100 text-sm">
-                <thead class="text-left text-xs font-semibold uppercase tracking-wide text-slate-500"><tr><th class="px-4 py-2">Sheet</th><th class="px-4 py-2">Enquiry</th><th class="px-4 py-2">Customer</th><th class="px-4 py-2">Vendor quote</th><th class="px-4 py-2">Our quotation</th></tr></thead>
+                <thead class="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <tr>
+                        {% if can_edit %}
+                        <th class="w-8 px-4 py-2">
+                            <input type="checkbox" x-model="allChecked" @change="toggleAll()" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500">
+                        </th>
+                        {% endif %}
+                        <th class="px-4 py-2">Sheet</th>
+                        <th class="px-4 py-2">Enquiry</th>
+                        <th class="px-4 py-2">Customer</th>
+                        <th class="px-4 py-2">Vendor quote</th>
+                        <th class="px-4 py-2">Our quotation</th>
+                        {% if can_edit %}<th class="w-12 px-4 py-2 text-right">Actions</th>{% endif %}
+                    </tr>
+                </thead>
                 <tbody class="divide-y divide-slate-100">
                     {% for s in page %}
                     <tr class="cursor-pointer hover:bg-slate-50" onclick="location.href='{% url 'vendor_quotes:master_sheet_detail' s.id %}'">
+                        {% if can_edit %}
+                        <td class="px-4 py-2" onclick="event.stopPropagation()">
+                            <input type="checkbox" form="bulk-delete-form" name="selected_sheets" value="{{ s.id }}" class="sheet-cb rounded border-slate-300 text-blue-600 focus:ring-blue-500" x-model="selected">
+                        </td>
+                        {% endif %}
                         <td class="px-4 py-2 text-slate-600">{{ s.sheet_name }}</td>
                         <td class="px-4 py-2 font-medium text-slate-900">{% if s.details_missing %}<span class="text-xs text-amber-700">details missing</span>{% else %}{{ s.enquiry_no }}{% endif %}</td>
                         <td class="px-4 py-2 text-slate-600">{{ s.customer_name|default:"—" }}</td>
                         <td class="px-4 py-2 text-slate-600">{{ s.vendor_quote_no|default:"—" }}</td>
                         <td class="px-4 py-2 text-slate-600">{{ s.quotation_no|default:"—" }}</td>
+                        {% if can_edit %}
+                        <td class="px-4 py-2 text-right" onclick="event.stopPropagation()">
+                            <form method="post" action="{% url 'vendor_quotes:master_sheet_delete' s.id %}" onsubmit="return confirm('Delete past quote sheet \'{{ s.sheet_name|escapejs }}\'?');" class="inline">
+                                {% csrf_token %}
+                                <button type="submit" class="rounded p-1 text-slate-400 hover:text-red-600 transition" title="Delete sheet">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </form>
+                        </td>
+                        {% endif %}
                     </tr>
                     {% empty %}
-                    <tr><td colspan="5" class="px-4 py-10 text-center text-slate-500">No past sheets. Upload the master workbook to import them.</td></tr>
+                    <tr><td colspan="{% if can_edit %}7{% else %}5{% endif %}" class="px-4 py-10 text-center text-slate-500">No past sheets. Upload the master workbook to import them.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>

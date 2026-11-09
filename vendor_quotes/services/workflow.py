@@ -100,6 +100,24 @@ def event(quote, action, message="", user=None, revision=None):
     QuoteEvent.objects.create(quote=quote, revision=revision, user=user, action=action, message=message)
 
 
+def log_workspace_activity(user, action, message):
+    """
+    Log an entry to the workspace's activity log (EmployeeActivityLog).
+    """
+    try:
+        from employee_management.models import EmployeeActivityLog
+        if user and user.is_authenticated:
+            act = action if action in dict(EmployeeActivityLog.ACTIVITY_TYPES) else "DELETE"
+            EmployeeActivityLog.objects.create(
+                employee=user,
+                activity_type=act,
+                performed_by=user,
+                description=message,
+            )
+    except Exception as e:
+        logger.warning("Could not write to EmployeeActivityLog: %s", e)
+
+
 # ---------------------------------------------------------------- vendors / masters
 
 @transaction.atomic
@@ -246,11 +264,18 @@ def revise(quote, user):
     if not can_edit(user):
         raise WorkflowError("You don't have permission to revise quotes.")
     latest = quote.revisions.select_for_update().order_by("-number").first()
-    if latest.status != QuoteRevision.STATUS_APPROVED:
-        raise WorkflowError("You can only revise the latest approved version.")
+    if not latest:
+        raise WorkflowError("No revisions found for this quote.")
+    if latest.status in (QuoteRevision.STATUS_DRAFT, QuoteRevision.STATUS_IN_REVIEW, QuoteRevision.STATUS_SENT_BACK):
+        raise WorkflowError("A revision is already in progress. Finish, submit or discard it first.")
+
+    last_approved = quote.revisions.filter(status=QuoteRevision.STATUS_APPROVED).order_by("-number").first()
+    if not last_approved:
+        raise WorkflowError("You can only revise an approved version, but no approved version was found.")
+
     rev = QuoteRevision.objects.create(quote=quote, number=latest.number + 1,
-                                       snapshot=fresh_copy(latest.snapshot), created_by=user)
-    event(quote, "revised", f"{rev.label} started from {latest.label}", user, rev)
+                                       snapshot=fresh_copy(last_approved.snapshot), created_by=user)
+    event(quote, "revised", f"{rev.label} started from {last_approved.label}", user, rev)
     return rev
 
 
@@ -468,3 +493,356 @@ def apply_ai_result(quote, rev, ai_result, user):
     event(quote, "ai_filled", msg, user, rev)
 
     return len(sheet_lines)
+
+
+# ---------------------------------------------------------------- delete / void / restore
+
+def can_delete_quote(quote, user):
+    """
+    Allowed only if NONE of its revisions was ever APPROVED or VOID
+    (all are DRAFT, SENT_BACK, IN_REVIEW or REJECTED).
+    Who: quote's creator (with can_edit) or any approver.
+    IN_REVIEW quotes: approvers only.
+    """
+    if not user.is_authenticated:
+        return False
+    if quote.revisions.filter(status__in=[QuoteRevision.STATUS_APPROVED, QuoteRevision.STATUS_VOID]).exists():
+        return False
+    if quote.revisions.filter(status=QuoteRevision.STATUS_IN_REVIEW).exists():
+        return can_approve(user)
+    return can_approve(user) or (can_edit(user) and quote.created_by_id == user.id)
+
+
+@transaction.atomic
+def delete_quote(quote, user):
+    """
+    Delete a quote, its uploaded quote_file, revisions, and cascaded objects.
+    If the enquiry has no quotes left afterwards, delete the enquiry too.
+    """
+    if not can_delete_quote(quote, user):
+        if quote.revisions.filter(status__in=[QuoteRevision.STATUS_APPROVED, QuoteRevision.STATUS_VOID]).exists():
+            raise WorkflowError("Approved or voided quotes cannot be deleted.")
+        raise WorkflowError("You don't have permission to delete this quote.")
+
+    latest_rev = quote.latest_revision
+    rev_info = f" ({latest_rev.label}, {latest_rev.get_status_display()})" if latest_rev else ""
+    desc = f"Deleted vendor quote {quote.enquiry.number} {quote.vendor.name} {quote.vendor_quote_no or ''}{rev_info}".strip()
+
+    event(quote, "deleted", desc, user)
+    log_workspace_activity(user, "DELETE", desc)
+
+    if quote.quote_file:
+        quote.quote_file.delete(save=False)
+    for rev in quote.revisions.all():
+        if rev.excel_file:
+            rev.excel_file.delete(save=False)
+
+    enquiry = quote.enquiry
+    quote.delete()
+
+    enquiry_deleted = False
+    if not enquiry.quotes.exists():
+        enquiry_desc = f"Deleted enquiry {enquiry.number} ({enquiry.customer_name}) as it has no quotes remaining"
+        log_workspace_activity(user, "DELETE", enquiry_desc)
+        enquiry.delete()
+        enquiry_deleted = True
+
+    return enquiry_deleted
+
+
+def can_discard_revision(rev, user):
+    """
+    Only the LATEST revision, only when number > 0 and status is DRAFT or SENT_BACK.
+    Who: editors (can_edit(user)). For revision 0, show 'Delete quote' instead.
+    """
+    if not user.is_authenticated or not can_edit(user):
+        return False
+    if rev.number <= 0:
+        return False
+    if rev.status not in (QuoteRevision.STATUS_DRAFT, QuoteRevision.STATUS_SENT_BACK):
+        return False
+    latest = rev.quote.latest_revision
+    return latest is not None and latest.id == rev.id
+
+
+@transaction.atomic
+def discard_revision(rev, user):
+    """
+    Discard (delete) an unapproved latest revision (number > 0). The previous version stays.
+    """
+    if not can_discard_revision(rev, user):
+        if rev.number <= 0:
+            raise WorkflowError("The original revision (R0) cannot be discarded. Delete the quote instead.")
+        if rev.status not in (QuoteRevision.STATUS_DRAFT, QuoteRevision.STATUS_SENT_BACK):
+            raise WorkflowError(f"Cannot discard a revision with status {rev.get_status_display()}.")
+        latest = rev.quote.latest_revision
+        if latest and latest.id != rev.id:
+            raise WorkflowError("Only the latest revision can be discarded.")
+        raise WorkflowError("You don't have permission to discard this revision.")
+
+    quote = rev.quote
+    desc = f"Discarded revision {rev.label} of quote {quote.enquiry.number} {quote.vendor.name}"
+
+    event(quote, "discard_revision", desc, user, revision=None)
+    log_workspace_activity(user, "DELETE", desc)
+
+    if rev.excel_file:
+        rev.excel_file.delete(save=False)
+
+    rev.delete()
+    return quote
+
+
+def can_void_revision(rev, user):
+    """
+    Approvers only, only when revision is APPROVED.
+    """
+    if not user.is_authenticated or not can_approve(user):
+        return False
+    return rev.status == QuoteRevision.STATUS_APPROVED
+
+
+@transaction.atomic
+def void_revision(rev, user, comment):
+    """
+    Void an approved revision. Keep record, Excel file, and Zoho number for history.
+    """
+    rev = QuoteRevision.objects.select_for_update().get(pk=rev.pk)
+    if not can_void_revision(rev, user):
+        if rev.status != QuoteRevision.STATUS_APPROVED:
+            raise WorkflowError(f"Only approved revisions can be voided (current status: {rev.get_status_display()}).")
+        raise WorkflowError("Only approvers can void an approved revision.")
+
+    comment = (comment or "").strip()
+    if not comment:
+        raise WorkflowError("A comment explaining why this revision is being voided is required.")
+
+    quote = rev.quote
+    desc = f"Voided revision {rev.label} of quote {quote.enquiry.number} {quote.vendor.name}: {comment}"
+
+    event(quote, "void_revision", desc, user, rev)
+    log_workspace_activity(user, "STATUS_CHANGE", desc)
+
+    rev.status = QuoteRevision.STATUS_VOID
+    rev.decision_comment = comment
+    rev.decided_by = user
+    rev.decided_at = timezone.now()
+    rev.save(update_fields=["status", "decision_comment", "decided_by", "decided_at", "updated_at"])
+
+    return rev
+
+
+def can_delete_enquiry(enquiry, user):
+    """
+    Allowed only if no quote under it has an APPROVED or VOID revision.
+    Who: approvers only.
+    """
+    if hasattr(enquiry, "is_authenticated") and not hasattr(user, "is_authenticated"):
+        user, enquiry = enquiry, user
+    if not user.is_authenticated or not can_approve(user):
+        return False
+    return not QuoteRevision.objects.filter(
+        quote__enquiry=enquiry,
+        status__in=[QuoteRevision.STATUS_APPROVED, QuoteRevision.STATUS_VOID]
+    ).exists()
+
+
+@transaction.atomic
+def delete_enquiry(enquiry, user, confirm_number=""):
+    """
+    Delete an enquiry and all quotes under it. Confirmation must match enquiry number.
+    """
+    if hasattr(enquiry, "is_authenticated") and not hasattr(user, "is_authenticated"):
+        user, enquiry = enquiry, user
+    if not can_delete_enquiry(enquiry, user):
+        if QuoteRevision.objects.filter(
+            quote__enquiry=enquiry,
+            status__in=[QuoteRevision.STATUS_APPROVED, QuoteRevision.STATUS_VOID]
+        ).exists():
+            raise WorkflowError("Cannot delete enquiry: it has approved or voided vendor quotes.")
+        raise WorkflowError("Only approvers can delete enquiries.")
+
+    confirm = (confirm_number or "").strip()
+    if confirm != enquiry.number.strip():
+        raise WorkflowError(f"Confirmation number '{confirm}' does not match '{enquiry.number}'.")
+
+    # Delete quote storage files
+    for quote in enquiry.quotes.all():
+        desc_q = f"Deleted vendor quote {quote.enquiry.number} {quote.vendor.name} (cascade from enquiry deletion)"
+        log_workspace_activity(user, "DELETE", desc_q)
+        if quote.quote_file:
+            quote.quote_file.delete(save=False)
+        for rev in quote.revisions.all():
+            if rev.excel_file:
+                rev.excel_file.delete(save=False)
+
+    desc = f"Deleted enquiry {enquiry.number} ({enquiry.customer_name})"
+    log_workspace_activity(user, "DELETE", desc)
+
+    enquiry.delete()
+
+
+def can_delete_vendor(vendor, user):
+    """
+    DELETE allowed only if the vendor has no quotes at all.
+    Who: approvers or SUPER_ADMIN/ADMIN.
+    """
+    if not user.is_authenticated:
+        return False
+    is_admin = can_approve(user) or getattr(user, "role", None) in ("SUPER_ADMIN", "ADMIN") or getattr(user, "is_superuser", False)
+    if not is_admin:
+        return False
+    return not vendor.quotes.exists()
+
+
+@transaction.atomic
+def delete_vendor(vendor, user):
+    """
+    Delete a vendor with no quotes, its master files from storage, and MasterSheets.
+    """
+    if not can_delete_vendor(vendor, user):
+        if vendor.quotes.exists():
+            raise WorkflowError(f"Cannot delete vendor '{vendor.name}' because it has existing quotes. You can deactivate it instead.")
+        raise WorkflowError("Only admins and approvers can delete vendors.")
+
+    desc = f"Deleted vendor {vendor.name} ({vendor.code or 'no code'})"
+    log_workspace_activity(user, "DELETE", desc)
+
+    for mf in vendor.master_files.all():
+        if mf.file:
+            mf.file.delete(save=False)
+
+    vendor.delete()
+
+
+def toggle_vendor_active(vendor, user, is_active=None):
+    """
+    Deactivate or activate a vendor.
+    """
+    is_admin = can_approve(user) or getattr(user, "role", None) in ("SUPER_ADMIN", "ADMIN") or getattr(user, "is_superuser", False)
+    if not is_admin:
+        raise WorkflowError("Only admins and approvers can change vendor active status.")
+
+    if is_active is None:
+        is_active = not vendor.is_active
+
+    vendor.is_active = is_active
+    vendor.save(update_fields=["is_active"])
+
+    action = "ACTIVATE" if is_active else "DEACTIVATE"
+    desc = f"{'Activated' if is_active else 'Deactivated'} vendor {vendor.name} ({vendor.code or ''})"
+    log_workspace_activity(user, action, desc)
+    return vendor
+
+
+def can_delete_master_file(mf, user):
+    """
+    Approvers only. Can delete any version except the current (newest) one.
+    """
+    if not user.is_authenticated or not can_approve(user):
+        return False
+    current = mf.vendor.current_master
+    return current is None or current.id != mf.id
+
+
+def can_restore_master_file(mf, user):
+    """
+    Approvers only. Can restore any version except the current (newest) one.
+    """
+    if not user.is_authenticated or not can_approve(user):
+        return False
+    current = mf.vendor.current_master
+    return current is not None and current.id != mf.id
+
+
+@transaction.atomic
+def delete_master_file(mf, user):
+    """
+    Delete an older master file version and its file from storage.
+    """
+    if not can_delete_master_file(mf, user):
+        current = mf.vendor.current_master
+        if current and current.id == mf.id:
+            raise WorkflowError("Cannot delete the current active master file.")
+        raise WorkflowError("Only approvers can delete master file versions.")
+
+    desc = f"Deleted master file version {mf.filename} ({mf.created_at.strftime('%Y-%m-%d %H:%M')}) of vendor {mf.vendor.name}"
+    log_workspace_activity(user, "DELETE", desc)
+
+    if mf.file:
+        mf.file.delete(save=False)
+    mf.delete()
+
+
+@transaction.atomic
+def restore_master_file(mf, user):
+    """
+    Restore an older master file version by copying it as the newest VendorMasterFile.
+    """
+    if not can_restore_master_file(mf, user):
+        current = mf.vendor.current_master
+        if current and current.id == mf.id:
+            raise WorkflowError("This version is already the current master file.")
+        raise WorkflowError("Only approvers can restore master file versions.")
+
+    mf.file.open("rb")
+    try:
+        content = mf.file.read()
+    finally:
+        mf.file.close()
+
+    restored = VendorMasterFile(
+        vendor=mf.vendor,
+        sheet_count=mf.sheet_count,
+        note=f"Restored from {mf.created_at.strftime('%b %d, %Y %H:%M')}",
+        uploaded_by=user,
+    )
+    restored.file.save(mf.filename, ContentFile(content), save=True)
+
+    desc = f"Restored master file version from {mf.created_at.strftime('%Y-%m-%d %H:%M')} for vendor {mf.vendor.name}"
+    log_workspace_activity(user, "UPDATE", desc)
+
+    return restored
+
+
+def can_delete_master_sheet(sheet, user):
+    """
+    Allowed for editors (can_edit(user)).
+    """
+    return user.is_authenticated and can_edit(user)
+
+
+@transaction.atomic
+def delete_master_sheet(sheet, user):
+    """
+    Delete a single MasterSheet record (never edits the Excel master file).
+    """
+    if not can_delete_master_sheet(sheet, user):
+        raise WorkflowError("You don't have permission to delete past quote sheets.")
+
+    desc = f"Deleted past quote sheet '{sheet.sheet_name}' ({sheet.enquiry_no or 'no ENQ'}) of vendor {sheet.vendor.name}"
+    log_workspace_activity(user, "DELETE", desc)
+
+    vendor_id = sheet.vendor_id
+    sheet.delete()
+    return vendor_id
+
+
+@transaction.atomic
+def bulk_delete_master_sheets(vendor, sheet_ids, user):
+    """
+    Bulk delete MasterSheet records by IDs for a vendor.
+    """
+    if not user.is_authenticated or not can_edit(user):
+        raise WorkflowError("You don't have permission to delete past quote sheets.")
+
+    sheets = vendor.master_sheets.filter(id__in=sheet_ids)
+    count = sheets.count()
+    if count == 0:
+        return 0
+
+    desc = f"Deleted {count} past quote sheet(s) from vendor {vendor.name}"
+    log_workspace_activity(user, "DELETE", desc)
+
+    sheets.delete()
+    return count

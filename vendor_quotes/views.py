@@ -84,8 +84,14 @@ def enquiry_detail(request, pk):
         enquiry.save()
         messages.success(request, "Enquiry updated.")
         return redirect("vendor_quotes:enquiry_detail", pk=enquiry.pk)
+    can_delete_enquiry = workflow.can_delete_enquiry(enquiry, request.user)
+    has_locked_quotes = QuoteRevision.objects.filter(
+        quote__enquiry=enquiry,
+        status__in=[QuoteRevision.STATUS_APPROVED, QuoteRevision.STATUS_VOID]
+    ).exists()
     return render(request, "vendor_quotes/enquiry_detail.html", _ctx(
-        request, enquiry=enquiry, quotes=quotes, zoho_connected=ZohoConnection.get().is_connected))
+        request, enquiry=enquiry, quotes=quotes, zoho_connected=ZohoConnection.get().is_connected,
+        can_delete_enquiry=can_delete_enquiry, has_locked_quotes=has_locked_quotes))
 
 
 # ---------------------------------------------------------------- create
@@ -133,6 +139,16 @@ def quote_detail(request, pk):
     ai_lines_count = len(ai_res.get("lines") or [])
     ai_warnings = ai_res.get("warnings") or []
     ai_quote_total = ai_res.get("quote_total")
+
+    can_delete = workflow.can_delete_quote(quote, request.user)
+    has_approved_or_void = quote.revisions.filter(status__in=[QuoteRevision.STATUS_APPROVED, QuoteRevision.STATUS_VOID]).exists()
+    can_discard = workflow.can_discard_revision(rev, request.user)
+    can_void = workflow.can_void_revision(rev, request.user)
+    last_approved_rev = quote.revisions.filter(status=QuoteRevision.STATUS_APPROVED).order_by("-number").first()
+    has_open_revision = revisions[-1].status in (QuoteRevision.STATUS_DRAFT, QuoteRevision.STATUS_IN_REVIEW, QuoteRevision.STATUS_SENT_BACK)
+    can_revise = workflow.can_edit(request.user) and (last_approved_rev is not None and rev.id == last_approved_rev.id) and not has_open_revision
+    next_revision_number = (revisions[-1].number + 1) if revisions else 1
+
     return render(request, "vendor_quotes/quote_detail.html", _ctx(
         request, quote=quote, rev=rev, revisions=revisions, editable=editable,
         is_latest=(rev.number == revisions[-1].number), lines=lines, problems=problems, total=total,
@@ -140,7 +156,10 @@ def quote_detail(request, pk):
         changes=rev.changes.select_related("user")[:200], events=quote.events.select_related("user")[:50],
         zoho_url=zoho.estimate_url(rev.zoho_estimate_id) if rev.zoho_estimate_id else "",
         zoho_connected=ZohoConnection.get().is_connected,
-        ai_lines_count=ai_lines_count, ai_warnings=ai_warnings, ai_quote_total=ai_quote_total))
+        ai_lines_count=ai_lines_count, ai_warnings=ai_warnings, ai_quote_total=ai_quote_total,
+        can_delete=can_delete, has_approved_or_void=has_approved_or_void,
+        can_discard=can_discard, can_void=can_void, can_revise=can_revise,
+        next_revision_number=next_revision_number))
 
 
 @login_required
@@ -362,9 +381,11 @@ def vendor_detail(request, pk):
     if request.GET.get("missing") == "1":
         sheets = sheets.filter(details_missing=True)
     page = Paginator(sheets.order_by("-position"), 30).get_page(request.GET.get("page"))
+    can_delete_vendor = workflow.can_delete_vendor(vendor, request.user)
     return render(request, "vendor_quotes/vendor_detail.html", _ctx(
         request, vendor=vendor, form=form, upload=upload, page=page, q=q,
-        masters=vendor.master_files.all()[:10], missing=vendor.master_sheets.filter(details_missing=True).count()))
+        masters=vendor.master_files.all()[:10], missing=vendor.master_sheets.filter(details_missing=True).count(),
+        can_delete_vendor=can_delete_vendor, current_master=vendor.current_master))
 
 
 @login_required
@@ -379,7 +400,9 @@ def master_sheet_detail(request, pk):
         sheet.save()
         messages.success(request, "Sheet details saved.")
         return redirect("vendor_quotes:master_sheet_detail", pk=sheet.pk)
-    return render(request, "vendor_quotes/master_sheet.html", _ctx(request, sheet=sheet))
+    can_delete_sheet = workflow.can_delete_master_sheet(sheet, request.user)
+    return render(request, "vendor_quotes/master_sheet.html", _ctx(
+        request, sheet=sheet, can_delete_sheet=can_delete_sheet))
 
 
 @login_required
@@ -388,6 +411,144 @@ def master_file_download(request, pk):
         return resp
     m = get_object_or_404(VendorMasterFile, pk=pk)
     return FileResponse(m.file.open("rb"), as_attachment=True, filename=m.filename)
+
+
+# ---------------------------------------------------------------- delete / void / restore views
+
+@login_required
+@require_POST
+def quote_delete(request, pk):
+    quote = get_object_or_404(VendorQuote.objects.select_related("enquiry", "vendor"), pk=pk)
+    try:
+        enquiry_id = quote.enquiry_id
+        enquiry_deleted = workflow.delete_quote(quote, request.user)
+        if enquiry_deleted:
+            messages.success(request, "Vendor quote and empty enquiry deleted.")
+            return redirect("vendor_quotes:quote_list")
+        messages.success(request, "Vendor quote deleted.")
+        return redirect("vendor_quotes:enquiry_detail", pk=enquiry_id)
+    except workflow.WorkflowError as e:
+        messages.error(request, str(e))
+        return redirect("vendor_quotes:quote_detail", pk=pk)
+
+
+@login_required
+@require_POST
+def revision_discard(request, pk):
+    rev = get_object_or_404(QuoteRevision.objects.select_related("quote"), pk=pk)
+    try:
+        quote = workflow.discard_revision(rev, request.user)
+        messages.success(request, f"Revision {rev.label} discarded.")
+        return redirect("vendor_quotes:quote_detail", pk=quote.pk)
+    except workflow.WorkflowError as e:
+        messages.error(request, str(e))
+        return redirect(f"{reverse('vendor_quotes:quote_detail', args=[rev.quote_id])}?rev={rev.number}")
+
+
+@login_required
+@require_POST
+def revision_void(request, pk):
+    rev = get_object_or_404(QuoteRevision.objects.select_related("quote"), pk=pk)
+    comment = request.POST.get("comment", "")
+    try:
+        workflow.void_revision(rev, request.user, comment)
+        messages.success(request, f"Revision {rev.label} marked as void.")
+    except workflow.WorkflowError as e:
+        messages.error(request, str(e))
+    return redirect(f"{reverse('vendor_quotes:quote_detail', args=[rev.quote_id])}?rev={rev.number}")
+
+
+@login_required
+@require_POST
+def enquiry_delete(request, pk):
+    enquiry = get_object_or_404(Enquiry, pk=pk)
+    confirm_number = request.POST.get("confirm_number", "")
+    try:
+        workflow.delete_enquiry(enquiry, request.user, confirm_number)
+        messages.success(request, f"Enquiry {enquiry.number} deleted.")
+        return redirect("vendor_quotes:quote_list")
+    except workflow.WorkflowError as e:
+        messages.error(request, str(e))
+        return redirect("vendor_quotes:enquiry_detail", pk=pk)
+
+
+@login_required
+@require_POST
+def vendor_delete(request, pk):
+    vendor = get_object_or_404(Vendor, pk=pk)
+    try:
+        workflow.delete_vendor(vendor, request.user)
+        messages.success(request, f"Vendor {vendor.name} deleted.")
+        return redirect("vendor_quotes:vendor_list")
+    except workflow.WorkflowError as e:
+        messages.error(request, str(e))
+        return redirect("vendor_quotes:vendor_detail", pk=pk)
+
+
+@login_required
+@require_POST
+def vendor_toggle_active(request, pk):
+    vendor = get_object_or_404(Vendor, pk=pk)
+    try:
+        workflow.toggle_vendor_active(vendor, request.user)
+        status_text = "activated" if vendor.is_active else "deactivated"
+        messages.success(request, f"Vendor {vendor.name} {status_text}.")
+    except workflow.WorkflowError as e:
+        messages.error(request, str(e))
+    next_url = request.POST.get("next") or reverse("vendor_quotes:vendor_detail", args=[vendor.pk])
+    return redirect(next_url)
+
+
+@login_required
+@require_POST
+def master_file_delete(request, pk):
+    mf = get_object_or_404(VendorMasterFile.objects.select_related("vendor"), pk=pk)
+    vendor_id = mf.vendor_id
+    try:
+        workflow.delete_master_file(mf, request.user)
+        messages.success(request, "Historical master file deleted.")
+    except workflow.WorkflowError as e:
+        messages.error(request, str(e))
+    return redirect("vendor_quotes:vendor_detail", pk=vendor_id)
+
+
+@login_required
+@require_POST
+def master_file_restore(request, pk):
+    mf = get_object_or_404(VendorMasterFile.objects.select_related("vendor"), pk=pk)
+    vendor_id = mf.vendor_id
+    try:
+        workflow.restore_master_file(mf, request.user)
+        messages.success(request, f"Master file restored from {mf.created_at.strftime('%b %d, %Y %H:%M')}.")
+    except workflow.WorkflowError as e:
+        messages.error(request, str(e))
+    return redirect("vendor_quotes:vendor_detail", pk=vendor_id)
+
+
+@login_required
+@require_POST
+def master_sheet_delete(request, pk):
+    sheet = get_object_or_404(MasterSheet.objects.select_related("vendor"), pk=pk)
+    vendor_id = sheet.vendor_id
+    try:
+        workflow.delete_master_sheet(sheet, request.user)
+        messages.success(request, f"Past quote sheet '{sheet.sheet_name}' deleted.")
+    except workflow.WorkflowError as e:
+        messages.error(request, str(e))
+    return redirect("vendor_quotes:vendor_detail", pk=vendor_id)
+
+
+@login_required
+@require_POST
+def master_sheets_bulk_delete(request, pk):
+    vendor = get_object_or_404(Vendor, pk=pk)
+    sheet_ids = request.POST.getlist("selected_sheets")
+    try:
+        n = workflow.bulk_delete_master_sheets(vendor, sheet_ids, request.user)
+        messages.success(request, f"{n} past quote sheet(s) deleted.")
+    except workflow.WorkflowError as e:
+        messages.error(request, str(e))
+    return redirect("vendor_quotes:vendor_detail", pk=vendor.pk)
 
 
 # ---------------------------------------------------------------- Zoho connection

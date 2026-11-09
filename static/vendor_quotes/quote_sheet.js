@@ -17,6 +17,7 @@
             saving: false,
             saveLabel: window.VQ.editable ? "All changes saved" : "",
             decision: null,
+            modal: null,
             summary: window.VQ.summary,
             aiRunning: window.VQ.aiRunning || false,
             aiPollTimer: null,
@@ -83,6 +84,8 @@
             },
             fmt(n) { return Math.round(n || 0).toLocaleString("en-US"); },
             openDecision(kind) { this.decision = kind; },
+            openModal(name) { this.modal = name; },
+            closeModal() { this.modal = null; },
             async save() {
                 if (!window.VQ.editable || !sheet) return true;
                 this.saving = true;

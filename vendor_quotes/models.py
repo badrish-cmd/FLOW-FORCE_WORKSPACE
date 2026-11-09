@@ -167,12 +167,14 @@ class QuoteRevision(models.Model):
     STATUS_SENT_BACK = "SENT_BACK"
     STATUS_APPROVED = "APPROVED"
     STATUS_REJECTED = "REJECTED"
+    STATUS_VOID = "VOID"
     STATUS_CHOICES = [
         (STATUS_DRAFT, "Draft"),
         (STATUS_IN_REVIEW, "In review"),
         (STATUS_SENT_BACK, "Sent back"),
         (STATUS_APPROVED, "Approved"),
         (STATUS_REJECTED, "Rejected"),
+        (STATUS_VOID, "Void"),
     ]
     OUTPUT_NOT_STARTED = "NOT_STARTED"
     OUTPUT_PENDING = "PENDING"

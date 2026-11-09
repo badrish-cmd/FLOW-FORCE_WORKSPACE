@@ -3,16 +3,18 @@ import json
 from unittest.mock import MagicMock, patch
 
 import openpyxl
+from django.contrib.auth.models import Group
+from django.core.files.storage import default_storage
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from auth_app.models import EmployeeUser
-from employee_management.models import Department
+from employee_management.models import Department, EmployeeActivityLog
 from tasks.models import EmailLog, Notification
 
-from .models import (MasterSheet, QuoteRevision, Vendor, VendorMasterFile, VendorQuote,
-                     ZohoConnection)
+from .models import (Enquiry, MasterSheet, QuoteChange, QuoteEvent, QuoteRevision, Vendor,
+                     VendorMasterFile, VendorQuote, ZohoConnection)
 from .services import sheet as sheet_svc
 from .services import workflow, zoho
 from .services.ai_extract import (AIExtractError, excel_to_text, extract_quote,
@@ -530,3 +532,431 @@ class AIQuoteExtractionTests(TestCase):
         self.assertEqual(data["lines_count"], 1)
         self.assertEqual(data["quote_total"], 1500.0)
         self.assertEqual(data["warnings"], ["Test warning"])
+
+
+@override_settings(CELERY_TASK_ALWAYS_EAGER=True, EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+                   ZOHO_CLIENT_ID="", ZOHO_CLIENT_SECRET="")
+class DeleteAndVoidTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(name="VQ Del Department", slug="vq-del-dept")
+        self.gm = EmployeeUser.objects.create_user(
+            email="gm_del@example.com", password="x", role="SUPER_ADMIN",
+            department=self.dept, full_name="GM Approver", status="APPROVED"
+        )
+        self.ibrahim = EmployeeUser.objects.create_user(
+            email="ibrahim_del@example.com", password="x", role="ADMIN",
+            department=self.dept, full_name="Ibrahim Admin", status="APPROVED"
+        )
+        vq_group, _ = Group.objects.get_or_create(name="Vendor Quotes")
+        self.editor = EmployeeUser.objects.create_user(
+            email="editor_del@example.com", password="x", role="EMPLOYEE",
+            department=self.dept, full_name="Editor Staff", status="APPROVED"
+        )
+        self.editor.groups.add(vq_group)
+        self.emp = EmployeeUser.objects.create_user(
+            email="unauth_del@example.com", password="x", role="EMPLOYEE",
+            department=self.dept, full_name="Unauth Staff", status="APPROVED"
+        )
+        self.vendor = Vendor.objects.create(
+            name="Vendor Del Test", code="VDT", currency="EUR",
+            default_exchange_rate=22000, default_discount=0.15
+        )
+
+    def _create_quote_with_file(self, user=None, enq_num="ENQ/2026/11/100", filename="quote.pdf"):
+        user = user or self.editor
+        qfile = SimpleUploadedFile(filename, b"%PDF-1.4 dummy quote bytes")
+        quote, rev = workflow.create_quote(
+            enquiry_number=enq_num, customer_name="Customer Del",
+            vendor=self.vendor, vendor_quote_no="Q-100",
+            quote_file=qfile, user=user
+        )
+        workflow.save_snapshot(rev, priced_snapshot([
+            {"part": "P1", "description": "Part 1", "qty": 2, "unit_price": 50, "sell": 150000}
+        ]), user)
+        rev.refresh_from_db()
+        return quote, rev
+
+    def test_rule1_delete_quote_allowed_and_cascades(self):
+        quote, rev = self._create_quote_with_file(user=self.editor)
+        file_path = quote.quote_file.name
+        self.assertTrue(default_storage.exists(file_path))
+        enq = quote.enquiry
+
+        # Creator deletes draft quote
+        self.assertTrue(workflow.can_delete_quote(quote, self.editor))
+        workflow.delete_quote(quote, self.editor)
+
+        # Quote and related records deleted
+        self.assertFalse(VendorQuote.objects.filter(id=quote.id).exists())
+        self.assertFalse(QuoteRevision.objects.filter(id=rev.id).exists())
+        # File removed from storage
+        self.assertFalse(default_storage.exists(file_path))
+        # Enquiry auto-deleted since no other quotes remain
+        self.assertFalse(Enquiry.objects.filter(id=enq.id).exists())
+        # Activity log entry written
+        self.assertTrue(EmployeeActivityLog.objects.filter(
+            activity_type="DELETE", description__icontains=enq.number
+        ).exists())
+
+    def test_rule1_delete_quote_keeps_enquiry_if_other_quotes_exist(self):
+        q1, _r1 = self._create_quote_with_file(user=self.editor, enq_num="ENQ/2026/11/200", filename="q1.pdf")
+        enq = q1.enquiry
+        v2 = Vendor.objects.create(name="Vendor 2", code="V2", currency="EUR")
+        q2, _r2 = workflow.create_quote(
+            enquiry_number=enq.number, customer_name="Customer Del",
+            vendor=v2, vendor_quote_no="Q-200",
+            quote_file=SimpleUploadedFile("q2.pdf", b"%PDF bytes"), user=self.editor
+        )
+
+        workflow.delete_quote(q1, self.editor)
+        self.assertFalse(VendorQuote.objects.filter(id=q1.id).exists())
+        self.assertTrue(Enquiry.objects.filter(id=enq.id).exists())
+        self.assertTrue(VendorQuote.objects.filter(id=q2.id).exists())
+
+    def test_rule1_delete_quote_in_review_permissions(self):
+        quote, rev = self._create_quote_with_file(user=self.editor)
+        workflow.submit(rev, self.editor)
+        rev.refresh_from_db()
+        self.assertEqual(rev.status, QuoteRevision.STATUS_IN_REVIEW)
+
+        # Editor (creator) cannot delete quote while in review
+        self.assertFalse(workflow.can_delete_quote(quote, self.editor))
+        with self.assertRaises(workflow.WorkflowError):
+            workflow.delete_quote(quote, self.editor)
+
+        # Approver CAN delete quote in review
+        self.assertTrue(workflow.can_delete_quote(quote, self.gm))
+        workflow.delete_quote(quote, self.gm)
+        self.assertFalse(VendorQuote.objects.filter(id=quote.id).exists())
+
+    def test_rule1_delete_quote_refused_if_approved_or_void(self):
+        quote, rev = self._create_quote_with_file(user=self.editor)
+        workflow.submit(rev, self.editor)
+        with self.captureOnCommitCallbacks(execute=True):
+            workflow.approve(rev, self.gm)
+        rev.refresh_from_db()
+        self.assertEqual(rev.status, QuoteRevision.STATUS_APPROVED)
+
+        # Refused if approved
+        self.assertFalse(workflow.can_delete_quote(quote, self.gm))
+        with self.assertRaises(workflow.WorkflowError):
+            workflow.delete_quote(quote, self.gm)
+
+        # Refused if void
+        workflow.void_revision(rev, self.gm, "Voiding approved")
+        rev.refresh_from_db()
+        self.assertEqual(rev.status, QuoteRevision.STATUS_VOID)
+        self.assertFalse(workflow.can_delete_quote(quote, self.gm))
+        with self.assertRaises(workflow.WorkflowError):
+            workflow.delete_quote(quote, self.gm)
+
+    def test_rule2_discard_revision_allowed_on_latest_unapproved(self):
+        quote, r0 = self._create_quote_with_file(user=self.editor)
+        workflow.submit(r0, self.editor)
+        with self.captureOnCommitCallbacks(execute=True):
+            workflow.approve(r0, self.gm)
+
+        r1 = workflow.revise(quote, self.editor)
+        self.assertEqual(r1.number, 1)
+        self.assertEqual(r1.status, QuoteRevision.STATUS_DRAFT)
+
+        self.assertTrue(workflow.can_discard_revision(r1, self.editor))
+        workflow.discard_revision(r1, self.editor)
+
+        self.assertFalse(QuoteRevision.objects.filter(id=r1.id).exists())
+        self.assertTrue(QuoteRevision.objects.filter(id=r0.id).exists())
+        self.assertEqual(quote.latest_revision.id, r0.id)
+        self.assertTrue(quote.events.filter(action="discard_revision").exists())
+        self.assertTrue(EmployeeActivityLog.objects.filter(
+            activity_type="DELETE", description__icontains="Discarded revision R1"
+        ).exists())
+
+    def test_rule2_discard_revision_refused_on_r0_or_non_latest_or_unauthorized(self):
+        quote, r0 = self._create_quote_with_file(user=self.editor)
+        # Cannot discard R0
+        self.assertFalse(workflow.can_discard_revision(r0, self.editor))
+        with self.assertRaises(workflow.WorkflowError):
+            workflow.discard_revision(r0, self.editor)
+
+        # Disallow unauthorized employee
+        with self.assertRaises(workflow.WorkflowError):
+            workflow.discard_revision(r0, self.emp)
+
+    def test_rule3_void_revision_flow(self):
+        quote, rev = self._create_quote_with_file(user=self.editor)
+        workflow.submit(rev, self.editor)
+        with self.captureOnCommitCallbacks(execute=True):
+            workflow.approve(rev, self.gm)
+        rev.refresh_from_db()
+
+        # Non-approver cannot void
+        self.assertFalse(workflow.can_void_revision(rev, self.editor))
+        with self.assertRaises(workflow.WorkflowError):
+            workflow.void_revision(rev, self.editor, "test")
+
+        # Empty comment refused
+        self.assertTrue(workflow.can_void_revision(rev, self.gm))
+        with self.assertRaises(workflow.WorkflowError):
+            workflow.void_revision(rev, self.gm, "   ")
+
+        # Approver voids revision
+        workflow.void_revision(rev, self.gm, "Project cancelled by customer")
+        rev.refresh_from_db()
+        self.assertEqual(rev.status, QuoteRevision.STATUS_VOID)
+        self.assertEqual(rev.decision_comment, "Project cancelled by customer")
+        self.assertEqual(rev.decided_by, self.gm)
+        self.assertTrue(quote.events.filter(action="void_revision").exists())
+        self.assertTrue(EmployeeActivityLog.objects.filter(
+            activity_type="STATUS_CHANGE", description__icontains="Voided revision"
+        ).exists())
+
+    def test_rule3_revise_blocked_from_void_unless_approved_exists(self):
+        quote, r0 = self._create_quote_with_file(user=self.editor)
+        workflow.submit(r0, self.editor)
+        with self.captureOnCommitCallbacks(execute=True):
+            workflow.approve(r0, self.gm)
+        workflow.void_revision(r0, self.gm, "Pricing obsolete")
+        r0.refresh_from_db()
+
+        # Only revision is VOID: revising blocked
+        with self.assertRaises(workflow.WorkflowError):
+            workflow.revise(quote, self.editor)
+
+        # Reset: R0 approved, R1 voided -> revising clones from R0 as R2
+        quote2, q2_r0 = self._create_quote_with_file(user=self.editor, enq_num="ENQ/2026/11/300")
+        workflow.submit(q2_r0, self.editor)
+        workflow.approve(q2_r0, self.gm)
+
+        q2_r1 = workflow.revise(quote2, self.editor)
+        workflow.save_snapshot(q2_r1, priced_snapshot([
+            {"part": "P1", "description": "Part 1", "qty": 3, "unit_price": 50, "sell": 200000}
+        ]), self.editor)
+        workflow.submit(q2_r1, self.editor)
+        workflow.approve(q2_r1, self.gm)
+        workflow.void_revision(q2_r1, self.gm, "Customer rejected R1 terms")
+
+        # Now revise quote2: should clone from last APPROVED (q2_r0) as R2
+        q2_r2 = workflow.revise(quote2, self.editor)
+        self.assertEqual(q2_r2.number, 2)
+        self.assertEqual(q2_r2.status, QuoteRevision.STATUS_DRAFT)
+
+    def test_rule4_delete_enquiry(self):
+        quote, rev = self._create_quote_with_file(user=self.editor, enq_num="ENQ/2026/11/400")
+        enq = quote.enquiry
+        qfile_path = quote.quote_file.name
+
+        # Non-approver refused
+        self.assertFalse(workflow.can_delete_enquiry(self.editor, enq))
+        with self.assertRaises(workflow.WorkflowError):
+            workflow.delete_enquiry(enq, self.editor, enq.number)
+
+        # Mismatched confirmation number refused
+        self.assertTrue(workflow.can_delete_enquiry(self.gm, enq))
+        with self.assertRaises(workflow.WorkflowError):
+            workflow.delete_enquiry(enq, self.gm, "WRONG/NUMBER")
+
+        # Successful delete by approver with exact number
+        workflow.delete_enquiry(enq, self.gm, enq.number)
+        self.assertFalse(Enquiry.objects.filter(id=enq.id).exists())
+        self.assertFalse(VendorQuote.objects.filter(id=quote.id).exists())
+        self.assertFalse(default_storage.exists(qfile_path))
+        self.assertTrue(EmployeeActivityLog.objects.filter(
+            activity_type="DELETE", description__icontains=enq.number
+        ).exists())
+
+    def test_rule4_delete_enquiry_refused_if_approved_or_void_quote(self):
+        quote, rev = self._create_quote_with_file(user=self.editor, enq_num="ENQ/2026/11/401")
+        enq = quote.enquiry
+        workflow.submit(rev, self.editor)
+        with self.captureOnCommitCallbacks(execute=True):
+            workflow.approve(rev, self.gm)
+
+        # Refused if approved
+        self.assertFalse(workflow.can_delete_enquiry(self.gm, enq))
+        with self.assertRaises(workflow.WorkflowError):
+            workflow.delete_enquiry(enq, self.gm, enq.number)
+
+        # Refused if void
+        workflow.void_revision(rev, self.gm, "Voided")
+        self.assertFalse(workflow.can_delete_enquiry(self.gm, enq))
+        with self.assertRaises(workflow.WorkflowError):
+            workflow.delete_enquiry(enq, self.gm, enq.number)
+
+    def test_rule5_vendor_delete_and_deactivate(self):
+        vendor_empty = Vendor.objects.create(name="Vendor Empty", code="VE", currency="EUR")
+        mf = VendorMasterFile(vendor=vendor_empty, sheet_count=1, note="test")
+        mf.file.save("test_master.xlsx", SimpleUploadedFile("test_master.xlsx", bos_like_workbook().getvalue()))
+        MasterSheet.objects.create(vendor=vendor_empty, sheet_name="Sheet1", enquiry_no="ENQ/1", snapshot={})
+        mf_path = mf.file.name
+
+        # Non-admin cannot delete
+        self.assertFalse(workflow.can_delete_vendor(vendor_empty, self.emp))
+        with self.assertRaises(workflow.WorkflowError):
+            workflow.delete_vendor(vendor_empty, self.emp)
+
+        # Approver / admin can delete empty vendor
+        self.assertTrue(workflow.can_delete_vendor(vendor_empty, self.gm))
+        workflow.delete_vendor(vendor_empty, self.gm)
+        self.assertFalse(Vendor.objects.filter(id=vendor_empty.id).exists())
+        self.assertFalse(default_storage.exists(mf_path))
+        self.assertFalse(MasterSheet.objects.filter(vendor_id=vendor_empty.id).exists())
+        self.assertTrue(EmployeeActivityLog.objects.filter(
+            activity_type="DELETE", description__icontains="Vendor Empty"
+        ).exists())
+
+        # Vendor with quotes cannot be deleted
+        quote, _ = self._create_quote_with_file(user=self.editor)
+        self.assertFalse(workflow.can_delete_vendor(self.vendor, self.gm))
+        with self.assertRaises(workflow.WorkflowError):
+            workflow.delete_vendor(self.vendor, self.gm)
+
+        # Deactivate / activate toggle
+        workflow.toggle_vendor_active(self.vendor, self.gm)
+        self.vendor.refresh_from_db()
+        self.assertFalse(self.vendor.is_active)
+        workflow.toggle_vendor_active(self.vendor, self.gm)
+        self.vendor.refresh_from_db()
+        self.assertTrue(self.vendor.is_active)
+
+    def test_rule6_vendor_master_file_delete_and_restore(self):
+        vendor = Vendor.objects.create(name="Vendor Master Test", code="VMT", currency="EUR")
+        mf1 = VendorMasterFile(vendor=vendor, sheet_count=1, note="v1")
+        mf1.file.save("master_v1.xlsx", SimpleUploadedFile("master_v1.xlsx", bos_like_workbook().getvalue()))
+        mf2 = VendorMasterFile(vendor=vendor, sheet_count=2, note="v2")
+        mf2.file.save("master_v2.xlsx", SimpleUploadedFile("master_v2.xlsx", bos_like_workbook().getvalue()))
+
+        mf1_path = mf1.file.name
+        self.assertEqual(vendor.current_master.id, mf2.id)
+
+        # Current master cannot be deleted or restored
+        self.assertFalse(workflow.can_delete_master_file(mf2, self.gm))
+        self.assertFalse(workflow.can_restore_master_file(mf2, self.gm))
+        with self.assertRaises(workflow.WorkflowError):
+            workflow.delete_master_file(mf2, self.gm)
+        with self.assertRaises(workflow.WorkflowError):
+            workflow.restore_master_file(mf2, self.gm)
+
+        # Non-approver cannot delete or restore
+        self.assertFalse(workflow.can_delete_master_file(mf1, self.editor))
+        self.assertFalse(workflow.can_restore_master_file(mf1, self.editor))
+
+        # Restore mf1 as newest version
+        restored = workflow.restore_master_file(mf1, self.gm)
+        self.assertIn("Restored from", restored.note)
+        vendor.refresh_from_db()
+        self.assertEqual(vendor.current_master.id, restored.id)
+        self.assertTrue(EmployeeActivityLog.objects.filter(
+            activity_type="UPDATE", description__icontains="Restored master file version"
+        ).exists())
+
+        # Now mf1 is older and can be deleted
+        self.assertTrue(workflow.can_delete_master_file(mf1, self.gm))
+        workflow.delete_master_file(mf1, self.gm)
+        self.assertFalse(VendorMasterFile.objects.filter(id=mf1.id).exists())
+        self.assertFalse(default_storage.exists(mf1_path))
+        self.assertTrue(EmployeeActivityLog.objects.filter(
+            activity_type="DELETE", description__icontains="Deleted master file version"
+        ).exists())
+
+    def test_rule7_master_sheet_delete_and_bulk_delete(self):
+        s1 = MasterSheet.objects.create(vendor=self.vendor, sheet_name="S1", enquiry_no="ENQ/1", snapshot={})
+        s2 = MasterSheet.objects.create(vendor=self.vendor, sheet_name="S2", enquiry_no="ENQ/2", snapshot={})
+        s3 = MasterSheet.objects.create(vendor=self.vendor, sheet_name="S3", enquiry_no="ENQ/3", snapshot={})
+
+        # Non-editor cannot delete
+        self.assertFalse(workflow.can_delete_master_sheet(s1, self.emp))
+        with self.assertRaises(workflow.WorkflowError):
+            workflow.delete_master_sheet(s1, self.emp)
+
+        # Editor deletes single sheet
+        self.assertTrue(workflow.can_delete_master_sheet(s1, self.editor))
+        workflow.delete_master_sheet(s1, self.editor)
+        self.assertFalse(MasterSheet.objects.filter(id=s1.id).exists())
+        self.assertTrue(EmployeeActivityLog.objects.filter(
+            activity_type="DELETE", description__icontains="Deleted past quote sheet 'S1'"
+        ).exists())
+
+        # Editor bulk deletes sheets
+        count = workflow.bulk_delete_master_sheets(self.vendor, [s2.id, s3.id], self.editor)
+        self.assertEqual(count, 2)
+        self.assertFalse(MasterSheet.objects.filter(id__in=[s2.id, s3.id]).exists())
+        self.assertTrue(EmployeeActivityLog.objects.filter(
+            activity_type="DELETE", description__icontains="Deleted 2 past quote sheet(s)"
+        ).exists())
+
+    def test_rule8_views_delete_and_void_endpoints(self):
+        # 1. Quote delete view
+        q, _ = self._create_quote_with_file(user=self.editor, enq_num="ENQ/2026/11/501")
+        self.client.force_login(self.editor)
+        resp = self.client.post(reverse("vendor_quotes:quote_delete", args=[q.id]))
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(VendorQuote.objects.filter(id=q.id).exists())
+
+        # 2. Revision discard view
+        q2, r0 = self._create_quote_with_file(user=self.editor, enq_num="ENQ/2026/11/502")
+        workflow.submit(r0, self.editor)
+        with self.captureOnCommitCallbacks(execute=True):
+            workflow.approve(r0, self.gm)
+        r1 = workflow.revise(q2, self.editor)
+        resp = self.client.post(reverse("vendor_quotes:revision_discard", args=[r1.id]))
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(QuoteRevision.objects.filter(id=r1.id).exists())
+
+        # 3. Revision void view
+        self.client.force_login(self.gm)
+        resp = self.client.post(reverse("vendor_quotes:revision_void", args=[r0.id]), {
+            "comment": "Voided via view test"
+        })
+        self.assertEqual(resp.status_code, 302)
+        r0.refresh_from_db()
+        self.assertEqual(r0.status, QuoteRevision.STATUS_VOID)
+
+        # 4. Enquiry delete view
+        q3, _ = self._create_quote_with_file(user=self.editor, enq_num="ENQ/2026/11/503")
+        enq3 = q3.enquiry
+        resp = self.client.post(reverse("vendor_quotes:enquiry_delete", args=[enq3.id]), {
+            "confirm_number": enq3.number
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(Enquiry.objects.filter(id=enq3.id).exists())
+
+        # 5. Vendor delete and toggle active views
+        v_test = Vendor.objects.create(name="Vendor View Test", code="VVT", currency="EUR")
+        resp = self.client.post(reverse("vendor_quotes:vendor_toggle_active", args=[v_test.id]))
+        self.assertEqual(resp.status_code, 302)
+        v_test.refresh_from_db()
+        self.assertFalse(v_test.is_active)
+
+        resp = self.client.post(reverse("vendor_quotes:vendor_delete", args=[v_test.id]))
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(Vendor.objects.filter(id=v_test.id).exists())
+
+        # 6. Master file delete and restore views
+        v_mf = Vendor.objects.create(name="Vendor MF View", code="VMF", currency="EUR")
+        mf_old = VendorMasterFile(vendor=v_mf, sheet_count=1, note="v1")
+        mf_old.file.save("v1.xlsx", SimpleUploadedFile("v1.xlsx", bos_like_workbook().getvalue()))
+        mf_new = VendorMasterFile(vendor=v_mf, sheet_count=2, note="v2")
+        mf_new.file.save("v2.xlsx", SimpleUploadedFile("v2.xlsx", bos_like_workbook().getvalue()))
+
+        resp = self.client.post(reverse("vendor_quotes:master_file_restore", args=[mf_old.id]))
+        self.assertEqual(resp.status_code, 302)
+        v_mf.refresh_from_db()
+        self.assertIn("Restored from", v_mf.current_master.note)
+
+        resp = self.client.post(reverse("vendor_quotes:master_file_delete", args=[mf_old.id]))
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(VendorMasterFile.objects.filter(id=mf_old.id).exists())
+
+        # 7. Master sheet delete and bulk delete views
+        self.client.force_login(self.editor)
+        ms1 = MasterSheet.objects.create(vendor=v_mf, sheet_name="MS1", enquiry_no="ENQ/1", snapshot={})
+        ms2 = MasterSheet.objects.create(vendor=v_mf, sheet_name="MS2", enquiry_no="ENQ/2", snapshot={})
+        resp = self.client.post(reverse("vendor_quotes:master_sheet_delete", args=[ms1.id]))
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(MasterSheet.objects.filter(id=ms1.id).exists())
+
+        resp = self.client.post(reverse("vendor_quotes:master_sheets_bulk_delete", args=[v_mf.id]), {
+            "selected_sheets": [ms2.id]
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(MasterSheet.objects.filter(id=ms2.id).exists())

@@ -1,11 +1,48 @@
 {% extends 'base.html' %}
 {% block title %}{{ enquiry.number }} - Vendor Quotes{% endblock %}
 {% block content %}
-<div class="mx-auto max-w-6xl">
-    <div class="mb-4">
-        <a href="{% url 'vendor_quotes:quote_list' %}" class="text-sm text-slate-500 hover:text-blue-600"><i class="fas fa-arrow-left mr-1"></i>Vendor quotes</a>
-        <h1 class="mt-1 text-2xl font-bold text-gray-900">{{ enquiry.number }}</h1>
-        <p class="text-sm text-slate-500">{{ enquiry.customer_name }}</p>
+<div class="mx-auto max-w-6xl" x-data="{ showDelete: false, confirmNumber: '' }">
+    <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+            <a href="{% url 'vendor_quotes:quote_list' %}" class="text-sm text-slate-500 hover:text-blue-600"><i class="fas fa-arrow-left mr-1"></i>Vendor quotes</a>
+            <h1 class="mt-1 text-2xl font-bold text-gray-900">{{ enquiry.number }}</h1>
+            <p class="text-sm text-slate-500">{{ enquiry.customer_name }}</p>
+        </div>
+        <div>
+            {% if can_delete_enquiry %}
+            <button type="button" @click="showDelete = true" class="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-sm font-semibold text-red-600 shadow-sm hover:bg-red-50">
+                <i class="fas fa-trash mr-1.5"></i>Delete enquiry
+            </button>
+            {% elif is_approver %}
+            <span title="Approved quotes can't be deleted – use Void on quotes first." class="inline-flex">
+                <button type="button" disabled class="cursor-not-allowed rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-400 opacity-60">
+                    <i class="fas fa-trash mr-1.5"></i>Delete enquiry
+                </button>
+            </span>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Delete Enquiry Confirmation Modal -->
+    <div x-show="showDelete" style="display: none;" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm" @click="showDelete = false"></div>
+        <div class="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 class="text-lg font-bold text-red-600"><i class="fas fa-exclamation-triangle mr-2"></i>Delete Enquiry</h3>
+            <p class="mt-2 text-sm text-slate-600">
+                This will permanently delete enquiry <strong>{{ enquiry.number }}</strong> and all of its vendor quotes and uploaded files.
+            </p>
+            <div class="mt-4 rounded-lg bg-amber-50 p-3 text-xs text-amber-800 border border-amber-200">
+                To confirm, please type the enquiry number <strong>{{ enquiry.number }}</strong> below:
+            </div>
+            <form method="post" action="{% url 'vendor_quotes:enquiry_delete' enquiry.id %}" class="mt-4 space-y-4">
+                {% csrf_token %}
+                <input type="text" name="confirm_number" x-model="confirmNumber" placeholder="{{ enquiry.number }}" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono focus:border-red-500 focus:ring-red-500">
+                <div class="flex justify-end gap-2">
+                    <button type="button" @click="showDelete = false; confirmNumber = ''" class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
+                    <button type="submit" :disabled="confirmNumber.trim() !== '{{ enquiry.number }}'" :class="confirmNumber.trim() === '{{ enquiry.number }}' ? 'bg-red-600 hover:bg-red-700 text-white cursor-pointer' : 'bg-red-300 text-white cursor-not-allowed'" class="rounded-lg px-4 py-2 text-sm font-semibold transition">Delete permanently</button>
+                </div>
+            </form>
+        </div>
     </div>
 
     <div class="grid grid-cols-1 gap-5 lg:grid-cols-3">
