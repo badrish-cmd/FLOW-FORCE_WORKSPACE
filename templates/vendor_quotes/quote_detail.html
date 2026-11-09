@@ -270,6 +270,8 @@
 
     <!-- Decision dialog (teleported to <body> so the spreadsheet canvas can't cover it) -->
     <template x-teleport="body">
+    <!-- x-teleport moves exactly ONE root element, so every dialog lives inside this wrapper -->
+    <div id="vq-dialogs">
     <div x-show="decision" x-cloak id="decision-dialog" class="fixed inset-0 flex items-center justify-center bg-slate-900/50 p-4" style="z-index: 5000" @keydown.escape.window="decision=null">
         <div class="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl" @click.outside="decision=null">
             <h3 class="text-lg font-semibold text-slate-900" x-text="{approve:'Approve this quote', send_back:'Send back to Ibrahim', reject:'Reject this quote'}[decision]"></h3>
@@ -328,6 +330,7 @@
                 </div>
             </form>
         </div>
+    </div>
     </div>
     </template>
 </div>
