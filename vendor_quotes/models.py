@@ -114,6 +114,17 @@ class Enquiry(models.Model):
 
 
 class VendorQuote(models.Model):
+    AI_NOT_STARTED = "NOT_STARTED"
+    AI_RUNNING = "RUNNING"
+    AI_DONE = "DONE"
+    AI_FAILED = "FAILED"
+    AI_STATUS_CHOICES = [
+        (AI_NOT_STARTED, "Not started"),
+        (AI_RUNNING, "Running"),
+        (AI_DONE, "Done"),
+        (AI_FAILED, "Failed"),
+    ]
+
     enquiry = models.ForeignKey(Enquiry, on_delete=models.CASCADE, related_name="quotes")
     vendor = models.ForeignKey(Vendor, on_delete=models.PROTECT, related_name="quotes")
     vendor_quote_no = models.CharField(max_length=100, blank=True)
@@ -122,6 +133,12 @@ class VendorQuote(models.Model):
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    # Phase 6: AI quote extraction
+    ai_status = models.CharField(max_length=20, choices=AI_STATUS_CHOICES, default=AI_NOT_STARTED, db_index=True)
+    ai_result = models.JSONField(default=dict, blank=True)
+    ai_error = models.TextField(blank=True)
+    ai_ran_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -132,6 +149,12 @@ class VendorQuote(models.Model):
     @property
     def latest_revision(self):
         return self.revisions.order_by("-number").first()
+
+    @property
+    def quote_file_name(self):
+        if not self.quote_file:
+            return ""
+        return os.path.basename(self.quote_file.name)
 
     @property
     def quote_file_is_pdf(self):

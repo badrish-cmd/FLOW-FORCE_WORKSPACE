@@ -304,6 +304,10 @@ ZOHO_ACCOUNTS_URL = os.getenv('ZOHO_ACCOUNTS_URL', 'https://accounts.zoho.com')
 ZOHO_ORG_ID = os.getenv('ZOHO_ORG_ID', '741367552')
 ZOHO_REDIRECT_URI = os.getenv('ZOHO_REDIRECT_URI', SITE_URL.rstrip('/') + '/vendor-quotes/zoho/callback/')
 
+# Google Gemini (AI Vendor Quote Reading)
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
+GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
+
 # --------------------------------------------------
 # LOGIN SETTINGS
 # --------------------------------------------------

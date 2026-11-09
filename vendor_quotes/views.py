@@ -1,6 +1,8 @@
 import json
+import os
 import secrets
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
@@ -23,8 +25,18 @@ def _guard(request, approve=False):
 
 
 def _ctx(request, **extra):
+    is_admin = (
+        workflow.can_approve(request.user)
+        or getattr(request.user, "role", None) in ("SUPER_ADMIN", "ADMIN")
+        or getattr(request.user, "is_superuser", False)
+    )
+    has_gemini_key = bool(
+        getattr(settings, "GEMINI_API_KEY", "").strip() or os.getenv("GEMINI_API_KEY", "").strip()
+    )
     extra.setdefault("can_approve", workflow.can_approve(request.user))
     extra.setdefault("can_edit", workflow.can_edit(request.user))
+    extra.setdefault("is_admin", is_admin)
+    extra.setdefault("has_gemini_key", has_gemini_key)
     return extra
 
 
@@ -117,13 +129,18 @@ def quote_detail(request, pk):
     lines, problems = extract_lines(rev.snapshot)
     total = sum(ln["qty"] * ln["rate"] for ln in lines)
     editable = workflow.can_edit_revision(request.user, rev)
+    ai_res = quote.ai_result or {}
+    ai_lines_count = len(ai_res.get("lines") or [])
+    ai_warnings = ai_res.get("warnings") or []
+    ai_quote_total = ai_res.get("quote_total")
     return render(request, "vendor_quotes/quote_detail.html", _ctx(
         request, quote=quote, rev=rev, revisions=revisions, editable=editable,
         is_latest=(rev.number == revisions[-1].number), lines=lines, problems=problems, total=total,
         problems_json=json.dumps(problems), 
         changes=rev.changes.select_related("user")[:200], events=quote.events.select_related("user")[:50],
         zoho_url=zoho.estimate_url(rev.zoho_estimate_id) if rev.zoho_estimate_id else "",
-        zoho_connected=ZohoConnection.get().is_connected))
+        zoho_connected=ZohoConnection.get().is_connected,
+        ai_lines_count=ai_lines_count, ai_warnings=ai_warnings, ai_quote_total=ai_quote_total))
 
 
 @login_required
@@ -218,6 +235,67 @@ def quote_file(request, pk):
         raise Http404
     return FileResponse(quote.quote_file.open("rb"), as_attachment=request.GET.get("download") == "1",
                         filename=quote.quote_file.name.rsplit("/", 1)[-1])
+
+
+@login_required
+@require_POST
+def quote_ai_read(request, pk):
+    if (resp := _guard(request)):
+        return resp
+    quote = get_object_or_404(VendorQuote.objects.select_related("vendor", "enquiry"), pk=pk)
+    rev = quote.latest_revision
+    if not rev:
+        return JsonResponse({"ok": False, "error": "Quote has no revisions."}, status=400)
+
+    if not workflow.can_edit_revision(request.user, rev):
+        return JsonResponse({"ok": False, "error": "You do not have permission to edit this revision."}, status=403)
+
+    if rev.status not in (QuoteRevision.STATUS_DRAFT, QuoteRevision.STATUS_SENT_BACK):
+        return JsonResponse({"ok": False, "error": f"Cannot run AI reading on a {rev.get_status_display().lower()} quote."}, status=400)
+
+    if not quote.quote_file:
+        return JsonResponse({"ok": False, "error": "No vendor quote file uploaded."}, status=400)
+
+    try:
+        if quote.quote_file.size > 20 * 1024 * 1024:
+            return JsonResponse({"ok": False, "error": "Quote file exceeds the 20 MB limit for AI processing."}, status=400)
+    except Exception:
+        pass
+
+    api_key = getattr(settings, "GEMINI_API_KEY", "").strip() or os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        return JsonResponse({"ok": False, "error": "Gemini API key is not configured. Set GEMINI_API_KEY on the server."}, status=400)
+
+    if quote.ai_status == VendorQuote.AI_RUNNING:
+        return JsonResponse({"ok": True, "status": VendorQuote.AI_RUNNING, "message": "AI extraction is already running."})
+
+    quote.ai_status = VendorQuote.AI_RUNNING
+    quote.ai_error = ""
+    quote.save(update_fields=["ai_status", "ai_error", "updated_at"])
+
+    from .tasks import read_vendor_quote_with_ai
+    read_vendor_quote_with_ai.delay(quote.id, request.user.id)
+    return JsonResponse({"ok": True, "status": VendorQuote.AI_RUNNING})
+
+
+@login_required
+def quote_ai_status(request, pk):
+    if (resp := _guard(request)):
+        return resp
+    quote = get_object_or_404(VendorQuote, pk=pk)
+    ai_result = quote.ai_result or {}
+    lines = ai_result.get("lines") or []
+    warnings = ai_result.get("warnings") or []
+    quote_total = ai_result.get("quote_total")
+    return JsonResponse({
+        "ok": True,
+        "status": quote.ai_status,
+        "error": quote.ai_error,
+        "ran_at": quote.ai_ran_at.isoformat() if quote.ai_ran_at else None,
+        "lines_count": len(lines),
+        "warnings": warnings,
+        "quote_total": quote_total,
+    })
 
 
 @login_required

@@ -32,6 +32,20 @@
             <span class="text-xs" :class="dirty ? 'text-amber-600' : 'text-slate-400'" x-text="saveLabel"></span>
             <button type="button" @click="save()" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50" title="Ctrl+S"><i class="fas fa-save mr-1.5"></i>Save</button>
             {% endif %}
+            {% if editable and rev.status != 'IN_REVIEW' and quote.quote_file %}
+            {% if has_gemini_key %}
+            <button type="button" @click="startAiRead()" :disabled="aiRunning" class="rounded-lg border border-purple-300 bg-purple-50 px-3 py-2 text-sm font-semibold text-purple-700 hover:bg-purple-100 disabled:opacity-50">
+                <template x-if="aiRunning">
+                    <span><i class="fas fa-spinner fa-spin mr-1.5"></i>Reading with AI...</span>
+                </template>
+                <template x-if="!aiRunning">
+                    <span><i class="fas fa-wand-magic-sparkles mr-1.5 text-purple-600"></i>Read with AI</span>
+                </template>
+            </button>
+            {% elif is_admin %}
+            <span class="text-xs text-slate-400 italic self-center px-1" title="Set GEMINI_API_KEY on the server to enable AI reading"><i class="fas fa-info-circle mr-1 text-slate-400"></i>AI reading disabled (set GEMINI_API_KEY)</span>
+            {% endif %}
+            {% endif %}
             {% if editable and rev.status != 'IN_REVIEW' and can_edit %}
             <form method="post" action="{% url 'vendor_quotes:revision_submit' rev.id %}" @submit.prevent="saveThenSubmit($event.target)">{% csrf_token %}
                 <button class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"><i class="fas fa-paper-plane mr-1.5"></i>Send for approval</button>
@@ -64,6 +78,59 @@
     {% endif %}
 
     <!-- Banners -->
+    <div x-show="aiRunning" x-cloak class="mb-3 rounded-xl border border-purple-200 bg-purple-50 p-4 text-sm text-purple-900 flex items-center gap-3">
+        <i class="fas fa-spinner fa-spin text-xl text-purple-600 shrink-0"></i>
+        <div>
+            <div class="font-semibold">AI is reading the vendor quote...</div>
+            <div class="text-xs text-purple-700">Gemini is extracting line items and pricing from {{ quote.quote_file_name|default:"the uploaded file" }}. The sheet will reload automatically once complete.</div>
+        </div>
+    </div>
+
+    {% if quote.ai_status == 'DONE' and not quote.ai_error %}
+    <div x-data="{ showAiNotice: true }" x-show="showAiNotice && !aiRunning" class="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+        <div class="flex items-start justify-between">
+            <div class="flex items-start gap-3">
+                <i class="fas fa-wand-magic-sparkles text-lg text-amber-600 mt-0.5 shrink-0"></i>
+                <div>
+                    <h4 class="font-semibold text-amber-950">AI filled {{ ai_lines_count }} lines – please check against the vendor quote</h4>
+                    <p class="mt-1 text-xs text-amber-800">
+                        Formulas are calculated in your browser. Please review the items, then click <strong>Save</strong> (or press Ctrl+S) before sending for approval.
+                    </p>
+                    {% if ai_quote_total is not None %}
+                    <div class="mt-2 text-xs font-medium text-amber-900">
+                        AI detected vendor quote total: <strong>{{ quote.currency }} {{ ai_quote_total }}</strong> (Check against row formula in the check row below).
+                    </div>
+                    {% endif %}
+                    {% if ai_warnings %}
+                    <div class="mt-2.5">
+                        <div class="text-xs font-semibold text-amber-900">AI extraction warnings ({{ ai_warnings|length }}):</div>
+                        <ul class="mt-1 list-disc pl-5 space-y-0.5 text-xs text-amber-800">
+                            {% for w in ai_warnings %}
+                            <li>{{ w }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            <button type="button" @click="showAiNotice = false" class="text-amber-600 hover:text-amber-800 text-xs px-2 py-1" title="Dismiss"><i class="fas fa-times"></i></button>
+        </div>
+    </div>
+    {% elif quote.ai_status == 'FAILED' and quote.ai_error %}
+    <div x-data="{ showAiError: true }" x-show="showAiError && !aiRunning" class="mb-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+        <div class="flex items-start justify-between">
+            <div class="flex items-start gap-3">
+                <i class="fas fa-exclamation-circle text-lg text-red-600 mt-0.5 shrink-0"></i>
+                <div>
+                    <h4 class="font-semibold text-red-950">AI Quote Reading Failed</h4>
+                    <p class="mt-1 text-xs text-red-800">{{ quote.ai_error }}</p>
+                </div>
+            </div>
+            <button type="button" @click="showAiError = false" class="text-red-500 hover:text-red-700 text-xs px-2 py-1" title="Dismiss"><i class="fas fa-times"></i></button>
+        </div>
+    </div>
+    {% endif %}
+
     {% if rev.status == 'SENT_BACK' and rev.decision_comment %}
     <div class="mb-3 rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm text-orange-900"><i class="fas fa-comment-dots mr-2"></i><strong>{{ rev.decided_by.full_name|default:"GM" }}:</strong> {{ rev.decision_comment }}</div>
     {% elif rev.status == 'IN_REVIEW' and can_approve %}
@@ -186,6 +253,9 @@ window.VQ = {
     saveUrl: "{% url 'vendor_quotes:revision_save' rev.id %}",
     csrf: "{{ csrf_token }}",
     summary: { lines: {{ lines|length }}, total: {{ total|floatformat:0|default:0 }}, problems: {{ problems_json|safe }} },
+    aiRunning: {% if quote.ai_status == 'RUNNING' %}true{% else %}false{% endif %},
+    aiReadUrl: "{% url 'vendor_quotes:quote_ai_read' quote.id %}",
+    aiStatusUrl: "{% url 'vendor_quotes:quote_ai_status' quote.id %}",
 };
 </script>
 <script src="{% static 'vendor_quotes/quote_sheet.js' %}"></script>

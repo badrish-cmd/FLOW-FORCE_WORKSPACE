@@ -18,6 +18,8 @@
             saveLabel: window.VQ.editable ? "All changes saved" : "",
             decision: null,
             summary: window.VQ.summary,
+            aiRunning: window.VQ.aiRunning || false,
+            aiPollTimer: null,
             init() {
                 let ready = false;
                 setTimeout(() => { ready = true; }, 2000);   // ignore recalculation events while loading
@@ -28,6 +30,55 @@
                     });
                     window.addEventListener("beforeunload", (e) => { if (this.dirty) { e.preventDefault(); e.returnValue = ""; } });
                     setInterval(() => { if (this.dirty && !this.saving) this.save(); }, 60000);
+                }
+                if (this.aiRunning) {
+                    this.pollAiStatus();
+                }
+            },
+            pollAiStatus() {
+                if (this.aiPollTimer) clearInterval(this.aiPollTimer);
+                this.aiPollTimer = setInterval(async () => {
+                    try {
+                        const resp = await fetch(window.VQ.aiStatusUrl);
+                        if (!resp.ok) return;
+                        const data = await resp.json();
+                        if (!data.ok) return;
+                        if (data.status === "DONE" || data.status === "FAILED") {
+                            clearInterval(this.aiPollTimer);
+                            this.aiPollTimer = null;
+                            window.location.reload();
+                        }
+                    } catch (e) {
+                        console.error("AI status polling error:", e);
+                    }
+                }, 3000);
+            },
+            async startAiRead() {
+                if (this.aiRunning) return;
+                if (this.summary && this.summary.lines > 0) {
+                    if (!confirm("Replace existing lines?")) {
+                        return;
+                    }
+                }
+                this.aiRunning = true;
+                try {
+                    const resp = await fetch(window.VQ.aiReadUrl, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "X-CSRFToken": window.VQ.csrf,
+                        },
+                    });
+                    const out = await resp.json();
+                    if (!resp.ok || !out.ok) {
+                        this.aiRunning = false;
+                        alert(out.error || "Failed to start AI reading.");
+                        return;
+                    }
+                    this.pollAiStatus();
+                } catch (err) {
+                    this.aiRunning = false;
+                    alert("Network error: " + err.message);
                 }
             },
             fmt(n) { return Math.round(n || 0).toLocaleString("en-US"); },

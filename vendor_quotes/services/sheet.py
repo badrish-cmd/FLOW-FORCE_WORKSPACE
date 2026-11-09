@@ -122,7 +122,8 @@ def _num(x, default=0.0):
 
 def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_no, currency,
                             exchange_rate, margin_factor, duty_factor, freight_factor,
-                            discount, lines=None, blank_lines=10, title=None):
+                            discount, lines=None, blank_lines=10, title=None,
+                            freight=0, quote_total=""):
     """Build the standard (BOS spare-parts style) price table. Everything stays editable.
 
     Rows 1-6: quote details (left, B/C) and pricing factors (right, H:I label, J value).
@@ -163,8 +164,8 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
         ("Margin factor (cost ÷ this)", _num(margin_factor, 1), "inpf"),
         ("Duty factor (0.9 = 10% duty)", _num(duty_factor, 1), "inpf"),
         ("Freight factor", _num(freight_factor, 1), "inpf"),
-        (f"Freight / courier ({cur}, spread on lines)", 0, "inpn"),
-        (f"Vendor quote total ({cur}, for the check)", "", "inpn"),
+        (f"Freight / courier ({cur}, spread on lines)", _num(freight, 0), "inpn"),
+        (f"Vendor quote total ({cur}, for the check)", "" if quote_total in (None, "") else _num(quote_total), "inpn"),
     ]):
         put(r, 7, label, s="lbl")
         put(r, 8, "", s="lbl")

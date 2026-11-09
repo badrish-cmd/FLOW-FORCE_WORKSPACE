@@ -1,6 +1,6 @@
 import io
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import openpyxl
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -11,10 +11,14 @@ from auth_app.models import EmployeeUser
 from employee_management.models import Department
 from tasks.models import EmailLog, Notification
 
-from .models import MasterSheet, QuoteRevision, Vendor, VendorMasterFile, ZohoConnection
+from .models import (MasterSheet, QuoteRevision, Vendor, VendorMasterFile, VendorQuote,
+                     ZohoConnection)
 from .services import sheet as sheet_svc
 from .services import workflow, zoho
+from .services.ai_extract import (AIExtractError, excel_to_text, extract_quote,
+                                  validate_and_clean_data)
 from .services.excel_io import append_to_master, import_master
+from .tasks import read_vendor_quote_with_ai
 
 
 def bos_like_workbook():
@@ -256,3 +260,273 @@ class ViewTests(TestCase):
         self.client.force_login(self.emp)
         self.assertEqual(self.client.get(reverse("vendor_quotes:quote_list")).status_code, 403)
         self.assertNotContains(self.client.get("/employee-dashboard/"), "Vendor Quotes")
+
+
+class AIQuoteExtractionTests(TestCase):
+    def setUp(self):
+        dept = Department.objects.create(name="VQ AI Sales", slug="vq-ai-sales")
+        self.gm = EmployeeUser.objects.create_user(
+            email="gm_ai@example.com", password="x", role="SUPER_ADMIN",
+            department=dept, full_name="GM AI", status="APPROVED"
+        )
+        self.ibrahim = EmployeeUser.objects.create_user(
+            email="ibrahim_ai@example.com", password="x", role="ADMIN",
+            department=dept, full_name="Md Ibrahim AI", status="APPROVED"
+        )
+        self.emp = EmployeeUser.objects.create_user(
+            email="emp_ai@example.com", password="x", role="EMPLOYEE",
+            department=dept, full_name="Emp AI", status="APPROVED"
+        )
+        self.vendor = Vendor.objects.create(
+            name="Alpha Supplies", code="ALPHA", currency="EUR",
+            default_exchange_rate=20000, default_margin_factor=0.85,
+            default_duty_factor=0.9, default_freight_factor=1.05,
+            default_discount=0.1
+        )
+
+    @override_settings(GEMINI_API_KEY="")
+    def test_missing_api_key_raises_error(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with self.assertRaises(AIExtractError) as cm:
+                extract_quote(b"%PDF-dummy", "quote.pdf")
+            self.assertIn("API key is not configured", str(cm.exception))
+
+    @override_settings(GEMINI_API_KEY="dummy-key")
+    def test_file_size_exceeded_raises_error(self):
+        huge_bytes = b"0" * (20 * 1024 * 1024 + 1)
+        with self.assertRaises(AIExtractError) as cm:
+            extract_quote(huge_bytes, "quote.pdf")
+        self.assertIn("exceeds the 20 MB limit", str(cm.exception))
+
+    @override_settings(GEMINI_API_KEY="dummy-key")
+    def test_unsupported_file_extension(self):
+        with self.assertRaises(AIExtractError) as cm:
+            extract_quote(b"word document content", "quote.docx")
+        self.assertIn("Unsupported file format", str(cm.exception))
+
+    def test_excel_to_text_conversion(self):
+        wb = openpyxl.Workbook()
+        ws1 = wb.active
+        ws1.title = "Items"
+        ws1.append(["Part No", "Description", "Qty", "Price"])
+        ws1.append(["P-001", "Sensor Unit", 2, 150.5])
+        ws2 = wb.create_sheet(title="Terms")
+        ws2.append(["Freight", 50])
+        buf = io.BytesIO()
+        wb.save(buf)
+        excel_bytes = buf.getvalue()
+
+        text = excel_to_text(excel_bytes, "test.xlsx")
+        self.assertIn("--- Sheet: Items ---", text)
+        self.assertIn("P-001", text)
+        self.assertIn("Sensor Unit", text)
+        self.assertIn("--- Sheet: Terms ---", text)
+        self.assertIn("Freight", text)
+
+    def test_validation_and_clean_data(self):
+        raw_data = {
+            "vendor_quote_no": "VQ-100",
+            "currency": "usd",
+            "freight_or_courier": "75.5",
+            "quote_total": "1200",
+            "lines": [
+                {"line_no": 1, "part_no": "A1", "description": "Good part", "qty": 10, "unit": "pcs", "unit_price": 50, "discount_percent": 15},
+                {"line_no": 2, "part_no": "A2", "description": "Zero qty", "qty": 0, "unit": "pcs", "unit_price": 20},
+                {"line_no": 3, "part_no": "A3", "description": "Negative price", "qty": 2, "unit": "pcs", "unit_price": -10},
+                {"line_no": 4, "part_no": "", "description": "", "qty": 1, "unit": "pcs", "unit_price": 30},
+                {"line_no": 5, "part_no": "A5", "description": "Over discount", "qty": 1, "unit": "pcs", "unit_price": 100, "discount_percent": 150},
+            ],
+            "warnings": ["Initial prompt warning"],
+        }
+        cleaned = validate_and_clean_data(raw_data)
+        self.assertEqual(cleaned["currency"], "USD")
+        self.assertEqual(cleaned["freight_or_courier"], 75.5)
+        self.assertEqual(cleaned["quote_total"], 1200.0)
+        self.assertEqual(len(cleaned["lines"]), 2)
+        self.assertEqual(cleaned["lines"][0]["part_no"], "A1")
+        self.assertEqual(cleaned["lines"][1]["part_no"], "A5")
+        self.assertIsNone(cleaned["lines"][1]["discount_percent"])
+
+        warning_texts = " ".join(cleaned["warnings"])
+        self.assertIn("invalid quantity", warning_texts)
+        self.assertIn("invalid unit price", warning_texts)
+        self.assertIn("both part number and description are empty", warning_texts)
+        self.assertIn("out of bounds", warning_texts)
+
+    @override_settings(GEMINI_API_KEY="dummy-key")
+    @patch("google.genai.Client")
+    def test_extract_quote_pdf_mocked(self, mock_client_cls):
+        mock_client = mock_client_cls.return_value
+        mock_response = MagicMock()
+        mock_response.parsed = None
+        mock_response.text = json.dumps({
+            "vendor_quote_no": "VQ-PDF-999",
+            "quote_date": "2026-11-09",
+            "currency": "EUR",
+            "freight_or_courier": 120.0,
+            "quote_total": 2500.0,
+            "lines": [
+                {"line_no": 1, "part_no": "PART-1", "description": "Hydraulic Valve", "qty": 4, "unit": "pcs", "unit_price": 350.0, "discount_percent": 10.0, "notes": "standard"},
+                {"line_no": 2, "part_no": "PART-2", "description": "Seal Kit", "qty": 10, "unit": "set", "unit_price": 45.0, "discount_percent": None, "notes": ""},
+            ],
+            "warnings": [],
+        })
+        mock_client.models.generate_content.return_value = mock_response
+
+        res = extract_quote(b"%PDF-1.4 test binary stream", "vendor_quote.pdf")
+        self.assertEqual(res["vendor_quote_no"], "VQ-PDF-999")
+        self.assertEqual(res["currency"], "EUR")
+        self.assertEqual(res["freight_or_courier"], 120.0)
+        self.assertEqual(res["quote_total"], 2500.0)
+        self.assertEqual(len(res["lines"]), 2)
+        self.assertEqual(res["lines"][0]["part_no"], "PART-1")
+
+    @override_settings(GEMINI_API_KEY="dummy-key")
+    @patch("google.genai.Client")
+    def test_extract_quote_excel_mocked(self, mock_client_cls):
+        mock_client = mock_client_cls.return_value
+        mock_response = MagicMock()
+        mock_response.parsed = None
+        mock_response.text = json.dumps({
+            "vendor_quote_no": "VQ-XLSX-123",
+            "quote_date": "2026-11-09",
+            "currency": "USD",
+            "freight_or_courier": 0,
+            "quote_total": 500.0,
+            "lines": [
+                {"line_no": 1, "part_no": "E-1", "description": "Filter", "qty": 2, "unit": "pcs", "unit_price": 250.0, "discount_percent": 5.0, "notes": ""},
+            ],
+            "warnings": [],
+        })
+        mock_client.models.generate_content.return_value = mock_response
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["Part", "Price"])
+        ws.append(["E-1", 250])
+        buf = io.BytesIO()
+        wb.save(buf)
+
+        res = extract_quote(buf.getvalue(), "quote.xlsx")
+        self.assertEqual(res["vendor_quote_no"], "VQ-XLSX-123")
+        self.assertEqual(res["currency"], "USD")
+        self.assertEqual(len(res["lines"]), 1)
+
+    def test_apply_ai_result_to_sheet_snapshot(self):
+        quote, rev = workflow.create_quote(
+            enquiry_number="ENQ/2026/11/700", customer_name="PT. Testing",
+            vendor=self.vendor, vendor_quote_no="", quote_file=None,
+            user=self.ibrahim
+        )
+        ai_data = {
+            "vendor_quote_no": "EXTRACTED-777",
+            "currency": "EUR",
+            "freight_or_courier": 250.0,
+            "quote_total": 4500.0,
+            "lines": [
+                {"line_no": 1, "part_no": "P-100", "description": "Pump Model A", "qty": 2, "unit": "pcs", "unit_price": 1000.0, "discount_percent": 20.0},
+                {"line_no": 2, "part_no": "P-200", "description": "Pump Model B", "qty": 3, "unit": "pcs", "unit_price": 800.0, "discount_percent": None},
+            ],
+            "warnings": ["Skipped unpriced spare"],
+        }
+        n_lines = workflow.apply_ai_result(quote, rev, ai_data, self.ibrahim)
+        self.assertEqual(n_lines, 2)
+        quote.refresh_from_db()
+        rev.refresh_from_db()
+
+        self.assertEqual(quote.vendor_quote_no, "EXTRACTED-777")
+        self.assertEqual(quote.currency, "EUR")
+
+        sh = sheet_svc.first_sheet(rev.snapshot)
+        self.assertEqual(sheet_svc.get_cell(sh, 0, 9)["v"], 20000.0)
+        self.assertEqual(sheet_svc.get_cell(sh, 1, 9)["v"], 0.85)
+        self.assertEqual(sheet_svc.get_cell(sh, 2, 9)["v"], 0.9)
+        self.assertEqual(sheet_svc.get_cell(sh, 3, 9)["v"], 1.05)
+        self.assertEqual(sheet_svc.get_cell(sh, 4, 9)["v"], 250.0)
+        self.assertEqual(sheet_svc.get_cell(sh, 5, 9)["v"], 4500.0)
+
+        # Line 1 (Excel row 9, 0-based row 8)
+        self.assertEqual(sheet_svc.get_cell(sh, 8, 1)["v"], "P-100")
+        self.assertEqual(sheet_svc.get_cell(sh, 8, 2)["v"], "Pump Model A")
+        self.assertEqual(sheet_svc.get_cell(sh, 8, 3)["v"], 2.0)
+        self.assertEqual(sheet_svc.get_cell(sh, 8, 5)["v"], 1000.0)
+        self.assertEqual(sheet_svc.get_cell(sh, 8, 6)["v"], 0.20)
+
+        # Line 2 (Excel row 10, 0-based row 9)
+        self.assertEqual(sheet_svc.get_cell(sh, 9, 1)["v"], "P-200")
+        self.assertEqual(sheet_svc.get_cell(sh, 9, 2)["v"], "Pump Model B")
+        self.assertEqual(sheet_svc.get_cell(sh, 9, 3)["v"], 3.0)
+        self.assertEqual(sheet_svc.get_cell(sh, 9, 5)["v"], 800.0)
+        self.assertEqual(sheet_svc.get_cell(sh, 9, 6)["v"], 0.1)
+
+        self.assertTrue(rev.changes.exists())
+        self.assertTrue(quote.events.filter(action="ai_filled").exists())
+
+    def test_apply_ai_refuses_approved_revision(self):
+        quote, rev = workflow.create_quote(
+            enquiry_number="ENQ/2026/11/800", customer_name="PT. Approved",
+            vendor=self.vendor, vendor_quote_no="", quote_file=None,
+            user=self.ibrahim
+        )
+        workflow.save_snapshot(rev, priced_snapshot([
+            {"part": "Z1", "description": "D1", "qty": 1, "unit_price": 10, "sell": 1000}
+        ]), self.ibrahim)
+        rev.refresh_from_db()
+        workflow.submit(rev, self.ibrahim)
+        rev.refresh_from_db()
+        with self.captureOnCommitCallbacks(execute=True):
+            workflow.approve(rev, self.gm)
+        rev.refresh_from_db()
+        self.assertEqual(rev.status, QuoteRevision.STATUS_APPROVED)
+
+        # Direct workflow call raises WorkflowError
+        with self.assertRaises(workflow.WorkflowError):
+            workflow.apply_ai_result(quote, rev, {"lines": []}, self.ibrahim)
+
+        # Celery task fails gracefully
+        quote.quote_file = SimpleUploadedFile("quote.pdf", b"%PDF-1.4 sample")
+        quote.save()
+        read_vendor_quote_with_ai(quote.id, self.ibrahim.id)
+        quote.refresh_from_db()
+        self.assertEqual(quote.ai_status, VendorQuote.AI_FAILED)
+        self.assertIn("not editable", quote.ai_error)
+
+    @override_settings(GEMINI_API_KEY="dummy-key")
+    @patch("vendor_quotes.tasks.read_vendor_quote_with_ai.delay")
+    def test_ai_read_and_status_views(self, mock_task_delay):
+        quote, rev = workflow.create_quote(
+            enquiry_number="ENQ/2026/11/900", customer_name="PT. ViewTest",
+            vendor=self.vendor, vendor_quote_no="",
+            quote_file=SimpleUploadedFile("vendor.pdf", b"%PDF-dummy-content"),
+            user=self.ibrahim
+        )
+
+        # Block unauthorized employee
+        self.client.force_login(self.emp)
+        resp = self.client.post(reverse("vendor_quotes:quote_ai_read", args=[quote.id]))
+        self.assertEqual(resp.status_code, 403)
+
+        # Ibrahim (authorized) triggers AI read
+        self.client.force_login(self.ibrahim)
+        resp = self.client.post(reverse("vendor_quotes:quote_ai_read", args=[quote.id]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["ok"], True)
+        self.assertEqual(resp.json()["status"], "RUNNING")
+        mock_task_delay.assert_called_once_with(quote.id, self.ibrahim.id)
+
+        # Check AI status view
+        quote.ai_status = VendorQuote.AI_DONE
+        quote.ai_result = {
+            "quote_total": 1500.0,
+            "lines": [{"part_no": "A", "qty": 1}],
+            "warnings": ["Test warning"]
+        }
+        quote.save()
+
+        status_resp = self.client.get(reverse("vendor_quotes:quote_ai_status", args=[quote.id]))
+        self.assertEqual(status_resp.status_code, 200)
+        data = status_resp.json()
+        self.assertEqual(data["status"], "DONE")
+        self.assertEqual(data["lines_count"], 1)
+        self.assertEqual(data["quote_total"], 1500.0)
+        self.assertEqual(data["warnings"], ["Test warning"])

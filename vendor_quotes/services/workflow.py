@@ -1,5 +1,6 @@
 """Business actions for vendor quotes: create, save, submit, approve, send back, reject, revise."""
 import logging
+import os
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -13,7 +14,8 @@ from ..models import (Enquiry, MasterSheet, QuoteChange, QuoteEvent, QuoteRevisi
                       VendorMasterFile, VendorQuote)
 from . import zoho
 from .excel_io import append_to_master, build_single_workbook, import_master
-from .sheet import build_standard_snapshot, diff_snapshots, extract_lines, fresh_copy
+from .sheet import (build_standard_snapshot, cell_number, cell_text, diff_snapshots,
+                    extract_lines, first_sheet, fresh_copy, get_cell)
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -339,3 +341,130 @@ def run_outputs(rev, excel=True, zoho_draft=True):
     if zoho_draft and rev.zoho_status != QuoteRevision.OUTPUT_DONE:
         run_zoho_output(rev)
     return rev
+
+
+@transaction.atomic
+def apply_ai_result(quote, rev, ai_result, user):
+    """Apply structured AI extraction results to an editable quote revision."""
+    rev = QuoteRevision.objects.select_for_update().get(pk=rev.pk)
+    if rev.status not in (QuoteRevision.STATUS_DRAFT, QuoteRevision.STATUS_SENT_BACK):
+        raise WorkflowError("AI reading can only be applied to editable revisions (Draft or Sent back).")
+    if user and not can_edit_revision(user, rev):
+        raise WorkflowError("You do not have permission to edit this revision.")
+
+    # 1. Update quote vendor_quote_no if empty
+    extracted_vq_no = (ai_result.get("vendor_quote_no") or "").strip()
+    if extracted_vq_no and not quote.vendor_quote_no:
+        quote.vendor_quote_no = extracted_vq_no
+        quote.save(update_fields=["vendor_quote_no", "updated_at"])
+
+    # 2. Update quote currency if empty
+    extracted_cur = (ai_result.get("currency") or "").strip().upper()
+    if extracted_cur and not quote.currency:
+        quote.currency = extracted_cur
+        quote.save(update_fields=["currency", "updated_at"])
+
+    # 3. Read existing parameters and factor values from current snapshot to preserve user's factors
+    old_snap = rev.snapshot or {}
+    sh = first_sheet(old_snap)
+
+    exchange_rate = quote.vendor.default_exchange_rate
+    margin_factor = quote.vendor.default_margin_factor
+    duty_factor = quote.vendor.default_duty_factor
+    freight_factor = quote.vendor.default_freight_factor
+    freight = 0
+    quote_total = ""
+
+    if sh:
+        c_rate = cell_number(get_cell(sh, 0, 9))
+        if c_rate is not None and c_rate > 0:
+            exchange_rate = c_rate
+        c_margin = cell_number(get_cell(sh, 1, 9))
+        if c_margin is not None and c_margin > 0:
+            margin_factor = c_margin
+        c_duty = cell_number(get_cell(sh, 2, 9))
+        if c_duty is not None and c_duty > 0:
+            duty_factor = c_duty
+        c_ffactor = cell_number(get_cell(sh, 3, 9))
+        if c_ffactor is not None and c_ffactor > 0:
+            freight_factor = c_ffactor
+        c_freight = cell_number(get_cell(sh, 4, 9))
+        if c_freight is not None:
+            freight = c_freight
+        c_total = cell_number(get_cell(sh, 5, 9))
+        if c_total is not None:
+            quote_total = c_total
+
+    # Overwrite freight and quote_total if AI found them
+    if ai_result.get("freight_or_courier") is not None:
+        freight = ai_result["freight_or_courier"]
+    if ai_result.get("quote_total") is not None:
+        quote_total = ai_result["quote_total"]
+
+    # 4. Map lines
+    ai_lines = ai_result.get("lines") or []
+    sheet_lines = []
+    for ln in ai_lines:
+        disc = ln.get("discount_percent")
+        # discount as a fraction (e.g. 15 -> 0.15)
+        if disc is not None:
+            disc_fraction = round(float(disc) / 100.0, 4)
+        else:
+            disc_fraction = float(quote.vendor.default_discount)
+
+        sheet_lines.append({
+            "part": ln.get("part_no") or "",
+            "description": ln.get("description") or "",
+            "qty": ln.get("qty") if ln.get("qty") is not None else "",
+            "unit": ln.get("unit") or "pcs",
+            "unit_price": ln.get("unit_price") if ln.get("unit_price") is not None else "",
+            "discount": disc_fraction,
+        })
+
+    title = f"{quote.enquiry.number} {quote.vendor.code or quote.vendor.name}"
+    cur = quote.currency or quote.vendor.currency or "EUR"
+
+    new_snap = build_standard_snapshot(
+        enquiry_no=quote.enquiry.number,
+        customer=quote.enquiry.customer_name,
+        vendor_name=quote.vendor.name,
+        vendor_quote_no=quote.vendor_quote_no,
+        currency=cur,
+        exchange_rate=exchange_rate,
+        margin_factor=margin_factor,
+        duty_factor=duty_factor,
+        freight_factor=freight_factor,
+        discount=quote.vendor.default_discount,
+        lines=sheet_lines,
+        blank_lines=max(10, len(sheet_lines)),
+        title=title,
+        freight=freight,
+        quote_total=quote_total,
+    )
+
+    # 5. Compute diff and record QuoteChange
+    changes = diff_snapshots(old_snap, new_snap)
+    QuoteChange.objects.bulk_create([
+        QuoteChange(
+            revision=rev,
+            user=user,
+            sheet=s[:100],
+            cell=c,
+            old_value=o[:2000],
+            new_value=n[:2000]
+        )
+        for s, c, o, n in changes
+    ])
+
+    rev.snapshot = new_snap
+    rev.save(update_fields=["snapshot", "updated_at"])
+
+    # 6. Record QuoteEvent
+    filename = os.path.basename(quote.quote_file.name) if quote.quote_file else "file"
+    warnings = ai_result.get("warnings") or []
+    msg = f"AI filled {len(sheet_lines)} lines from {filename}"
+    if warnings:
+        msg += f" (Warnings: {'; '.join(warnings)})"
+    event(quote, "ai_filled", msg, user, rev)
+
+    return len(sheet_lines)
