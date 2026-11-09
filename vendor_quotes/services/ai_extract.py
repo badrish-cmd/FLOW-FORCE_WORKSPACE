@@ -235,7 +235,9 @@ def extract_quote(file_bytes: bytes, filename: str) -> Dict[str, Any]:
     try:
         from google import genai
         from google.genai import types
-        client = genai.Client(api_key=api_key)
+        # Structured JSON output (response_schema) is only available on the v1beta API;
+        # google-genai 3.x defaults to v1, which rejects it with "JSON mode is not enabled".
+        client = genai.Client(api_key=api_key, http_options=types.HttpOptions(api_version="v1beta"))
     except Exception as e:
         raise AIExtractError(f"Failed to initialize Gemini client: {e}")
 
