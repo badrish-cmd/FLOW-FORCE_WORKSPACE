@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1E40AF" />
+      <stop offset="45%" stop-color="#2563EB" />
+      <stop offset="100%" stop-color="#0F172A" />
+    </linearGradient>
+    <linearGradient id="bodyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="60%" stop-color="#F1F5F9" />
+      <stop offset="100%" stop-color="#CBD5E1" />
+    </linearGradient>
+    <linearGradient id="finLeft" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="100%" stop-color="#1D4ED8" />
+    </linearGradient>
+    <linearGradient id="finRight" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0284C7" />
+      <stop offset="100%" stop-color="#1E3A8A" />
+    </linearGradient>
+    <linearGradient id="flameOut" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#F97316" />
+      <stop offset="60%" stop-color="#EF4444" />
+      <stop offset="100%" stop-color="#DC2626" stop-opacity="0" />
+    </linearGradient>
+    <linearGradient id="flameIn" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FEF08A" />
+      <stop offset="60%" stop-color="#F59E0B" />
+      <stop offset="100%" stop-color="#EA580C" stop-opacity="0.2" />
+    </linearGradient>
+    <linearGradient id="windowGlass" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="100%" stop-color="#0369A1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background Squircle -->
+  <rect width="512" height="512" rx="118" fill="url(#bg)" />
+  <rect width="504" height="504" x="4" y="4" rx="114" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="6" />
+
+  <!-- Flow trails -->
+  <path d="M 90 280 C 70 340, 110 410, 180 430" fill="none" stroke="#38BDF8" stroke-width="8" stroke-linecap="round" stroke-opacity="0.4" />
+  <path d="M 140 370 C 120 410, 150 450, 200 460" fill="none" stroke="#60A5FA" stroke-width="6" stroke-linecap="round" stroke-opacity="0.3" />
+  <circle cx="110" cy="430" r="5" fill="#38BDF8" fill-opacity="0.5" />
+  <circle cx="85" cy="350" r="4" fill="#60A5FA" fill-opacity="0.4" />
+  <circle cx="420" cy="120" r="4" fill="#FFFFFF" fill-opacity="0.7" />
+  <circle cx="440" cy="170" r="6" fill="#93C5FD" fill-opacity="0.5" />
+
+  <!-- Centered Rocket rotated 45deg -->
+  <g transform="rotate(45 256 256)">
+    <!-- Thruster Flame Outer -->
+    <path d="M 226 325 Q 210 380, 256 425 Q 302 380, 286 325 Z" fill="url(#flameOut)" />
+    
+    <!-- Thruster Flame Inner -->
+    <path d="M 236 325 Q 230 365, 256 395 Q 282 365, 276 325 Z" fill="url(#flameIn)" />
+
+    <!-- Thruster Nozzle -->
+    <path d="M 226 310 L 286 310 L 292 328 L 220 328 Z" fill="#1E293B" stroke="#475569" stroke-width="3" />
+
+    <!-- Left Fin -->
+    <path d="M 206 230 Q 150 250, 142 320 Q 185 315, 212 288 Z" fill="url(#finLeft)" />
+    
+    <!-- Right Fin -->
+    <path d="M 306 230 Q 362 250, 370 320 Q 327 315, 300 288 Z" fill="url(#finRight)" />
+
+    <!-- Fuselage / Rocket Body -->
+    <path d="M 256 95 C 290 145, 312 215, 306 312 C 275 318, 237 318, 206 312 C 200 215, 222 145, 256 95 Z" fill="url(#bodyGrad)" />
+
+    <!-- Body Shading Overlay (curved right side for 3D depth) -->
+    <path d="M 256 95 C 285 145, 306 215, 306 312 C 280 316, 256 314, 256 314 C 256 314, 270 215, 256 95 Z" fill="#000000" fill-opacity="0.08" />
+
+    <!-- Dorsal / Center Fin Ridge -->
+    <path d="M 254 220 L 258 220 L 257 312 L 255 312 Z" fill="#94A3B8" fill-opacity="0.7" />
+
+    <!-- Porthole Window -->
+    <circle cx="256" cy="200" r="28" fill="#0F172A" />
+    <circle cx="256" cy="200" r="24" fill="#334155" />
+    <circle cx="256" cy="200" r="20" fill="url(#windowGlass)" />
+    <!-- Glass Reflection -->
+    <path d="M 244 190 Q 256 184, 268 190 Q 266 186, 256 184 Q 246 184, 244 190 Z" fill="#FFFFFF" fill-opacity="0.75" />
+    <circle cx="264" cy="194" r="3.5" fill="#FFFFFF" fill-opacity="0.9" />
+  </g>
+</svg>
+

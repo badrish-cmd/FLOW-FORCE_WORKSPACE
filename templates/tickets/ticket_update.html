@@ -1,0 +1,133 @@
+{% extends 'base.html' %}
+{% block title %}Edit Ticket {{ ticket.number }} - Flow-Force Workspace{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-4xl px-4 py-6">
+    <div class="mb-6">
+        <a href="{% url 'tickets:ticket_detail' ticket.id %}" class="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline mb-2">
+            <i class="fas fa-arrow-left"></i> Back to Ticket {{ ticket.number }}
+        </a>
+        <h1 class="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <i class="fas fa-edit text-blue-600"></i>
+            Edit Ticket {{ ticket.number }}
+        </h1>
+        <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            Update ticket details, contacts, warranty dates, or assignees.
+        </p>
+    </div>
+
+    <form method="post" class="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-6">
+        {% csrf_token %}
+
+        {% if form.errors %}
+        <div class="p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-800 dark:text-red-300">
+            <div class="font-semibold mb-1">Please correct the errors below:</div>
+            <ul class="list-disc list-inside text-xs space-y-1">
+                {% for field, errors in form.errors.items %}
+                    {% for error in errors %}
+                        <li><strong>{{ field|title }}:</strong> {{ error }}</li>
+                    {% endfor %}
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div class="sm:col-span-2">
+                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Title <span class="text-red-500">*</span>
+                </label>
+                {{ form.title }}
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Priority <span class="text-red-500">*</span>
+                </label>
+                {{ form.priority }}
+            </div>
+        </div>
+
+        <div>
+            <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Description / Scope of Work
+            </label>
+            {{ form.description }}
+        </div>
+
+        {% if ticket.type == 'SERVICE' %}
+        <div class="p-3 bg-slate-50 dark:bg-slate-900/40 rounded-lg border border-slate-200 dark:border-slate-700">
+            <label class="flex items-center gap-2 cursor-pointer">
+                {{ form.parts_purchased }}
+                <span class="text-sm font-medium text-slate-800 dark:text-slate-200">
+                    Parts purchased for this service (requires receipts before completion)
+                </span>
+            </label>
+        </div>
+        {% endif %}
+
+        <div>
+            <div class="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-3 border-b border-slate-100 dark:border-slate-700 pb-1">
+                Customer & Site Information
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Customer Name</label>
+                    {{ form.customer_name }}
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Salesperson</label>
+                    {{ form.salesperson_name }}
+                </div>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                <div>
+                    <label class="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Contact Name</label>
+                    {{ form.client_contact_name }}
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Phone</label>
+                    {{ form.client_phone }}
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Email</label>
+                    {{ form.client_email }}
+                </div>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Site Address</label>
+                {{ form.site_address }}
+            </div>
+        </div>
+
+        <div>
+            <div class="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-3 border-b border-slate-100 dark:border-slate-700 pb-1">
+                Warranty & Assignment
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                    <label class="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Warranty Start</label>
+                    {{ form.warranty_start }}
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Warranty End</label>
+                    {{ form.warranty_end }}
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Assigned Tech</label>
+                    {{ form.assigned_to }}
+                </div>
+            </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200 dark:border-slate-700">
+            <a href="{% url 'tickets:ticket_detail' ticket.id %}" class="px-4 py-2 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition">
+                Cancel
+            </a>
+            <button type="submit" class="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-lg shadow transition">
+                Save Changes
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}
+

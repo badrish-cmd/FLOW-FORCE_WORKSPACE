@@ -1,0 +1,957 @@
+{% extends 'base.html' %}
+{% block title %}{{ ticket.number }} - Flow-Force Workspace{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-7xl px-4 py-6" x-data="ticketDetailApp()">
+    <!-- Top breadcrumb & actions -->
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+        <div>
+            <div class="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mb-1">
+                <a href="{% url 'tickets:ticket_list' %}" class="hover:text-blue-600 transition">Tickets</a>
+                <span>&bull;</span>
+                <span>{{ ticket.get_type_display }}</span>
+                <span>&bull;</span>
+                <span class="font-mono text-slate-700 dark:text-slate-300">{{ ticket.number }}</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-3">
+                <h1 class="text-2xl font-bold text-slate-900 dark:text-white">{{ ticket.number }}: {{ ticket.title }}</h1>
+                {% include 'tickets/_status_badge.html' with status=ticket.status label=ticket.status_label %}
+                {% if ticket.priority == 'URGENT' %}
+                <span class="px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300">URGENT</span>
+                {% elif ticket.priority == 'HIGH' %}
+                <span class="px-2 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">High Priority</span>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+            {% if can_change_status %}
+            <button type="button" @click="openStatusModal = true" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition inline-flex items-center gap-2">
+                <i class="fas fa-step-forward"></i>
+                <span>Update Status</span>
+            </button>
+            {% endif %}
+
+            <button type="button" @click="openUploadModal = true" class="px-3.5 py-2 bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 text-white dark:text-slate-900 text-sm font-semibold rounded-lg shadow-sm transition inline-flex items-center gap-2">
+                <i class="fas fa-cloud-upload-alt"></i>
+                <span>Upload Files</span>
+            </button>
+
+            <button type="button" @click="openLinkModal = true" class="px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 text-slate-700 dark:text-slate-200 text-sm font-medium rounded-lg transition inline-flex items-center gap-1.5" title="Add from Link">
+                <i class="fas fa-link text-slate-500"></i>
+                <span class="hidden sm:inline">Add from Link</span>
+            </button>
+
+            {% if synology_configured %}
+            <button type="button" @click="openShareModal = true" class="px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 text-slate-700 dark:text-slate-200 text-sm font-medium rounded-lg transition inline-flex items-center gap-1.5" title="Generate Share Link">
+                <i class="fas fa-share-alt text-slate-500"></i>
+                <span class="hidden sm:inline">Share</span>
+            </button>
+            {% endif %}
+
+            {% if can_edit %}
+            <a href="{% url 'tickets:ticket_update' ticket.id %}" class="px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 text-slate-700 dark:text-slate-200 text-sm font-medium rounded-lg transition inline-flex items-center gap-1.5">
+                <i class="fas fa-edit text-slate-500"></i>
+                <span class="hidden sm:inline">Edit</span>
+            </a>
+            {% endif %}
+
+            {% if can_delete %}
+            <button type="button" @click="openDeleteModal = true" class="px-2.5 py-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg text-sm transition" title="Delete Ticket">
+                <i class="fas fa-trash-alt"></i>
+            </button>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Status Progression Stepper -->
+    <div class="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm mb-6 overflow-x-auto">
+        <div class="flex items-center justify-between min-w-[640px]">
+            {% for status_key, status_title in ticket.status_choices %}
+            <div class="flex-1 flex flex-col items-center relative text-center">
+                <!-- Connector Line -->
+                {% if not forloop.first %}
+                <div class="absolute top-4 right-1/2 w-full h-0.5 -translate-y-1/2 {% if forloop.counter0 <= ticket.status_index %}bg-blue-600 dark:bg-blue-500{% else %}bg-slate-200 dark:bg-slate-700{% endif %}" style="z-index: 1;"></div>
+                {% endif %}
+
+                <!-- Circle Marker -->
+                <div class="relative w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold mb-2 transition"
+                     style="z-index: 2;"
+                     class="{% if forloop.counter0 < ticket.status_index %}bg-blue-600 text-white{% elif forloop.counter0 == ticket.status_index %}bg-blue-600 ring-4 ring-blue-100 dark:ring-blue-900 text-white{% else %}bg-slate-100 dark:bg-slate-700 text-slate-400{% endif %}">
+                    {% if forloop.counter0 < ticket.status_index %}
+                    <i class="fas fa-check text-xs"></i>
+                    {% else %}
+                    {{ forloop.counter }}
+                    {% endif %}
+                </div>
+                <div class="text-[11px] font-semibold {% if forloop.counter0 <= ticket.status_index %}text-slate-900 dark:text-white{% else %}text-slate-400 dark:text-slate-500{% endif %}">
+                    {{ status_title }}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Main Content Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Left 2 Cols: Details & Files -->
+        <div class="lg:col-span-2 space-y-6">
+            <!-- Ticket Info Card -->
+            <div class="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">
+                    Customer & Job Information
+                </h2>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                    <div>
+                        <span class="text-slate-500 dark:text-slate-400 text-xs block">Customer:</span>
+                        <span class="font-semibold text-slate-900 dark:text-white">{{ ticket.customer_name|default:"Not specified" }}</span>
+                        {% if ticket.zoho_customer_id %}
+                        <span class="text-xs text-slate-400 font-mono">({{ ticket.zoho_customer_id }})</span>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <span class="text-slate-500 dark:text-slate-400 text-xs block">Salesperson:</span>
+                        <span class="font-semibold text-slate-900 dark:text-white">{{ ticket.salesperson_name|default:"Not assigned" }}</span>
+                    </div>
+                    <div>
+                        <span class="text-slate-500 dark:text-slate-400 text-xs block">Zoho JOB No.:</span>
+                        {% if ticket.job_no %}
+                        <span class="font-mono font-bold text-blue-600 dark:text-blue-400">{{ ticket.job_no }}</span>
+                        {% else %}
+                        <span class="text-slate-400">None</span>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <span class="text-slate-500 dark:text-slate-400 text-xs block">Enquiry Number (ENQ):</span>
+                        {% if ticket.enquiry_number %}
+                        <span class="font-mono font-semibold text-slate-800 dark:text-slate-200">{{ ticket.enquiry_number }}</span>
+                        {% else %}
+                        <span class="text-slate-400">None</span>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <span class="text-slate-500 dark:text-slate-400 text-xs block">Zoho Quote No.:</span>
+                        <span class="font-mono text-slate-800 dark:text-slate-200">{{ ticket.quote_number|default:"-" }}</span>
+                    </div>
+                    <div>
+                        <span class="text-slate-500 dark:text-slate-400 text-xs block">Assigned Engineer:</span>
+                        <span class="font-semibold text-slate-900 dark:text-white">{{ ticket.assigned_to.get_full_name|default:ticket.assigned_to.username|default:"Unassigned" }}</span>
+                    </div>
+                </div>
+
+                <!-- Contact & Site Details -->
+                <div class="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700/60 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                    <div>
+                        <span class="text-slate-500 dark:text-slate-400 text-xs block">Site Contact:</span>
+                        <div class="font-medium text-slate-800 dark:text-slate-200">{{ ticket.client_contact_name|default:"-" }}</div>
+                        {% if ticket.client_phone %}<div class="text-xs text-slate-500"><i class="fas fa-phone-alt mr-1"></i>{{ ticket.client_phone }}</div>{% endif %}
+                        {% if ticket.client_email %}<div class="text-xs text-slate-500"><i class="fas fa-envelope mr-1"></i>{{ ticket.client_email }}</div>{% endif %}
+                    </div>
+                    <div>
+                        <span class="text-slate-500 dark:text-slate-400 text-xs block">Site / Plant Address:</span>
+                        <div class="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">{{ ticket.site_address|default:"Not specified" }}</div>
+                    </div>
+                </div>
+
+                {% if ticket.description %}
+                <div class="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700/60">
+                    <span class="text-slate-500 dark:text-slate-400 text-xs block mb-1">Scope / Description:</span>
+                    <div class="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-line bg-slate-50 dark:bg-slate-900/40 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
+                        {{ ticket.description }}
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Parent Project link if this is a Service Ticket -->
+                {% if ticket.parent_job %}
+                <div class="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700/60">
+                    <span class="text-slate-500 dark:text-slate-400 text-xs block mb-1">Parent Project Job:</span>
+                    <a href="{% url 'tickets:ticket_detail' ticket.parent_job.id %}" class="inline-flex items-center gap-2 p-2 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-sm font-semibold hover:underline">
+                        <i class="fas fa-project-diagram"></i>
+                        <span>{{ ticket.parent_job.number }}: {{ ticket.parent_job.title }}</span>
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Linked Service Tickets if this is a Project Job -->
+            {% if child_services %}
+            <div class="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        Linked Service Tickets ({{ child_services|length }})
+                    </h2>
+                    <a href="{% url 'tickets:ticket_create' %}?type=SERVICE&parent_job={{ ticket.id }}" class="text-xs font-semibold text-blue-600 hover:underline">
+                        <i class="fas fa-plus"></i> New Service Ticket
+                    </a>
+                </div>
+                <div class="divide-y divide-slate-100 dark:divide-slate-700">
+                    {% for st in child_services %}
+                    <div class="py-2.5 flex items-center justify-between">
+                        <div>
+                            <a href="{% url 'tickets:ticket_detail' st.id %}" class="text-sm font-semibold text-blue-600 hover:underline">
+                                {{ st.number }}: {{ st.title }}
+                            </a>
+                            <div class="text-xs text-slate-400">Created {{ st.created_at|date:"M d, Y" }}</div>
+                        </div>
+                        {% include 'tickets/_status_badge.html' with status=st.status label=st.status_label %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- File Management Tabs & Sections -->
+            <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden" x-data="{ activeTab: '02_photos' }">
+                <div class="p-4 border-b border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <h2 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                            <i class="fas fa-folder-open text-blue-600"></i>
+                            Ticket Files & Synology Storage
+                        </h2>
+                        <div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                            Total files: {{ all_files_count }} &bull; NAS Folder: <span class="font-mono text-slate-700 dark:text-slate-300">{{ ticket.nas_folder|default:"Not synced yet" }}</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button type="button" @click="openUploadModal = true" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition inline-flex items-center gap-1.5">
+                            <i class="fas fa-upload"></i> Upload
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Tabs header -->
+                <div class="flex border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 overflow-x-auto text-xs font-semibold">
+                    <button type="button" @click="activeTab = '02_photos'" :class="activeTab === '02_photos' ? 'border-b-2 border-blue-600 text-blue-600 dark:text-blue-400 bg-white dark:bg-slate-800' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'" class="px-4 py-3 whitespace-nowrap transition">
+                        <i class="fas fa-images mr-1"></i> 02 Photos ({{ files_by_category.PHOTO|length }})
+                    </button>
+                    <button type="button" @click="activeTab = '03_reports'" :class="activeTab === '03_reports' ? 'border-b-2 border-blue-600 text-blue-600 dark:text-blue-400 bg-white dark:bg-slate-800' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'" class="px-4 py-3 whitespace-nowrap transition">
+                        <i class="fas fa-file-alt mr-1"></i> 03 Site Reports ({{ files_by_category.SITE_REPORT|length }})
+                    </button>
+                    <button type="button" @click="activeTab = '04_warranty'" :class="activeTab === '04_warranty' ? 'border-b-2 border-blue-600 text-blue-600 dark:text-blue-400 bg-white dark:bg-slate-800' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'" class="px-4 py-3 whitespace-nowrap transition">
+                        <i class="fas fa-shield-alt mr-1"></i> 04 Warranty ({{ files_by_category.WARRANTY|length }})
+                    </button>
+                    <button type="button" @click="activeTab = '05_receipts'" :class="activeTab === '05_receipts' ? 'border-b-2 border-blue-600 text-blue-600 dark:text-blue-400 bg-white dark:bg-slate-800' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'" class="px-4 py-3 whitespace-nowrap transition">
+                        <i class="fas fa-receipt mr-1"></i> 05 Receipts ({{ files_by_category.RECEIPT|length }})
+                    </button>
+                    <button type="button" @click="activeTab = '01_client'" :class="activeTab === '01_client' ? 'border-b-2 border-blue-600 text-blue-600 dark:text-blue-400 bg-white dark:bg-slate-800' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'" class="px-4 py-3 whitespace-nowrap transition">
+                        <i class="fas fa-id-card mr-1"></i> 01 Client Details ({{ files_by_category.CLIENT_DETAILS|length }})
+                    </button>
+                    <button type="button" @click="activeTab = 'other'" :class="activeTab === 'other' ? 'border-b-2 border-blue-600 text-blue-600 dark:text-blue-400 bg-white dark:bg-slate-800' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'" class="px-4 py-3 whitespace-nowrap transition">
+                        <i class="fas fa-folder mr-1"></i> Other ({{ files_by_category.OTHER|length }})
+                    </button>
+                </div>
+
+                <!-- Tab Contents -->
+                <div class="p-4">
+                    <!-- 02 PHOTOS (Gallery view) -->
+                    <div x-show="activeTab === '02_photos'">
+                        {% if files_by_category.PHOTO %}
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                            {% for f in files_by_category.PHOTO %}
+                            <div class="group relative bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden flex flex-col">
+                                <div class="aspect-square bg-slate-200 dark:bg-slate-800 relative overflow-hidden flex items-center justify-center cursor-pointer"
+                                     @click="previewImage('{% if f.thumbnail %}{{ f.thumbnail.url }}{% else %}{% url 'tickets:ticket_file_download' ticket.id f.id %}{% endif %}', '{{ f.original_name }}')">
+                                    {% if f.thumbnail %}
+                                    <img src="{{ f.thumbnail.url }}" alt="{{ f.original_name }}" class="w-full h-full object-cover group-hover:scale-105 transition duration-200">
+                                    {% else %}
+                                    <i class="fas fa-image text-3xl text-slate-400"></i>
+                                    {% endif %}
+                                    <div class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-lg">
+                                        <i class="fas fa-search-plus"></i>
+                                    </div>
+                                </div>
+                                <div class="p-2 text-xs flex-1 flex flex-col justify-between">
+                                    <div class="font-medium text-slate-800 dark:text-slate-200 truncate" title="{{ f.original_name }}">{{ f.original_name }}</div>
+                                    <div class="flex items-center justify-between text-[10px] text-slate-400 mt-1">
+                                        <span>{{ f.readable_size }}</span>
+                                        <span>
+                                            {% if f.sync_status == 'SYNCED' %}
+                                            <i class="fas fa-check-circle text-emerald-500" title="Synced to Synology NAS"></i>
+                                            {% elif f.sync_status == 'FAILED' %}
+                                            <i class="fas fa-exclamation-circle text-red-500" title="{{ f.sync_error|default:'Sync failed' }}"></i>
+                                            {% else %}
+                                            <i class="fas fa-clock text-amber-500" title="Pending Sync"></i>
+                                            {% endif %}
+                                        </span>
+                                    </div>
+                                    <div class="flex items-center justify-end gap-2 mt-2 pt-1 border-t border-slate-200 dark:border-slate-700/60">
+                                        <a href="{% url 'tickets:ticket_file_download' ticket.id f.id %}" class="text-blue-600 hover:text-blue-800 text-xs" title="Download">
+                                            <i class="fas fa-download"></i>
+                                        </a>
+                                        {% if can_edit %}
+                                        <form method="post" action="{% url 'tickets:ticket_file_delete' ticket.id f.id %}" onsubmit="return confirm('Remove this file?');" class="inline">
+                                            {% csrf_token %}
+                                            <button type="submit" class="text-red-500 hover:text-red-700 text-xs" title="Remove">
+                                                <i class="fas fa-trash-alt"></i>
+                                            </button>
+                                        </form>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-center py-8 text-slate-400 text-xs">
+                            <i class="fas fa-camera text-3xl mb-2 text-slate-300 dark:text-slate-600"></i>
+                            <p>No photos uploaded yet. Click Upload to add job site photos.</p>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- 03 SITE REPORTS -->
+                    <div x-show="activeTab === '03_reports'">
+                        {% if files_by_category.SITE_REPORT %}
+                        <div class="divide-y divide-slate-100 dark:divide-slate-700">
+                            {% for f in files_by_category.SITE_REPORT %}
+                            <div class="py-3 flex items-center justify-between gap-3">
+                                <div class="flex items-center gap-3 min-w-0">
+                                    <div class="p-2.5 bg-red-50 dark:bg-red-950/40 text-red-600 rounded-lg">
+                                        <i class="fas fa-file-pdf fa-lg"></i>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <div class="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">{{ f.original_name }}</div>
+                                        <div class="text-xs text-slate-400 font-mono">{{ f.stored_name }} &bull; {{ f.readable_size }} &bull; by {{ f.uploaded_by.username|default:"System" }}</div>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-3">
+                                    {% if f.sync_status == 'SYNCED' %}
+                                    <span class="text-xs text-emerald-600 font-medium inline-flex items-center gap-1"><i class="fas fa-check"></i> Synced</span>
+                                    {% elif f.sync_status == 'FAILED' %}
+                                    <span class="text-xs text-red-500 font-medium inline-flex items-center gap-1"><i class="fas fa-times"></i> Failed</span>
+                                    {% else %}
+                                    <span class="text-xs text-amber-500 font-medium inline-flex items-center gap-1"><i class="fas fa-clock"></i> Pending</span>
+                                    {% endif %}
+                                    <a href="{% url 'tickets:ticket_file_download' ticket.id f.id %}" class="px-2.5 py-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-xs font-semibold text-slate-700 dark:text-slate-200 rounded">
+                                        <i class="fas fa-download mr-1"></i> Download
+                                    </a>
+                                    {% if can_edit %}
+                                    <form method="post" action="{% url 'tickets:ticket_file_delete' ticket.id f.id %}" onsubmit="return confirm('Remove file?');">
+                                        {% csrf_token %}
+                                        <button type="submit" class="text-red-500 hover:text-red-700 text-xs p-1">
+                                            <i class="fas fa-trash-alt"></i>
+                                        </button>
+                                    </form>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-center py-8 text-slate-400 text-xs">
+                            <i class="fas fa-file-invoice text-3xl mb-2 text-slate-300 dark:text-slate-600"></i>
+                            <p>No site reports uploaded yet. Site reports are required before Handover / Completion.</p>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- 04 WARRANTY -->
+                    <div x-show="activeTab === '04_warranty'">
+                        {% if files_by_category.WARRANTY %}
+                        <div class="divide-y divide-slate-100 dark:divide-slate-700">
+                            {% for f in files_by_category.WARRANTY %}
+                            <div class="py-3 flex items-center justify-between gap-3">
+                                <div class="flex items-center gap-3 min-w-0">
+                                    <div class="p-2.5 bg-blue-50 dark:bg-blue-950/40 text-blue-600 rounded-lg">
+                                        <i class="fas fa-shield-alt fa-lg"></i>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <div class="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">{{ f.original_name }}</div>
+                                        <div class="text-xs text-slate-400 font-mono">{{ f.stored_name }} &bull; {{ f.readable_size }}</div>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-3">
+                                    <a href="{% url 'tickets:ticket_file_download' ticket.id f.id %}" class="px-2.5 py-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-xs font-semibold text-slate-700 dark:text-slate-200 rounded">
+                                        <i class="fas fa-download mr-1"></i> Download
+                                    </a>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-center py-8 text-slate-400 text-xs">
+                            <i class="fas fa-certificate text-3xl mb-2 text-slate-300 dark:text-slate-600"></i>
+                            <p>No warranty certificates uploaded yet. Required before closing a project.</p>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- 05 RECEIPTS -->
+                    <div x-show="activeTab === '05_receipts'">
+                        {% if files_by_category.RECEIPT %}
+                        <div class="divide-y divide-slate-100 dark:divide-slate-700">
+                            {% for f in files_by_category.RECEIPT %}
+                            <div class="py-3 flex items-center justify-between gap-3">
+                                <div class="flex items-center gap-3 min-w-0">
+                                    <div class="p-2.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 rounded-lg">
+                                        <i class="fas fa-receipt fa-lg"></i>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <div class="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">{{ f.original_name }}</div>
+                                        <div class="text-xs text-slate-400 font-mono">{{ f.stored_name }} &bull; {{ f.readable_size }}</div>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-3">
+                                    <a href="{% url 'tickets:ticket_file_download' ticket.id f.id %}" class="px-2.5 py-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-xs font-semibold text-slate-700 dark:text-slate-200 rounded">
+                                        <i class="fas fa-download mr-1"></i> Download
+                                    </a>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-center py-8 text-slate-400 text-xs">
+                            <i class="fas fa-receipt text-3xl mb-2 text-slate-300 dark:text-slate-600"></i>
+                            <p>No purchase receipts uploaded yet.</p>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- 01 CLIENT DETAILS -->
+                    <div x-show="activeTab === '01_client'">
+                        {% if files_by_category.CLIENT_DETAILS %}
+                        <div class="divide-y divide-slate-100 dark:divide-slate-700">
+                            {% for f in files_by_category.CLIENT_DETAILS %}
+                            <div class="py-3 flex items-center justify-between gap-3">
+                                <div class="flex items-center gap-3 min-w-0">
+                                    <div class="p-2.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg">
+                                        <i class="fas fa-file fa-lg"></i>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <div class="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">{{ f.original_name }}</div>
+                                        <div class="text-xs text-slate-400 font-mono">{{ f.stored_name }} &bull; {{ f.readable_size }}</div>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-3">
+                                    <a href="{% url 'tickets:ticket_file_download' ticket.id f.id %}" class="px-2.5 py-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-xs font-semibold text-slate-700 dark:text-slate-200 rounded">
+                                        <i class="fas fa-download mr-1"></i> Download
+                                    </a>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-center py-8 text-slate-400 text-xs">
+                            <p>No client documents in this section.</p>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- OTHER -->
+                    <div x-show="activeTab === 'other'">
+                        {% if files_by_category.OTHER %}
+                        <div class="divide-y divide-slate-100 dark:divide-slate-700">
+                            {% for f in files_by_category.OTHER %}
+                            <div class="py-3 flex items-center justify-between gap-3">
+                                <div class="flex items-center gap-3 min-w-0">
+                                    <div class="p-2.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg">
+                                        <i class="fas fa-file fa-lg"></i>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <div class="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">{{ f.original_name }}</div>
+                                        <div class="text-xs text-slate-400 font-mono">{{ f.stored_name }} &bull; {{ f.readable_size }}</div>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-3">
+                                    <a href="{% url 'tickets:ticket_file_download' ticket.id f.id %}" class="px-2.5 py-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-xs font-semibold text-slate-700 dark:text-slate-200 rounded">
+                                        <i class="fas fa-download mr-1"></i> Download
+                                    </a>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-center py-8 text-slate-400 text-xs">
+                            <p>No other documents.</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Activity & Timeline -->
+            <div class="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                <h2 class="text-base font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+                    <i class="fas fa-history text-blue-600"></i>
+                    Audit Trail & Timeline
+                </h2>
+
+                <div class="flow-root">
+                    <ul class="-mb-8">
+                        {% for ev in events %}
+                        <li>
+                            <div class="relative pb-8">
+                                {% if not forloop.last %}
+                                <span class="absolute top-4 left-4 -ml-px h-full w-0.5 bg-slate-200 dark:bg-slate-700" aria-hidden="true"></span>
+                                {% endif %}
+                                <div class="relative flex space-x-3">
+                                    <div>
+                                        <span class="h-8 w-8 rounded-full flex items-center justify-center text-xs text-white {% if 'STATUS' in ev.action %}bg-blue-600{% elif 'NOTE' in ev.action %}bg-indigo-600{% elif 'FILE' in ev.action %}bg-emerald-600{% elif 'DELETED' in ev.action %}bg-red-600{% else %}bg-slate-600{% endif %}">
+                                            <i class="fas {% if 'STATUS' in ev.action %}fa-sync{% elif 'NOTE' in ev.action %}fa-comment{% elif 'FILE' in ev.action %}fa-file{% else %}fa-check{% endif %}"></i>
+                                        </span>
+                                    </div>
+                                    <div class="min-w-0 flex-1 pt-1.5 flex justify-between space-x-4">
+                                        <div>
+                                            <p class="text-sm text-slate-800 dark:text-slate-200">
+                                                <strong class="font-semibold text-slate-900 dark:text-white">{{ ev.user.get_full_name|default:ev.user.username|default:"System" }}</strong>
+                                                &bull; <span class="text-xs uppercase tracking-wider text-slate-500 font-bold">{{ ev.action }}</span>
+                                                {% if ev.from_status and ev.to_status %}
+                                                <span class="text-xs text-slate-500">({{ ev.from_status }} &rarr; {{ ev.to_status }})</span>
+                                                {% endif %}
+                                            </p>
+                                            {% if ev.note %}
+                                            <p class="mt-1 text-xs text-slate-600 dark:text-slate-400 whitespace-pre-line bg-slate-50 dark:bg-slate-900/40 p-2 rounded border border-slate-200 dark:border-slate-700/60">
+                                                {{ ev.note }}
+                                            </p>
+                                            {% endif %}
+                                        </div>
+                                        <div class="text-right text-xs whitespace-nowrap text-slate-400">
+                                            {{ ev.created_at|date:"M d, H:i" }}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </li>
+                        {% empty %}
+                        <li class="text-center py-4 text-xs text-slate-400">No activity recorded yet.</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right 1 Col: Status Actions, Warranty Card, Quick Note, Share Links -->
+        <div class="space-y-6">
+            <!-- Warranty Status Card -->
+            <div class="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        Warranty Status
+                    </h2>
+                    <i class="fas fa-shield-alt text-slate-400"></i>
+                </div>
+
+                {% if ticket.warranty_end %}
+                    {% if ticket.is_warranty_active %}
+                        {% if ticket.is_warranty_expiring_soon %}
+                        <div class="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg text-amber-800 dark:text-amber-300 text-xs mb-3">
+                            <i class="fas fa-exclamation-triangle mr-1"></i>
+                            <strong>Expiring Soon:</strong> {{ ticket.warranty_days_remaining }} days remaining.
+                        </div>
+                        {% else %}
+                        <div class="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-lg text-emerald-800 dark:text-emerald-300 text-xs mb-3">
+                            <i class="fas fa-check-circle mr-1"></i>
+                            <strong>Active Warranty:</strong> {{ ticket.warranty_days_remaining }} days remaining.
+                        </div>
+                        {% endif %}
+                    {% else %}
+                    <div class="p-3 bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-600 dark:text-slate-300 text-xs mb-3">
+                        <i class="fas fa-times-circle mr-1"></i> Warranty has expired.
+                    </div>
+                    {% endif %}
+
+                    <div class="space-y-1.5 text-xs text-slate-600 dark:text-slate-400">
+                        <div class="flex justify-between">
+                            <span>Start:</span>
+                            <span class="font-medium text-slate-800 dark:text-slate-200">{{ ticket.warranty_start|default:"Not specified" }}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>End:</span>
+                            <span class="font-medium text-slate-800 dark:text-slate-200">{{ ticket.warranty_end }}</span>
+                        </div>
+                    </div>
+                {% else %}
+                <p class="text-xs text-slate-400">Warranty period is not specified for this ticket.</p>
+                {% endif %}
+            </div>
+
+            <!-- Quick Add Note -->
+            <div class="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">
+                    Add Note / Work Log
+                </h2>
+                <form method="post" action="{% url 'tickets:ticket_add_note' ticket.id %}">
+                    {% csrf_token %}
+                    <textarea name="note" rows="3" required placeholder="Type an update, site observation, or note..." class="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3"></textarea>
+                    <button type="submit" class="w-full py-2 bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 text-white dark:text-slate-900 font-semibold text-xs rounded-lg transition">
+                        Post Note
+                    </button>
+                </form>
+            </div>
+
+            <!-- Active Synology Share Links -->
+            {% if share_links %}
+            <div class="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3 flex items-center justify-between">
+                    <span>Active Share Links</span>
+                    <i class="fas fa-link text-slate-400"></i>
+                </h2>
+                <div class="space-y-3">
+                    {% for sl in share_links %}
+                    <div class="p-2.5 bg-slate-50 dark:bg-slate-900/50 rounded-lg border border-slate-200 dark:border-slate-700 text-xs">
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="font-semibold text-slate-800 dark:text-slate-200">
+                                {% if sl.ticket_file %}{{ sl.ticket_file.original_name }}{% else %}Whole Ticket Folder{% endif %}
+                            </span>
+                            <span class="text-[10px] text-slate-400">Expires: {{ sl.expires_at|date:"M d" }}</span>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            <input type="text" readonly value="{{ sl.url }}" class="flex-1 bg-white dark:bg-slate-800 px-2 py-1 text-[11px] font-mono border border-slate-300 dark:border-slate-700 rounded truncate">
+                            <button type="button" @click="navigator.clipboard.writeText('{{ sl.url }}'); alert('Copied share link!');" class="p-1 text-blue-600 hover:text-blue-800" title="Copy URL">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- ==================== MODALS ==================== -->
+
+    <!-- Status Change Modal -->
+    <div x-show="openStatusModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-slate-900/60 transition-opacity" @click="openStatusModal = false"></div>
+            <div class="inline-block align-bottom bg-white dark:bg-slate-800 rounded-xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full p-6">
+                <div class="flex items-center justify-between mb-4 border-b border-slate-200 dark:border-slate-700 pb-3">
+                    <h3 class="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        <i class="fas fa-step-forward text-blue-600"></i> Change Ticket Status
+                    </h3>
+                    <button type="button" @click="openStatusModal = false" class="text-slate-400 hover:text-slate-600">&times;</button>
+                </div>
+
+                <form method="post" action="{% url 'tickets:ticket_status_change' ticket.id %}">
+                    {% csrf_token %}
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">New Status</label>
+                            <select name="new_status" class="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-100">
+                                {% for key, label in ticket.status_choices %}
+                                <option value="{{ key }}" {% if key == ticket.status %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <!-- Rule Reminders -->
+                        <div class="p-3 bg-blue-50 dark:bg-blue-950/40 rounded-lg border border-blue-200 dark:border-blue-900 text-xs text-blue-800 dark:text-blue-300">
+                            <strong>Prerequisite Checklist:</strong>
+                            <ul class="list-disc list-inside mt-1 space-y-0.5">
+                                {% if ticket.type == 'PROJECT' %}
+                                <li>Handover requires $\ge$ 1 Site Report and $\ge$ 1 Photo.</li>
+                                <li>Closing Project requires $\ge$ 1 Warranty Certificate.</li>
+                                {% else %}
+                                <li>Completion/Closing requires $\ge$ 1 Site Report.</li>
+                                {% if ticket.parts_purchased %}<li>Parts were purchased: $\ge$ 1 Receipt is required.</li>{% endif %}
+                                {% endif %}
+                            </ul>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Transition Note / Comment (Optional)</label>
+                            <textarea name="note" rows="2" placeholder="Reason for advancing status..." class="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-100"></textarea>
+                        </div>
+
+                        {% if can_override %}
+                        <div class="pt-3 border-t border-slate-200 dark:border-slate-700">
+                            <label class="block text-xs font-bold text-amber-700 dark:text-amber-400 mb-1">
+                                <i class="fas fa-shield-alt"></i> Super Admin Override Reason (If prerequisites missing)
+                            </label>
+                            <input type="text" name="override_reason" placeholder="Mandatory reason if overriding missing files..." class="w-full px-3 py-2 text-sm bg-amber-50/50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700 rounded-lg text-slate-800 dark:text-slate-100">
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="mt-6 flex items-center justify-end gap-3">
+                        <button type="button" @click="openStatusModal = false" class="px-4 py-2 text-sm text-slate-600 dark:text-slate-400">Cancel</button>
+                        <button type="submit" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-lg shadow">Apply Status</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Upload Files Modal (Chunked upload support up to 5 GB) -->
+    <div x-show="openUploadModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-slate-900/60 transition-opacity" @click="if(!isUploading) openUploadModal = false"></div>
+            <div class="inline-block align-bottom bg-white dark:bg-slate-800 rounded-xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full p-6">
+                <div class="flex items-center justify-between mb-4 border-b border-slate-200 dark:border-slate-700 pb-3">
+                    <h3 class="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        <i class="fas fa-cloud-upload-alt text-blue-600"></i> Upload Files to Synology NAS
+                    </h3>
+                    <button type="button" :disabled="isUploading" @click="openUploadModal = false" class="text-slate-400 hover:text-slate-600">&times;</button>
+                </div>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Target Category</label>
+                        <select x-model="selectedCategory" class="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-100">
+                            {% for cat_key, cat_name in categories %}
+                            <option value="{{ cat_key }}">{{ cat_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <!-- File Drop Area -->
+                    <div class="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 text-center hover:border-blue-500 transition cursor-pointer"
+                         @click="$refs.fileInput.click()">
+                        <input type="file" x-ref="fileInput" @change="handleFileSelect($event)" class="hidden" multiple>
+                        <i class="fas fa-cloud-upload-alt text-4xl text-slate-400 mb-2"></i>
+                        <p class="text-sm font-semibold text-slate-800 dark:text-slate-200">Click or Drag & Drop files here</p>
+                        <p class="text-xs text-slate-400 mt-1">Supports Photos, Site Reports (PDF), ZIP archives, up to {{ max_upload_mb }} MB.</p>
+                    </div>
+
+                    <!-- Selected Files List -->
+                    <template x-if="filesQueue.length > 0">
+                        <div class="space-y-2 max-h-48 overflow-y-auto">
+                            <template x-for="(file, index) in filesQueue" :key="index">
+                                <div class="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-900/40 rounded-lg text-xs">
+                                    <div class="truncate flex-1 mr-2">
+                                        <span class="font-medium text-slate-800 dark:text-slate-200" x-text="file.name"></span>
+                                        <span class="text-slate-400 ml-1" x-text="'(' + (file.size / (1024*1024)).toFixed(1) + ' MB)'"></span>
+                                    </div>
+                                    <button type="button" :disabled="isUploading" @click="filesQueue.splice(index, 1)" class="text-red-500 hover:text-red-700">&times;</button>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+
+                    <!-- Upload Progress -->
+                    <div x-show="isUploading" class="space-y-1">
+                        <div class="flex justify-between text-xs text-slate-600 dark:text-slate-400">
+                            <span x-text="uploadStatusText"></span>
+                            <span x-text="uploadProgress + '%'"></span>
+                        </div>
+                        <div class="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
+                            <div class="bg-blue-600 h-2 rounded-full transition-all duration-200" :style="'width: ' + uploadProgress + '%'"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-6 flex items-center justify-end gap-3">
+                    <button type="button" :disabled="isUploading" @click="openUploadModal = false" class="px-4 py-2 text-sm text-slate-600 dark:text-slate-400">Cancel</button>
+                    <button type="button" :disabled="filesQueue.length === 0 || isUploading" @click="startUpload()" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold text-sm rounded-lg shadow">
+                        <span x-text="isUploading ? 'Uploading...' : 'Start Upload'"></span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add From Link Modal -->
+    <div x-show="openLinkModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-slate-900/60 transition-opacity" @click="openLinkModal = false"></div>
+            <div class="inline-block align-bottom bg-white dark:bg-slate-800 rounded-xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full p-6">
+                <div class="flex items-center justify-between mb-4 border-b border-slate-200 dark:border-slate-700 pb-3">
+                    <h3 class="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        <i class="fas fa-link text-blue-600"></i> Import File from Link
+                    </h3>
+                    <button type="button" @click="openLinkModal = false" class="text-slate-400 hover:text-slate-600">&times;</button>
+                </div>
+
+                <form method="post" action="{% url 'tickets:ticket_add_from_link' ticket.id %}">
+                    {% csrf_token %}
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Download URL</label>
+                            <input type="url" name="url" required placeholder="https://example.com/site-report.pdf" class="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-100">
+                            <p class="text-[11px] text-slate-400 mt-1">If linking to a ZIP, contents will be unpacked and organized automatically.</p>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Target Category</label>
+                            <select name="category" class="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-100">
+                                {% for cat_key, cat_name in categories %}
+                                <option value="{{ cat_key }}">{{ cat_name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mt-6 flex items-center justify-end gap-3">
+                        <button type="button" @click="openLinkModal = false" class="px-4 py-2 text-sm text-slate-600 dark:text-slate-400">Cancel</button>
+                        <button type="submit" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-lg shadow">Fetch & Save</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Share Link Modal -->
+    <div x-show="openShareModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-slate-900/60 transition-opacity" @click="openShareModal = false"></div>
+            <div class="inline-block align-bottom bg-white dark:bg-slate-800 rounded-xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full p-6">
+                <div class="flex items-center justify-between mb-4 border-b border-slate-200 dark:border-slate-700 pb-3">
+                    <h3 class="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        <i class="fas fa-share-alt text-blue-600"></i> Generate Synology Share Link
+                    </h3>
+                    <button type="button" @click="openShareModal = false" class="text-slate-400 hover:text-slate-600">&times;</button>
+                </div>
+
+                <form method="post" action="{% url 'tickets:ticket_create_share_link' ticket.id %}">
+                    {% csrf_token %}
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">What to share</label>
+                            <select name="file_id" class="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-100">
+                                <option value="">Entire Ticket Folder (All files)</option>
+                                {% for f in ticket.files.all %}
+                                {% if not f.is_hidden %}
+                                <option value="{{ f.id }}">{{ f.original_name }} ({{ f.readable_size }})</option>
+                                {% endif %}
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Expiration Duration</label>
+                            <select name="days" class="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-100">
+                                <option value="3">3 Days</option>
+                                <option value="7" selected>7 Days</option>
+                                <option value="14">14 Days</option>
+                                <option value="30">30 Days</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mt-6 flex items-center justify-end gap-3">
+                        <button type="button" @click="openShareModal = false" class="px-4 py-2 text-sm text-slate-600 dark:text-slate-400">Cancel</button>
+                        <button type="submit" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-lg shadow">Generate Link</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Soft Delete Modal -->
+    <div x-show="openDeleteModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-slate-900/60 transition-opacity" @click="openDeleteModal = false"></div>
+            <div class="inline-block align-bottom bg-white dark:bg-slate-800 rounded-xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full p-6">
+                <div class="flex items-center justify-between mb-4 border-b border-slate-200 dark:border-slate-700 pb-3">
+                    <h3 class="text-lg font-bold text-red-600 flex items-center gap-2">
+                        <i class="fas fa-trash-alt"></i> Soft Delete Ticket
+                    </h3>
+                    <button type="button" @click="openDeleteModal = false" class="text-slate-400 hover:text-slate-600">&times;</button>
+                </div>
+
+                <form method="post" action="{% url 'tickets:ticket_delete' ticket.id %}">
+                    {% csrf_token %}
+                    <p class="text-sm text-slate-600 dark:text-slate-300 mb-4">
+                        Are you sure you want to delete <strong>{{ ticket.number }}</strong>? The ticket will be marked as deleted in the database. <strong>Files on the Synology NAS are never deleted.</strong>
+                    </p>
+                    <div class="mb-4">
+                        <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Reason for Deletion</label>
+                        <textarea name="reason" rows="2" required placeholder="Mandatory reason for audit trail..." class="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-100"></textarea>
+                    </div>
+                    <div class="flex items-center justify-end gap-3">
+                        <button type="button" @click="openDeleteModal = false" class="px-4 py-2 text-sm text-slate-600 dark:text-slate-400">Cancel</button>
+                        <button type="submit" class="px-5 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold text-sm rounded-lg shadow">Confirm Soft Delete</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Image Lightbox Modal -->
+    <div x-show="lightboxOpen" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4" @click.self="lightboxOpen = false">
+        <div class="relative max-w-4xl max-h-[90vh] flex flex-col items-center">
+            <button type="button" @click="lightboxOpen = false" class="absolute -top-10 right-0 text-white text-2xl hover:text-slate-300">&times;</button>
+            <img :src="lightboxSrc" :alt="lightboxCaption" class="max-w-full max-h-[80vh] object-contain rounded shadow-2xl">
+            <div class="mt-2 text-xs text-white/80 font-mono" x-text="lightboxCaption"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+function ticketDetailApp() {
+    return {
+        openStatusModal: false,
+        openUploadModal: false,
+        openLinkModal: false,
+        openShareModal: false,
+        openDeleteModal: false,
+        lightboxOpen: false,
+        lightboxSrc: '',
+        lightboxCaption: '',
+
+        selectedCategory: 'PHOTO',
+        filesQueue: [],
+        isUploading: false,
+        uploadProgress: 0,
+        uploadStatusText: '',
+
+        previewImage(url, caption) {
+            this.lightboxSrc = url;
+            this.lightboxCaption = caption;
+            this.lightboxOpen = true;
+        },
+
+        handleFileSelect(e) {
+            const files = Array.from(e.target.files);
+            this.filesQueue.push(...files);
+        },
+
+        async startUpload() {
+            if (this.filesQueue.length === 0) return;
+            this.isUploading = true;
+            this.uploadProgress = 0;
+
+            const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MB per chunk
+            const csrfToken = '{{ csrf_token }}';
+
+            for (let fIdx = 0; fIdx < this.filesQueue.length; fIdx++) {
+                const file = this.filesQueue[fIdx];
+                const uploadUuid = 'u_' + Math.random().toString(36).substring(2, 15) + Date.now();
+                const totalChunks = Math.ceil(file.size / CHUNK_SIZE) || 1;
+
+                for (let cIdx = 0; cIdx < totalChunks; cIdx++) {
+                    const start = cIdx * CHUNK_SIZE;
+                    const end = Math.min(start + CHUNK_SIZE, file.size);
+                    const chunkBlob = file.slice(start, end);
+
+                    const formData = new FormData();
+                    formData.append('csrfmiddlewaretoken', csrfToken);
+                    formData.append('chunk', chunkBlob);
+                    formData.append('upload_uuid', uploadUuid);
+                    formData.append('chunk_index', cIdx);
+                    formData.append('total_chunks', totalChunks);
+                    formData.append('filename', file.name);
+                    formData.append('category', this.selectedCategory);
+
+                    this.uploadStatusText = `Uploading ${file.name} (chunk ${cIdx + 1}/${totalChunks})...`;
+
+                    try {
+                        const resp = await fetch('{% url "tickets:ticket_upload_chunk" ticket.id %}', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        const data = await resp.json();
+                        if (!resp.ok) {
+                            alert('Upload error: ' + (data.error || 'Server error'));
+                            this.isUploading = false;
+                            return;
+                        }
+                    } catch (err) {
+                        alert('Network error while uploading ' + file.name);
+                        this.isUploading = false;
+                        return;
+                    }
+
+                    const overall = Math.round(((fIdx + (cIdx + 1) / totalChunks) / this.filesQueue.length) * 100);
+                    this.uploadProgress = overall;
+                }
+            }
+
+            this.uploadStatusText = 'Upload completed! Refreshing...';
+            setTimeout(() => {
+                window.location.reload();
+            }, 600);
+        }
+    };
+}
+</script>
+{% endblock %}
+

@@ -2,8 +2,16 @@ from django.contrib import admin
 from django.urls import path
 from django.urls import include
 from tasks.views import notification_mark_read_view
+from django.contrib.staticfiles.storage import staticfiles_storage
+from django.views.generic.base import RedirectView
 
 urlpatterns = [
+
+    path(
+        "favicon.ico",
+        RedirectView.as_view(url=staticfiles_storage.url("images/favicon.ico"), permanent=True),
+        name="favicon"
+    ),
 
     path(
         "admin/",
@@ -62,6 +70,11 @@ urlpatterns = [
     path(
         "vendor-quotes/",
         include("vendor_quotes.urls")
+    ),
+
+    path(
+        "tickets/",
+        include("tickets.urls")
     ),
 
 ]

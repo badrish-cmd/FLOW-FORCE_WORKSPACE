@@ -311,6 +311,7 @@ class EmailLog(models.Model):
         ("APPROVAL_STATUS_MAIL", "Approval Status Mail"),
         ("OVERDUE_ESCALATION_MAIL", "Overdue Escalation Mail"),
         ("VENDOR_QUOTE_MAIL", "Vendor Quote Mail"),
+        ("TICKET_MAIL", "Ticket Mail"),
     ]
 
     STATUS_CHOICES = [

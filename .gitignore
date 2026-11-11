@@ -43,3 +43,11 @@ Thumbs.db
 .env.*
 !.env.example
 .env.local
+
+# Local MCP & Dev Scripts (Local only)
+MCP_SETUP.md
+mcp_server/
+run_mcp.py
+install_claude_desktop_config.py
+scripts/
+docs/

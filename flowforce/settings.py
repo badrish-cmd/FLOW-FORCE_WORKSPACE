@@ -67,6 +67,7 @@ INSTALLED_APPS = [
     'tables',
     'tasks',
     'vendor_quotes',
+    'tickets',
 ]
 
 # --------------------------------------------------
@@ -116,6 +117,7 @@ TEMPLATES = [
                 'tasks.context_processors.global_context',
                 'drawing_library.context_processors.drawing_library_context',
                 'vendor_quotes.context_processors.vendor_quotes',
+                'tickets.context_processors.tickets_context',
             ],
         },
     },
@@ -316,6 +318,17 @@ AI_MONTHLY_BUDGET_USD = Decimal(os.getenv('AI_MONTHLY_BUDGET_USD', '0'))
 AI_BLOCK_OVER_BUDGET = os.getenv('AI_BLOCK_OVER_BUDGET', 'False').lower() in ('true', '1', 'yes')
 
 # --------------------------------------------------
+# SYNOLOGY NAS & TICKETS MODULE
+# --------------------------------------------------
+SYNOLOGY_URL = os.getenv('SYNOLOGY_URL', '').rstrip('/')
+SYNOLOGY_USER = os.getenv('SYNOLOGY_USER', '')
+SYNOLOGY_PASSWORD = os.getenv('SYNOLOGY_PASSWORD', '')
+SYNOLOGY_ROOT = os.getenv('SYNOLOGY_ROOT', '/FF-Jobs')
+SYNOLOGY_VERIFY_SSL = os.getenv('SYNOLOGY_VERIFY_SSL', 'True').lower() in ('true', '1', 'yes')
+TICKETS_MAX_UPLOAD_MB = int(os.getenv('TICKETS_MAX_UPLOAD_MB', 5120))
+TICKETS_NAS_SCAN_MINUTES = int(os.getenv('TICKETS_NAS_SCAN_MINUTES', 15))
+
+# --------------------------------------------------
 # LOGIN SETTINGS
 # --------------------------------------------------
 
@@ -383,6 +396,18 @@ CELERY_BEAT_SCHEDULE = {
     'retry-failed-emails': {
         'task': 'tasks.tasks.retry_failed_emails',
         'schedule': crontab(minute=0),  # Every hour
+    },
+    'retry-pending-ticket-files': {
+        'task': 'tickets.tasks.retry_pending_synology_uploads',
+        'schedule': crontab(minute='*/10'),  # Every 10 minutes
+    },
+    'scan-synology-ticket-folders': {
+        'task': 'tickets.tasks.scan_synology_ticket_folders',
+        'schedule': crontab(minute=f'*/{TICKETS_NAS_SCAN_MINUTES}'),  # Every N minutes
+    },
+    'check-expiring-warranties-daily': {
+        'task': 'tickets.tasks.check_expiring_warranties_daily',
+        'schedule': crontab(hour=9, minute=0),  # 09:00 AM daily
     },
 }
 
