@@ -34,7 +34,8 @@ class LineItemSchema(BaseModel):
     unit: Optional[str] = Field("pcs", description="Unit of measure (e.g., pcs, set, m, kg)")
     unit_price: Optional[float] = Field(None, description="Price per single unit BEFORE any discount")
     discount_percent: Optional[float] = Field(None, description="Discount percentage between 0 and 100, if any")
-    notes: Optional[str] = Field(None, description="Additional notes or specifications for this item")
+    notes: Optional[str] = Field(None, description="Additional notes, specifications, model, or make for this item")
+    commodity_code: Optional[str] = Field(None, description="HS code, customs tariff number, or commodity code if printed")
 
 
 class QuoteExtractSchema(BaseModel):
@@ -43,6 +44,8 @@ class QuoteExtractSchema(BaseModel):
     currency: Optional[str] = Field(None, description="3-letter currency ISO code, e.g. EUR, USD, IDR")
     freight_or_courier: Optional[float] = Field(None, description="Freight, transport, courier, or packing charge in vendor currency")
     quote_total: Optional[float] = Field(None, description="Total quotation amount in vendor currency")
+    quote_subject: Optional[str] = Field(None, description="Short product summary, max ~80 characters, e.g. 'Airlock DMN Westinghouse AML300 4TCO'")
+    delivery_time: Optional[str] = Field(None, description="Delivery or lead time stated in quote, formatted e.g. '10 to 12 weeks from PO'")
     lines: List[LineItemSchema] = Field(default_factory=list, description="Extracted line items")
     warnings: List[str] = Field(default_factory=list, description="Warnings or issues detected (e.g. skipped unpriced items)")
 
@@ -58,7 +61,10 @@ Strict extraction rules:
 5. Freight / Packing / Courier: Put freight, packing, courier, handling, or transport charges into 'freight_or_courier', NOT as a line item in 'lines'.
 6. Price on request: Skip any line items where the price is 'price on request', 'on request', 'price will follow', 'TBA', or missing, and add an explanatory warning string to 'warnings' for each skipped item.
 7. Currency: Extract the currency as a 3-letter ISO code (e.g. EUR, USD, IDR, SGD, GBP, JPY).
-8. Never invent values: If a field is not present or unknown, return null.
+8. Quote Subject: Extract a concise product summary (max ~80 characters) summarizing the quoted equipment or goods (e.g. 'Airlock DMN Westinghouse AML300 4TCO').
+9. Delivery Time: If the vendor quote states a delivery time or lead time, extract it as 'X to Y weeks from PO' (or the printed lead time).
+10. Commodity Code: If an HS code, tariff code, or commodity code is printed for an item, extract it into 'commodity_code'.
+11. Never invent values: If a field is not present or unknown, return null.
 """
 
 
@@ -152,6 +158,7 @@ def validate_and_clean_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
             "unit_price": float(unit_price) if isinstance(unit_price, (int, float)) else unit_price,
             "discount_percent": disc,
             "notes": (item.get("notes") or "").strip(),
+            "commodity_code": (item.get("commodity_code") or "").strip() or None,
         })
 
     currency = raw_data.get("currency")
@@ -176,15 +183,38 @@ def validate_and_clean_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
         except (ValueError, TypeError):
             quote_total = None
 
+    subject = (raw_data.get("quote_subject") or "").strip()
+    if subject:
+        subject = subject[:255]
+    else:
+        subject = None
+
+    deliv = (raw_data.get("delivery_time") or "").strip()
+    if deliv:
+        deliv = deliv[:255]
+    else:
+        deliv = None
+
     return {
         "vendor_quote_no": (raw_data.get("vendor_quote_no") or "").strip() or None,
         "quote_date": (raw_data.get("quote_date") or "").strip() or None,
         "currency": currency or None,
         "freight_or_courier": freight,
         "quote_total": quote_total,
+        "quote_subject": subject,
+        "delivery_time": deliv,
         "lines": cleaned_lines,
         "warnings": warnings,
     }
+
+
+def _safe_int(val, default=0):
+    try:
+        if isinstance(val, (int, float, str)) and not isinstance(val, bool):
+            return int(val)
+    except (ValueError, TypeError):
+        pass
+    return default
 
 
 def extract_quote(file_bytes: bytes, filename: str, user=None, quote=None) -> Dict[str, Any]:
@@ -304,13 +334,13 @@ def extract_quote(file_bytes: bytes, filename: str, user=None, quote=None) -> Di
         usage = getattr(response, "usage_metadata", None)
         if usage:
             if isinstance(usage, dict):
-                input_tokens = usage.get("prompt_token_count", 0) or 0
-                output_tokens = usage.get("candidates_token_count", 0) or 0
-                total_tokens = usage.get("total_token_count", 0) or 0
+                input_tokens = _safe_int(usage.get("prompt_token_count"), 0)
+                output_tokens = _safe_int(usage.get("candidates_token_count"), 0)
+                total_tokens = _safe_int(usage.get("total_token_count"), 0)
             else:
-                input_tokens = getattr(usage, "prompt_token_count", 0) or 0
-                output_tokens = getattr(usage, "candidates_token_count", 0) or 0
-                total_tokens = getattr(usage, "total_token_count", 0) or 0
+                input_tokens = _safe_int(getattr(usage, "prompt_token_count", None), 0)
+                output_tokens = _safe_int(getattr(usage, "candidates_token_count", None), 0)
+                total_tokens = _safe_int(getattr(usage, "total_token_count", None), 0)
         if total_tokens == 0 and (input_tokens + output_tokens) > 0:
             total_tokens = input_tokens + output_tokens
 
@@ -373,6 +403,14 @@ def _record_request_log(
 ):
     from django.utils import timezone
     from ..models import AIRequestLog
+
+    input_tokens = _safe_int(input_tokens, 0)
+    output_tokens = _safe_int(output_tokens, 0)
+    total_tokens = _safe_int(total_tokens, 0)
+    lines_extracted = _safe_int(lines_extracted, 0)
+    warnings_count = _safe_int(warnings_count, 0)
+    duration_ms = _safe_int(duration_ms, 0)
+    file_size = _safe_int(file_size, 0)
 
     price_in = getattr(settings, "GEMINI_PRICE_INPUT_PER_M", Decimal("0"))
     if not isinstance(price_in, Decimal):

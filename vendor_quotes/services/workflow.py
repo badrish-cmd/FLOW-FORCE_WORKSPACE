@@ -355,8 +355,22 @@ def revise(quote, user):
     if not last_approved:
         raise WorkflowError("You can only revise an approved version, but no approved version was found.")
 
-    rev = QuoteRevision.objects.create(quote=quote, number=latest.number + 1,
-                                       snapshot=fresh_copy(last_approved.snapshot), created_by=user)
+    import copy
+    rev = QuoteRevision.objects.create(
+        quote=quote,
+        number=latest.number + 1,
+        snapshot=fresh_copy(last_approved.snapshot),
+        created_by=user,
+        quote_subject=last_approved.quote_subject,
+        validity_days=last_approved.validity_days,
+        salesperson_name=last_approved.salesperson_name,
+        salesperson_id=last_approved.salesperson_id,
+        delivery_time=last_approved.delivery_time,
+        payment_terms=last_approved.payment_terms,
+        customer_notes=last_approved.customer_notes,
+        extra_terms=last_approved.extra_terms,
+        line_details=copy.deepcopy(last_approved.line_details or {}),
+    )
     event(quote, "revised", f"{rev.label} started from {last_approved.label}", user, rev)
     return rev
 
@@ -422,13 +436,41 @@ def run_zoho_output(rev):
                 raise zoho.ZohoError("The original quotation has no Zoho number yet - create it first, then retry this revision.")
             estimate_number = zoho.revision_number_for(base, rev.number)
         customer_id = zoho.resolve_customer(q.enquiry)
-        est_id, est_no = zoho.create_draft_estimate(
-            customer_id=customer_id, reference=q.enquiry.number, lines=lines,
-            estimate_number=estimate_number)
+
+        # Fallback subject if still empty
+        if not rev.quote_subject and lines:
+            first_desc = lines[0].get("description", "")
+            if first_desc:
+                rev.quote_subject = first_desc[:255]
+                rev.save(update_fields=["quote_subject"])
+
+        res = zoho.create_draft_estimate(
+            customer_id=customer_id,
+            reference=q.enquiry.number,
+            lines=lines,
+            estimate_number=estimate_number,
+            quote_subject=rev.quote_subject,
+            validity_days=rev.validity_days,
+            salesperson_name=rev.salesperson_name,
+            salesperson_id=rev.salesperson_id,
+            delivery_time=rev.delivery_time,
+            payment_terms=rev.payment_terms,
+            customer_notes=rev.customer_notes,
+            extra_terms=rev.extra_terms,
+            line_details=rev.line_details,
+        )
+        est_id = res[0]
+        est_no = res[1]
+        stick_warnings = getattr(res, "stick_warnings", [])
+        if not stick_warnings and len(res) >= 3:
+            stick_warnings = res[2]
+
         rev.zoho_estimate_id, rev.zoho_estimate_number = est_id, est_no or (estimate_number or "")
         rev.zoho_status = QuoteRevision.OUTPUT_DONE
         rev.zoho_error = ""
         event(q, "zoho_done", f"Draft quotation {rev.zoho_estimate_number} created in Zoho Books", None, rev)
+        if stick_warnings:
+            event(q, "zoho_warning", f"Draft quotation {rev.zoho_estimate_number} created in Zoho Books, but {' and '.join(stick_warnings)} did not stick.", None, rev)
         MasterSheet.objects.filter(vendor=q.vendor, sheet_name=rev.master_sheet_name, quotation_no="") \
             .update(quotation_no=rev.zoho_estimate_number)
     except zoho.ZohoNotConnected as e:
@@ -563,10 +605,45 @@ def apply_ai_result(quote, rev, ai_result, user):
         for s, c, o, n in changes
     ])
 
-    rev.snapshot = new_snap
-    rev.save(update_fields=["snapshot", "updated_at"])
+    # 6. Apply quotation details (subject, delivery time, per-line commodity codes)
+    extracted_subj = (ai_result.get("quote_subject") or "").strip()
+    if extracted_subj:
+        rev.quote_subject = extracted_subj[:255]
+    elif not rev.quote_subject and sheet_lines:
+        first_desc = sheet_lines[0].get("description") or ""
+        if first_desc:
+            rev.quote_subject = first_desc[:255]
 
-    # 6. Record QuoteEvent
+    extracted_deliv = (ai_result.get("delivery_time") or "").strip()
+    if extracted_deliv:
+        rev.delivery_time = extracted_deliv[:255]
+
+    line_details = dict(rev.line_details or {})
+    for i, ln in enumerate(ai_lines, 1):
+        k = str(i)
+        cur_ld = dict(line_details.get(k) or {})
+        cc = (ln.get("commodity_code") or "").strip()
+        notes = (ln.get("notes") or "").strip()
+        if cc and not cur_ld.get("commodity_code"):
+            cur_ld["commodity_code"] = cc
+        if notes and not cur_ld.get("notes"):
+            cur_ld["notes"] = notes
+        if not cur_ld.get("quote_description"):
+            part = (ln.get("part_no") or "").strip()
+            desc = (ln.get("description") or "").strip()
+            cur_ld["quote_description"] = zoho.build_line_description(
+                description=desc,
+                part=part,
+                spec=notes,
+                commodity_code=cc,
+            )
+        line_details[k] = cur_ld
+    rev.line_details = line_details
+
+    rev.snapshot = new_snap
+    rev.save(update_fields=["snapshot", "quote_subject", "delivery_time", "line_details", "updated_at"])
+
+    # 7. Record QuoteEvent
     filename = os.path.basename(quote.quote_file.name) if quote.quote_file else "file"
     warnings = ai_result.get("warnings") or []
     msg = f"AI filled {len(sheet_lines)} lines from {filename}"

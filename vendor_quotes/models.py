@@ -214,6 +214,26 @@ class QuoteRevision(models.Model):
     zoho_estimate_number = models.CharField(max_length=60, blank=True)
     zoho_error = models.TextField(blank=True)
 
+    # Quotation details for Zoho draft quotation
+    quote_subject = models.CharField(max_length=255, blank=True)
+    validity_days = models.PositiveIntegerField(default=30)
+    salesperson_name = models.CharField(max_length=100, blank=True)
+    salesperson_id = models.CharField(max_length=50, blank=True)
+    delivery_time = models.CharField(max_length=255, blank=True, help_text='e.g. "10 to 12 weeks from PO"')
+    payment_terms = models.CharField(
+        max_length=255,
+        default="50% Down payment and Balance 50% Payment after delivery of goods"
+    )
+    customer_notes = models.TextField(default="Looking forward for your business.")
+    extra_terms = models.TextField(
+        default="All Delivery time quoted are after receipt of Order and subject to availability"
+    )
+    line_details = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Per-line customizations (quote description, commodity code, etc.) keyed by line number"
+    )
+
     class Meta:
         ordering = ["quote", "number"]
         unique_together = [("quote", "number")]
@@ -228,6 +248,12 @@ class QuoteRevision(models.Model):
     @property
     def is_editable(self):
         return self.status in (self.STATUS_DRAFT, self.STATUS_SENT_BACK)
+
+    @property
+    def expiry_date(self):
+        from datetime import timedelta
+        base_date = self.created_at.date() if self.created_at else timezone.localdate()
+        return base_date + timedelta(days=self.validity_days or 30)
 
 
 class QuoteChange(models.Model):

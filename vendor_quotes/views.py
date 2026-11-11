@@ -163,6 +163,69 @@ def quote_detail(request, pk):
     quote_ai_cost = sum((l.estimated_cost_usd for l in ai_logs), Decimal("0"))
     is_budget_blocked = workflow.is_ai_budget_blocked()
 
+    # Quotation details setup
+    # Fallback subject if empty
+    if not rev.quote_subject and lines:
+        first_desc = lines[0].get("description", "")
+        if first_desc:
+            rev.quote_subject = first_desc[:255]
+
+    # Resolve default salesperson if empty and editable
+    if not rev.salesperson_id and not rev.salesperson_name and editable:
+        try:
+            cust_id = quote.enquiry.zoho_customer_id
+            if not cust_id and ZohoConnection.get().is_connected:
+                cust_id = zoho.resolve_customer(quote.enquiry)
+            if cust_id:
+                sp_id, sp_name = zoho.get_customer_default_salesperson(cust_id)
+                if sp_id or sp_name:
+                    rev.salesperson_id = sp_id
+                    rev.salesperson_name = sp_name
+                    rev.save(update_fields=["salesperson_id", "salesperson_name"])
+        except Exception:
+            pass
+
+    salesperson_options = zoho.get_salespersons_list()
+
+    quotation_lines = []
+    line_details = rev.line_details or {}
+    for idx, ln in enumerate(lines, 1):
+        k = str(idx)
+        ld = line_details.get(k) or {}
+        edited_desc = ld.get("quote_description") or ld.get("description")
+        spec = ld.get("notes") or ld.get("spec") or ""
+        cc = ld.get("commodity_code") or ""
+        built_desc = zoho.build_line_description(
+            description=ln.get("description", ""),
+            part=ln.get("part", ""),
+            spec=spec,
+            commodity_code=cc,
+            edited_description=edited_desc,
+        )
+        quotation_lines.append({
+            "line_no": idx,
+            "part": ln.get("part", ""),
+            "description": ln.get("description", ""),
+            "qty": ln.get("qty", ""),
+            "unit": ln.get("unit", ""),
+            "rate": ln.get("rate", 0),
+            "quote_description": built_desc,
+            "commodity_code": cc,
+            "spec": spec,
+        })
+
+    quotation_details_json = {
+        "quote_subject": rev.quote_subject or "",
+        "validity_days": rev.validity_days or 30,
+        "salesperson_name": rev.salesperson_name or "",
+        "salesperson_id": rev.salesperson_id or "",
+        "delivery_time": rev.delivery_time or "",
+        "payment_terms": rev.payment_terms or "",
+        "customer_notes": rev.customer_notes or "",
+        "extra_terms": rev.extra_terms or "",
+        "line_details": rev.line_details or {},
+    }
+
     return render(request, "vendor_quotes/quote_detail.html", _ctx(
         request, quote=quote, rev=rev, revisions=revisions, editable=editable,
         is_latest=(rev.number == revisions[-1].number), lines=lines, problems=problems, total=total,
@@ -175,7 +238,10 @@ def quote_detail(request, pk):
         can_discard=can_discard, can_void=can_void, can_revise=can_revise,
         next_revision_number=next_revision_number,
         quote_ai_count=quote_ai_count, quote_ai_tokens=quote_ai_tokens,
-        quote_ai_cost=quote_ai_cost, is_budget_blocked=is_budget_blocked))
+        quote_ai_cost=quote_ai_cost, is_budget_blocked=is_budget_blocked,
+        salesperson_options=salesperson_options,
+        quotation_lines=quotation_lines,
+        quotation_details_json=quotation_details_json))
 
 
 @login_required
@@ -184,13 +250,90 @@ def revision_save(request, pk):
     rev = get_object_or_404(QuoteRevision, pk=pk)
     try:
         payload = json.loads(request.body or b"{}")
-        n = workflow.save_snapshot(rev, payload.get("snapshot"), request.user)
+        if "snapshot" in payload and payload["snapshot"]:
+            n = workflow.save_snapshot(rev, payload.get("snapshot"), request.user)
+        else:
+            n = 0
+
+        qd = payload.get("quotation_details")
+        if qd and isinstance(qd, dict) and workflow.can_edit_revision(request.user, rev):
+            update_fields = []
+            if "quote_subject" in qd:
+                rev.quote_subject = str(qd["quote_subject"])[:255]
+                update_fields.append("quote_subject")
+            if "validity_days" in qd:
+                try:
+                    rev.validity_days = max(1, int(qd["validity_days"]))
+                    update_fields.append("validity_days")
+                except (ValueError, TypeError):
+                    pass
+            if "salesperson_name" in qd:
+                rev.salesperson_name = str(qd["salesperson_name"])[:100]
+                update_fields.append("salesperson_name")
+            if "salesperson_id" in qd:
+                rev.salesperson_id = str(qd["salesperson_id"])[:50]
+                update_fields.append("salesperson_id")
+            if "delivery_time" in qd:
+                rev.delivery_time = str(qd["delivery_time"])[:255]
+                update_fields.append("delivery_time")
+            if "payment_terms" in qd:
+                rev.payment_terms = str(qd["payment_terms"])[:255]
+                update_fields.append("payment_terms")
+            if "customer_notes" in qd:
+                rev.customer_notes = str(qd["customer_notes"])
+                update_fields.append("customer_notes")
+            if "extra_terms" in qd:
+                rev.extra_terms = str(qd["extra_terms"])
+                update_fields.append("extra_terms")
+            if "line_details" in qd and isinstance(qd["line_details"], dict):
+                rev.line_details = qd["line_details"]
+                update_fields.append("line_details")
+            if update_fields:
+                update_fields.append("updated_at")
+                rev.save(update_fields=update_fields)
     except (ValueError, workflow.WorkflowError) as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=400)
     rev.refresh_from_db()
     lines, problems = extract_lines(rev.snapshot)
     return JsonResponse({"ok": True, "changes": n, "lines": len(lines),
                          "total": sum(ln["qty"] * ln["rate"] for ln in lines), "problems": problems})
+
+
+@login_required
+@require_POST
+def revision_update_details(request, pk):
+    rev = get_object_or_404(QuoteRevision, pk=pk)
+    if not workflow.can_edit_revision(request.user, rev):
+        return HttpResponseForbidden("You cannot edit this revision.")
+    rev.quote_subject = request.POST.get("quote_subject", rev.quote_subject).strip()[:255]
+    try:
+        rev.validity_days = max(1, int(request.POST.get("validity_days", rev.validity_days)))
+    except (ValueError, TypeError):
+        pass
+    rev.salesperson_id = request.POST.get("salesperson_id", rev.salesperson_id).strip()[:50]
+    rev.salesperson_name = request.POST.get("salesperson_name", rev.salesperson_name).strip()[:100]
+    rev.delivery_time = request.POST.get("delivery_time", rev.delivery_time).strip()[:255]
+    rev.payment_terms = request.POST.get("payment_terms", rev.payment_terms).strip()[:255]
+    rev.customer_notes = request.POST.get("customer_notes", rev.customer_notes)
+    rev.extra_terms = request.POST.get("extra_terms", rev.extra_terms)
+
+    # Process line details from form POST if any
+    line_details = dict(rev.line_details or {})
+    lines, _ = extract_lines(rev.snapshot)
+    for idx in range(1, len(lines) + 1):
+        k = str(idx)
+        cur_ld = dict(line_details.get(k) or {})
+        desc_key = f"line_{idx}_description"
+        code_key = f"line_{idx}_commodity_code"
+        if desc_key in request.POST:
+            cur_ld["quote_description"] = request.POST[desc_key]
+        if code_key in request.POST:
+            cur_ld["commodity_code"] = request.POST[code_key].strip()
+        line_details[k] = cur_ld
+    rev.line_details = line_details
+    rev.save()
+    messages.success(request, "Quotation details saved.")
+    return redirect(f"{reverse('vendor_quotes:quote_detail', args=[rev.quote_id])}?rev={rev.number}")
 
 
 def _action(request, pk, fn, success, **kw):

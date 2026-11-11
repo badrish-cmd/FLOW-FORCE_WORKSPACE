@@ -1174,3 +1174,349 @@ class AIUsageTrackerTests(TestCase):
         self.assertContains(page, "AI used 2 times on this quote")
         self.assertContains(page, "1200 tokens")
         self.assertContains(page, "0.0120")
+
+
+@override_settings(ZOHO_CLIENT_ID="dummy_client_id", ZOHO_CLIENT_SECRET="dummy_client_secret")
+class ZohoDraftQuotationFieldsTests(TestCase):
+    def setUp(self):
+        dept = Department.objects.create(name="VQ Zoho Ops", slug="vq-zoho-ops")
+        self.gm = EmployeeUser.objects.create_user(
+            email="gm_zoho@example.com", password="x", role="SUPER_ADMIN",
+            department=dept, full_name="GM Zoho", status="APPROVED"
+        )
+        self.editor = EmployeeUser.objects.create_user(
+            email="editor_zoho@example.com", password="x", role="ADMIN",
+            department=dept, full_name="Editor Zoho", status="APPROVED"
+        )
+        self.vendor = Vendor.objects.create(
+            name="DMN Westinghouse", code="DMN", currency="EUR",
+            default_exchange_rate=20000, default_margin_factor=0.8,
+            default_duty_factor=0.9, default_freight_factor=1, default_discount=0.15
+        )
+        ZohoConnection.objects.get_or_create(pk=1, defaults={"refresh_token": "dummy_token"})
+        self.quote, self.rev = workflow.create_quote(
+            enquiry_number="ENQ/2026/09/2708",
+            customer_name="PT. Indofood Sukses Makmur",
+            vendor=self.vendor,
+            vendor_quote_no="DMN-2026-09",
+            quote_file=None,
+            user=self.editor,
+        )
+
+    def test_build_line_description_matches_ffi_example(self):
+        """Matches real example FFI_26000280 exactly."""
+        desc = zoho.build_line_description(
+            description="DMN Rotary Valve unit",
+            part="RV",
+            spec="AML 300 4TCO Eq : AML - Rotary valve",
+            commodity_code="84818090",
+        )
+        expected = (
+            "Supply of DMN Rotary Valve unit - RV\n"
+            "AML 300 4TCO Eq : AML - Rotary valve\n"
+            "Commodity Code: 84818090"
+        )
+        self.assertEqual(desc, expected)
+
+    def test_build_line_description_does_not_double_supply_of(self):
+        """Does not prepend 'Supply of' if description already starts with 'Supply of'."""
+        desc = zoho.build_line_description(
+            description="Supply of DMN Rotary Valve unit",
+            part="RV",
+            commodity_code="84818090",
+        )
+        expected = (
+            "Supply of DMN Rotary Valve unit - RV\n"
+            "Commodity Code: 84818090"
+        )
+        self.assertEqual(desc, expected)
+
+    def test_build_line_description_custom_override(self):
+        """Uses edited text directly when provided."""
+        desc = zoho.build_line_description(
+            description="Original description",
+            part="RV",
+            edited_description="Custom edited line description text",
+        )
+        self.assertEqual(desc, "Custom edited line description text")
+
+    @patch("vendor_quotes.services.zoho.api")
+    def test_zoho_create_draft_estimate_payload_all_fields(self, mock_api):
+        from datetime import date
+
+        # Setup mock responses for api calls:
+        # 1. contacts/{customer_id} (primary contact)
+        # 2. estimates (POST)
+        # 3. estimates/{id} (read back verify)
+        def mock_api_router(method, path, params=None, payload=None):
+            if method == "GET" and path.startswith("contacts/"):
+                return {
+                    "code": 0,
+                    "contact": {
+                        "contact_id": "cust_123",
+                        "contact_persons": [
+                            {"contact_person_id": "cp_101", "is_primary_contact": False},
+                            {"contact_person_id": "cp_primary", "is_primary_contact": True},
+                        ],
+                    },
+                }
+            elif method == "POST" and path == "estimates":
+                return {
+                    "code": 0,
+                    "estimate": {
+                        "estimate_id": "est_999",
+                        "estimate_number": "FFI_26000280",
+                    },
+                }
+            elif method == "GET" and path.startswith("estimates/"):
+                return {
+                    "code": 0,
+                    "estimate": {
+                        "estimate_id": "est_999",
+                        "subject_content": "Airlock DMN Westinghouse AML300 4TCO",
+                        "salesperson_id": "sp_555",
+                    },
+                }
+            return {"code": 0}
+
+        mock_api.side_effect = mock_api_router
+
+        lines = [
+            {"part": "RV", "description": "DMN Rotary Valve unit", "qty": 1, "rate": 50000000.0, "unit": "unit"}
+        ]
+        line_details = {
+            "1": {
+                "commodity_code": "84818090",
+                "notes": "AML 300 4TCO Eq : AML - Rotary valve",
+            }
+        }
+
+        res = zoho.create_draft_estimate(
+            customer_id="cust_123",
+            reference="ENQ/2026/09/2708",
+            lines=lines,
+            estimate_number="FFI_26000280",
+            quote_subject="Airlock DMN Westinghouse AML300 4TCO",
+            validity_days=30,
+            salesperson_name="Esthie Engela",
+            salesperson_id="sp_555",
+            delivery_time="10 to 12 weeks from PO",
+            payment_terms="50% Down payment and Balance 50% Payment after delivery of goods",
+            customer_notes="Looking forward for your business.",
+            extra_terms="All Delivery time quoted are after receipt of Order and subject to availability",
+            line_details=line_details,
+            date=date(2026, 9, 1),
+        )
+
+        self.assertEqual(res[0], "est_999")
+        self.assertEqual(res[1], "FFI_26000280")
+        self.assertEqual(getattr(res, "stick_warnings", []), [])
+
+        # Find the POST estimates call
+        post_call = [call for call in mock_api.call_args_list if call[0][0] == "POST" and call[0][1] == "estimates"][0]
+        params = post_call[0][2]
+        payload = post_call[0][3]
+
+        self.assertEqual(params["ignore_auto_number_generation"], "true")
+        self.assertEqual(payload["customer_id"], "cust_123")
+        self.assertEqual(payload["reference_number"], "ENQ/2026/09/2708")
+        self.assertEqual(payload["estimate_number"], "FFI_26000280")
+        self.assertEqual(payload["subject_content"], "Airlock DMN Westinghouse AML300 4TCO")
+        self.assertEqual(payload["date"], "2026-09-01")
+        self.assertEqual(payload["expiry_date"], "2026-10-01")
+        self.assertEqual(payload["salesperson_id"], "sp_555")
+        self.assertEqual(payload["notes"], "Looking forward for your business.")
+        self.assertEqual(payload["contact_persons"], ["cp_primary"])
+
+        expected_terms = (
+            "Delivery Time : 10 to 12 weeks from PO\n"
+            "Payment Terms : 50% Down payment and Balance 50% Payment after delivery of goods\n"
+            "Validity : 30 days\n"
+            "All Delivery time quoted are after receipt of Order and subject to availability"
+        )
+        self.assertEqual(payload["terms"], expected_terms)
+
+        # Check line_items: NO "name", only "description", "quantity", "rate", "unit"
+        self.assertEqual(len(payload["line_items"]), 1)
+        item = payload["line_items"][0]
+        self.assertNotIn("name", item)
+        self.assertEqual(item["quantity"], 1)
+        self.assertEqual(item["rate"], 50000000.0)
+        self.assertEqual(item["unit"], "unit")
+        expected_line_desc = (
+            "Supply of DMN Rotary Valve unit - RV\n"
+            "AML 300 4TCO Eq : AML - Rotary valve\n"
+            "Commodity Code: 84818090"
+        )
+        self.assertEqual(item["description"], expected_line_desc)
+
+    def test_revise_copies_all_quotation_fields_and_line_descriptions(self):
+        """Revisions (R1, R2...) copy all quotation details + edited line descriptions."""
+        workflow.save_snapshot(
+            self.rev,
+            priced_snapshot([{"part": "RV", "description": "Rotary Valve", "qty": 1, "unit_price": 100, "sell": 50000}]),
+            self.editor
+        )
+        self.rev.refresh_from_db()
+        self.rev.quote_subject = "Airlock DMN Westinghouse AML300 4TCO"
+        self.rev.validity_days = 45
+        self.rev.salesperson_name = "Esthie Engela"
+        self.rev.salesperson_id = "sp_esthie"
+        self.rev.delivery_time = "10 to 12 weeks from PO"
+        self.rev.payment_terms = "30% Down payment and 70% upon delivery"
+        self.rev.customer_notes = "Thank you for considering our quote."
+        self.rev.extra_terms = "Warranty 12 months."
+        self.rev.line_details = {
+            "1": {
+                "quote_description": "Customized line 1 description",
+                "commodity_code": "84818090",
+            }
+        }
+        self.rev.status = QuoteRevision.STATUS_IN_REVIEW
+        self.rev.save()
+
+        # Approve rev 0
+        workflow.approve(self.rev, self.gm)
+        self.rev.refresh_from_db()
+        self.assertEqual(self.rev.status, QuoteRevision.STATUS_APPROVED)
+
+        # Revise
+        r1 = workflow.revise(self.quote, self.editor)
+        self.assertEqual(r1.number, 1)
+        self.assertEqual(r1.quote_subject, "Airlock DMN Westinghouse AML300 4TCO")
+        self.assertEqual(r1.validity_days, 45)
+        self.assertEqual(r1.salesperson_name, "Esthie Engela")
+        self.assertEqual(r1.salesperson_id, "sp_esthie")
+        self.assertEqual(r1.delivery_time, "10 to 12 weeks from PO")
+        self.assertEqual(r1.payment_terms, "30% Down payment and 70% upon delivery")
+        self.assertEqual(r1.customer_notes, "Thank you for considering our quote.")
+        self.assertEqual(r1.extra_terms, "Warranty 12 months.")
+        self.assertEqual(
+            r1.line_details,
+            {"1": {"quote_description": "Customized line 1 description", "commodity_code": "84818090"}}
+        )
+
+    def test_defaults_when_ai_fails_or_omitted(self):
+        """When AI fails or is not run, subject falls back to the first line's description."""
+        snap = priced_snapshot([
+            {"part": "P-1", "description": "Centrifugal Slurry Pump", "qty": 2, "unit_price": 500, "sell": 25000000}
+        ])
+        workflow.save_snapshot(self.rev, snap, self.editor)
+        self.rev.refresh_from_db()
+        self.assertEqual(self.rev.quote_subject, "")
+
+        # When quote_detail view loads or approval runs, subject falls back to first line
+        self.client.force_login(self.editor)
+        resp = self.client.get(reverse("vendor_quotes:quote_detail", args=[self.quote.id]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Centrifugal Slurry Pump")
+
+        self.rev.refresh_from_db()
+        # In run_zoho_output or approval:
+        with patch("vendor_quotes.services.zoho.create_draft_estimate") as mock_create, \
+             patch("vendor_quotes.services.zoho.resolve_customer", return_value="cust_1"):
+            mock_create.return_value = ("est_1", "FFI_1")
+            workflow.run_zoho_output(self.rev)
+            self.rev.refresh_from_db()
+            self.assertEqual(self.rev.quote_subject, "Centrifugal Slurry Pump")
+            self.assertEqual(mock_create.call_args.kwargs["quote_subject"], "Centrifugal Slurry Pump")
+
+    @patch("vendor_quotes.services.zoho.api")
+    def test_zoho_read_back_warning_when_fields_do_not_stick(self, mock_api):
+        """If Zoho read-back shows subject or salesperson did not stick, logs QuoteEvent warning."""
+        def mock_api_router(method, path, params=None, payload=None):
+            if method == "POST" and path == "estimates":
+                return {"code": 0, "estimate": {"estimate_id": "est_nostick", "estimate_number": "FFI_NOSTICK"}}
+            elif method == "GET" and path.startswith("estimates/"):
+                # Missing subject_content and salesperson_id in Zoho response
+                return {"code": 0, "estimate": {"estimate_id": "est_nostick"}}
+            return {"code": 0}
+
+        mock_api.side_effect = mock_api_router
+
+        snap = priced_snapshot([{"part": "A", "description": "Test", "qty": 1, "unit_price": 10, "sell": 1000}])
+        workflow.save_snapshot(self.rev, snap, self.editor)
+        self.rev.refresh_from_db()
+        self.rev.quote_subject = "Airlock DMN"
+        self.rev.salesperson_id = "sp_1"
+        self.rev.save()
+
+        with patch("vendor_quotes.services.zoho.resolve_customer", return_value="cust_1"):
+            workflow.run_zoho_output(self.rev)
+
+        self.rev.refresh_from_db()
+        self.assertEqual(self.rev.zoho_status, QuoteRevision.OUTPUT_DONE)
+        self.assertEqual(self.rev.zoho_estimate_number, "FFI_NOSTICK")
+
+        # Check that zoho_warning event was logged
+        warning_event = self.quote.events.filter(action="zoho_warning").first()
+        self.assertIsNotNone(warning_event)
+        self.assertIn("Subject and Salesperson did not stick", warning_event.message)
+
+    @override_settings(ZOHO_CLIENT_ID="id", ZOHO_CLIENT_SECRET="secret")
+    @patch("vendor_quotes.services.zoho.api")
+    def test_salespersons_caching(self, mock_api):
+        from django.core.cache import cache
+        cache.clear()
+        conn = ZohoConnection.get()
+        conn.refresh_token = "tok"
+        conn.save()
+
+        mock_api.return_value = {
+            "code": 0,
+            "estimates": [
+                {"salesperson_id": "sp_1", "salesperson_name": "Esthie Engela"},
+                {"salesperson_id": "sp_2", "salesperson_name": "Umapathi Umapathi"},
+                {"salesperson_id": "sp_1", "salesperson_name": "Esthie Engela"},
+            ],
+        }
+
+        salespersons = zoho.get_salespersons_list()
+        self.assertEqual(len(salespersons), 2)
+        self.assertEqual(salespersons[0]["name"], "Esthie Engela")
+        self.assertEqual(salespersons[1]["name"], "Umapathi Umapathi")
+        self.assertEqual(mock_api.call_count, 1)
+
+        # Second call uses cache, no extra api call
+        salespersons_cached = zoho.get_salespersons_list()
+        self.assertEqual(len(salespersons_cached), 2)
+        self.assertEqual(mock_api.call_count, 1)
+
+    def test_revision_save_updates_quotation_details(self):
+        """Saving via revision_save updates quotation details atomically with snapshot."""
+        self.client.force_login(self.editor)
+        snap = priced_snapshot([{"part": "A", "description": "Desc", "qty": 2, "unit_price": 10, "sell": 2000}])
+        resp = self.client.post(
+            reverse("vendor_quotes:revision_save", args=[self.rev.id]),
+            data=json.dumps({
+                "snapshot": snap,
+                "quotation_details": {
+                    "quote_subject": "Rotary Valve Set",
+                    "validity_days": 45,
+                    "salesperson_name": "Umapathi Umapathi",
+                    "salesperson_id": "sp_uma",
+                    "delivery_time": "6 to 8 weeks from PO",
+                    "payment_terms": "100% after delivery",
+                    "customer_notes": "Prompt delivery requested.",
+                    "extra_terms": "Price includes packaging.",
+                    "line_details": {
+                        "1": {"quote_description": "Supply of Rotary Valve unit - A", "commodity_code": "84818090"}
+                    },
+                },
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.rev.refresh_from_db()
+        self.assertEqual(self.rev.quote_subject, "Rotary Valve Set")
+        self.assertEqual(self.rev.validity_days, 45)
+        self.assertEqual(self.rev.salesperson_name, "Umapathi Umapathi")
+        self.assertEqual(self.rev.salesperson_id, "sp_uma")
+        self.assertEqual(self.rev.delivery_time, "6 to 8 weeks from PO")
+        self.assertEqual(self.rev.payment_terms, "100% after delivery")
+        self.assertEqual(self.rev.customer_notes, "Prompt delivery requested.")
+        self.assertEqual(self.rev.extra_terms, "Price includes packaging.")
+        self.assertEqual(
+            self.rev.line_details,
+            {"1": {"quote_description": "Supply of Rotary Valve unit - A", "commodity_code": "84818090"}}
+        )

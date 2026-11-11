@@ -21,6 +21,40 @@
             summary: window.VQ.summary,
             aiRunning: window.VQ.aiRunning || false,
             aiPollTimer: null,
+            details: window.VQ.details || {},
+            markDirty() {
+                if (window.VQ.editable) {
+                    this.dirty = true;
+                    this.saveLabel = "Unsaved changes";
+                }
+            },
+            onSalespersonSelect(e) {
+                const sel = e.target;
+                const opt = sel.options[sel.selectedIndex];
+                this.details.salesperson_id = sel.value;
+                if (opt && opt.dataset.name) {
+                    this.details.salesperson_name = opt.dataset.name;
+                }
+                this.markDirty();
+            },
+            updateLineDescription(lineNo, val) {
+                if (!this.details.line_details) this.details.line_details = {};
+                if (!this.details.line_details[lineNo]) this.details.line_details[lineNo] = {};
+                this.details.line_details[lineNo].quote_description = val;
+                this.markDirty();
+            },
+            updateLineCommodityCode(lineNo, val) {
+                if (!this.details.line_details) this.details.line_details = {};
+                if (!this.details.line_details[lineNo]) this.details.line_details[lineNo] = {};
+                this.details.line_details[lineNo].commodity_code = val;
+                this.markDirty();
+            },
+            get calculatedExpiryDate() {
+                const days = parseInt(this.details.validity_days) || 30;
+                const d = new Date();
+                d.setDate(d.getDate() + days);
+                return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+            },
             init() {
                 let ready = false;
                 setTimeout(() => { ready = true; }, 2000);   // ignore recalculation events while loading
@@ -97,7 +131,10 @@
                     const resp = await fetch(window.VQ.saveUrl, {
                         method: "POST",
                         headers: { "Content-Type": "application/json", "X-CSRFToken": window.VQ.csrf },
-                        body: JSON.stringify({ snapshot: snapshot }),
+                        body: JSON.stringify({
+                            snapshot: snapshot,
+                            quotation_details: this.details,
+                        }),
                     });
                     const out = await resp.json();
                     if (!resp.ok || !out.ok) throw new Error(out.error || "Save failed");

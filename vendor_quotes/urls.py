@@ -16,6 +16,7 @@ urlpatterns = [
     path("quotes/<int:pk>/ai-status/", views.quote_ai_status, name="quote_ai_status"),
     path("quotes/<int:pk>/revise/", views.quote_revise, name="quote_revise"),
     path("revisions/<int:pk>/save/", views.revision_save, name="revision_save"),
+    path("revisions/<int:pk>/details/", views.revision_update_details, name="revision_update_details"),
     path("revisions/<int:pk>/submit/", views.revision_submit, name="revision_submit"),
     path("revisions/<int:pk>/approve/", views.revision_approve, name="revision_approve"),
     path("revisions/<int:pk>/send-back/", views.revision_send_back, name="revision_send_back"),
