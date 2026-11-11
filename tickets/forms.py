@@ -78,7 +78,7 @@ class TicketCreateForm(forms.ModelForm):
             type=Ticket.TYPE_PROJECT, is_deleted=False
         ).order_by("-created_at")
         self.fields["parent_job"].required = False
-        self.fields["assigned_to"].queryset = User.objects.filter(is_active=True).order_by("first_name", "username")
+        self.fields["assigned_to"].queryset = User.objects.filter(is_active=True).order_by("full_name", "email")
         self.fields["assigned_to"].required = False
 
 
@@ -118,6 +118,6 @@ class TicketUpdateForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["assigned_to"].queryset = User.objects.filter(is_active=True).order_by("first_name", "username")
+        self.fields["assigned_to"].queryset = User.objects.filter(is_active=True).order_by("full_name", "email")
         self.fields["assigned_to"].required = False
 

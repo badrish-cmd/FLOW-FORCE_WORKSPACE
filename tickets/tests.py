@@ -1,3 +1,4 @@
+import unittest
 """
 Comprehensive test suite for Tickets & Service Jobs module with Synology integration.
 """
@@ -13,7 +14,10 @@ from django.utils import timezone
 
 from .models import Ticket, TicketEvent, TicketFile, TicketShareLink
 from .services import file_handler, synology, workflow, zoho_lookup
-from mcp_server.tools import tickets as mcp_tickets
+try:
+    from mcp_server.tools import tickets as mcp_tickets  # local-only package
+except ImportError:  # pragma: no cover - not deployed to the server
+    mcp_tickets = None
 
 User = get_user_model()
 
@@ -64,20 +68,26 @@ class SynologyPathAndSafetyTests(TestCase):
         self.assertNotIn("?", clean)
         self.assertTrue(len(clean) <= 80)
 
-    @override_settings(SYNOLOGY_ROOT="/FlowForce/Jobs")
+    @override_settings(SYNOLOGY_ROOT="/FF-Jobs")
     def test_ticket_nas_folder_builder(self):
-        """NAS folder paths are properly rooted and formatted."""
-        t1 = Ticket(number="TKT-26-0001", job_no="1921", customer_name="Indofood Sukses", title="Rotary Valve")
-        folder = synology.build_ticket_nas_folder(t1)
-        self.assertTrue(folder.startswith("/FlowForce/Jobs/"))
-        self.assertIn("JOB-1921", folder)
-        self.assertIn("Indofood", folder)
+        """Agreed layout: Customer / JOB (ENQ) / and Service tickets inside their project."""
+        project = Ticket(type=Ticket.TYPE_PROJECT, number="TKT-26-0001", job_no="1921",
+                         enquiry_number="ENQ/2026/06/2527", customer_name="PT Medifarma Laboratories", title="Valves")
+        self.assertEqual(synology.build_ticket_nas_folder(project),
+                         "/FF-Jobs/PT Medifarma Laboratories/JOB-1921 (ENQ-2026-06-2527)")
 
-        # Enquiry fallback
-        t2 = Ticket(number="TKT-26-0002", enquiry_number="ENQ/2026/09/2708", customer_name="Indofood", title="Airlock")
-        folder2 = synology.build_ticket_nas_folder(t2)
-        self.assertTrue(folder2.startswith("/FlowForce/Jobs/"))
-        self.assertIn("ENQ-ENQ-2026-09-2708", folder2)
+        enq_only = Ticket(type=Ticket.TYPE_PROJECT, number="TKT-26-0002", enquiry_number="ENQ/2026/09/2708",
+                          customer_name="Indofood", title="Airlock")
+        self.assertEqual(synology.build_ticket_nas_folder(enq_only), "/FF-Jobs/Indofood/ENQ-2026-09-2708")
+
+        project.nas_folder = synology.build_ticket_nas_folder(project)
+        service = Ticket(type=Ticket.TYPE_SERVICE, number="TKT-26-0003", customer_name="PT Medifarma Laboratories",
+                         title="Leak at valve 3", parent_job=project)
+        self.assertEqual(synology.build_ticket_nas_folder(service),
+                         "/FF-Jobs/PT Medifarma Laboratories/JOB-1921 (ENQ-2026-06-2527)/Service/TKT-26-0003 Leak at valve 3")
+
+        lone = Ticket(type=Ticket.TYPE_SERVICE, number="TKT-26-0004", customer_name="../../etc", title="x")
+        self.assertTrue(synology.build_ticket_nas_folder(lone).startswith("/FF-Jobs/"))
 
 
 class ZohoRegexMatchingTests(TestCase):
@@ -292,6 +302,7 @@ class PermissionsAndSoftDeleteTests(TestCase):
         self.assertEqual(ticket.events.first().action, "DELETED")
 
 
+@unittest.skipIf(mcp_tickets is None, "local MCP server not present")
 class MCPToolsTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(email="mcp@flowforce.com", full_name="MCP Admin", role="SUPER_ADMIN", is_superuser=True)

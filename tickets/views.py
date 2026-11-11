@@ -93,7 +93,7 @@ def ticket_list(request):
     page_number = request.GET.get("page")
     page_obj = paginator.get_page(page_number)
 
-    users = User.objects.filter(is_active=True).order_by("first_name", "username")
+    users = User.objects.filter(is_active=True).order_by("full_name", "email")
 
     context = {
         "page_obj": page_obj,

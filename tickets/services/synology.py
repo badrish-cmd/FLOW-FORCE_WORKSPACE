@@ -58,7 +58,7 @@ def is_configured():
     return bool(url and user and pwd)
 
 
-def sanitize_path_segment(name, max_length=80):
+def sanitize_path_segment(name, max_length=80, keep_spaces=False):
     """
     Sanitize a directory or file name segment:
     - Strips directory traversal dots (..)
@@ -79,41 +79,60 @@ def sanitize_path_segment(name, max_length=80):
     # Strip leading/trailing dots and spaces
     cleaned = cleaned.strip(". ")
     # Collapse consecutive whitespace and underscores
-    cleaned = re.sub(r'[\s_]+', '_', cleaned)
-    cleaned = cleaned.strip("_.")
+    if keep_spaces:
+        # Readable folder names: "PT Medifarma Laboratories", "JOB-1921 (ENQ-2026-06-2527)"
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip(" _.")
+    else:
+        cleaned = re.sub(r'[\s_]+', '_', cleaned)
+        cleaned = cleaned.strip("_.")
     if not cleaned:
         cleaned = "unnamed"
     return cleaned[:max_length]
 
 
-def build_ticket_nas_folder(ticket):
-    """
-    Build the full canonical NAS folder path for a ticket.
-    Guarantees no traversal and enforces root prefix.
-    Format:
-      - If ticket has job_no: <SYNOLOGY_ROOT>/JOB-<job_no>_<customer>_<title>
-      - Else if enquiry_number: <SYNOLOGY_ROOT>/ENQ-<enquiry>_<customer>_<title>
-      - Else: <SYNOLOGY_ROOT>/<ticket.number>_<customer>_<title>
-    """
-    root = (getattr(settings, "SYNOLOGY_ROOT", "") or "/FlowForce/Jobs").strip()
+def _root_path():
+    root = (getattr(settings, "SYNOLOGY_ROOT", "") or "/FF-Jobs").strip()
     if not root.startswith("/"):
         root = "/" + root
-    root = posixpath.normpath(root)
+    return posixpath.normpath(root)
 
-    cust = sanitize_path_segment(ticket.customer_name or "General", max_length=25)
-    title = sanitize_path_segment(ticket.title or "Ticket", max_length=30)
 
+def _job_segment(ticket):
+    """'JOB-1921 (ENQ-2026-06-2527)', 'JOB-1921', 'ENQ-2026-06-2527' or the ticket number."""
+    enq = ""
+    if ticket.enquiry_number:
+        enq = "ENQ-" + sanitize_path_segment(
+            ticket.enquiry_number.replace("/", "-").replace("\\", "-").removeprefix("ENQ-"), max_length=30, keep_spaces=True)
     if ticket.job_no:
-        job = sanitize_path_segment(ticket.job_no, max_length=20)
-        segment = f"JOB-{job}_{cust}_{title}"
-    elif ticket.enquiry_number:
-        enq = sanitize_path_segment(ticket.enquiry_number.replace("/", "-").replace("\\", "-"), max_length=25)
-        segment = f"ENQ-{enq}_{cust}_{title}"
-    else:
-        segment = f"{ticket.number}_{cust}_{title}"
+        job = "JOB-" + sanitize_path_segment(ticket.job_no, max_length=20, keep_spaces=True)
+        return sanitize_path_segment(f"{job} ({enq})" if enq else job, max_length=80, keep_spaces=True)
+    return enq or ticket.number
 
-    segment = sanitize_path_segment(segment, max_length=80)
-    folder_path = posixpath.join(root, segment)
+
+def build_ticket_nas_folder(ticket):
+    """
+    Full NAS folder for a ticket (agreed layout):
+      PROJECT:                <ROOT>/<Customer>/JOB-1921 (ENQ-2026-06-2527)
+      SERVICE with project:   <project folder>/Service/<TKT-26-0001 Title>
+      SERVICE without project:<ROOT>/<Customer>/Service/<TKT-26-0001 Title>
+    Every part is sanitised; the result always stays inside SYNOLOGY_ROOT.
+    """
+    root = _root_path()
+    if ticket.type == ticket.TYPE_SERVICE:
+        name = sanitize_path_segment(f"{ticket.number} {ticket.title or ''}".strip(), max_length=80, keep_spaces=True)
+        parent = getattr(ticket, "parent_job", None)
+        if parent is not None:
+            base = parent.nas_folder or build_ticket_nas_folder(parent)
+        else:
+            base = posixpath.join(root, sanitize_path_segment(ticket.customer_name or "General", keep_spaces=True))
+        folder_path = posixpath.join(base, "Service", name)
+    else:
+        cust = sanitize_path_segment(ticket.customer_name or "General", keep_spaces=True)
+        folder_path = posixpath.join(root, cust, _job_segment(ticket))
+
+    folder_path = posixpath.normpath(folder_path)
+    if folder_path != root and not folder_path.startswith(root + "/"):
+        raise ValueError("NAS folder escapes SYNOLOGY_ROOT")
     return folder_path
 
 
@@ -127,7 +146,7 @@ class SynologyClient:
         self.url = (url or getattr(settings, "SYNOLOGY_URL", "")).rstrip("/")
         self.user = user or getattr(settings, "SYNOLOGY_USER", "")
         self.password = password or getattr(settings, "SYNOLOGY_PASSWORD", "")
-        self.root = (root or getattr(settings, "SYNOLOGY_ROOT", "") or "/FlowForce/Jobs").rstrip("/")
+        self.root = (root or getattr(settings, "SYNOLOGY_ROOT", "") or "/FF-Jobs").rstrip("/")
         self.verify_ssl = getattr(settings, "SYNOLOGY_VERIFY_SSL", False) if verify_ssl is None else verify_ssl
         self.session = requests.Session()
 

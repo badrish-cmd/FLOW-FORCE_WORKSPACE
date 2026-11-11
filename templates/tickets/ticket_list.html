@@ -223,7 +223,7 @@
                             {% endif %}
                         </td>
                         <td class="px-4 py-3 text-slate-600 dark:text-slate-300">
-                            {{ t.assigned_to.get_full_name|default:t.assigned_to.username|default:"Unassigned" }}
+                            {% if t.assigned_to %}{{ t.assigned_to.full_name|default:t.assigned_to.email }}{% else %}Unassigned{% endif %}
                         </td>
                         <td class="px-4 py-3 text-right text-xs text-slate-400">
                             {{ t.created_at|date:"M d, Y" }}
