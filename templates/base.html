@@ -17,6 +17,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
+            // The workspace is light-only; don't follow the Windows/phone dark-mode setting.
+            darkMode: 'class',
             theme: {
                 extend: {
                     colors: {

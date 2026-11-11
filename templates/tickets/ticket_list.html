@@ -2,277 +2,198 @@
 {% block title %}Tickets & Jobs - Flow-Force Workspace{% endblock %}
 
 {% block content %}
-<div class="mx-auto max-w-7xl px-4 py-6">
+<div class="mx-auto max-w-7xl">
+
     <!-- Header -->
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+    <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-            <h1 class="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <i class="fas fa-ticket-alt text-blue-600"></i>
-                Tickets & Service Jobs
-            </h1>
-            <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                Project delivery tracking, service job records, and Synology NAS file management.
-            </p>
+            <h1 class="text-2xl font-bold text-gray-900">Tickets &amp; Jobs</h1>
+            <p class="text-sm text-slate-500">Project jobs and service tickets, with photos, reports, warranty and receipts kept on the Synology.</p>
         </div>
         {% if can_create %}
-        <div class="flex items-center gap-2">
-            <a href="{% url 'tickets:ticket_create' %}?type=PROJECT" class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition">
-                <i class="fas fa-plus"></i>
-                <span>New Project Job</span>
+        <div class="flex flex-wrap gap-2">
+            <a href="{% url 'tickets:ticket_create' %}?type=PROJECT" class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700">
+                <i class="fas fa-plus"></i> New Project Job
             </a>
-            <a href="{% url 'tickets:ticket_create' %}?type=SERVICE" class="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg shadow-sm transition">
-                <i class="fas fa-wrench"></i>
-                <span>New Service Ticket</span>
+            <a href="{% url 'tickets:ticket_create' %}?type=SERVICE" class="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">
+                <i class="fas fa-wrench"></i> New Service Ticket
             </a>
         </div>
         {% endif %}
     </div>
 
-    <!-- Quick Stats -->
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        <a href="{% url 'tickets:ticket_list' %}?type=PROJECT" class="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm hover:border-blue-500 transition">
-            <div class="flex items-center justify-between">
-                <div>
-                    <div class="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">Project Jobs</div>
-                    <div class="text-2xl font-bold text-slate-900 dark:text-white mt-1">{{ total_projects }}</div>
-                </div>
-                <div class="p-3 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg">
-                    <i class="fas fa-project-diagram fa-lg"></i>
-                </div>
+    <!-- Pipelines: where every job / ticket stands -->
+    <div class="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {% with pipe=project_pipe %}
+        <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div class="mb-3 flex items-center justify-between">
+                <a href="?type=PROJECT" class="flex items-center gap-2 font-semibold text-slate-900 hover:text-blue-600">
+                    <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><i class="fas fa-project-diagram text-sm"></i></span>
+                    Project jobs
+                </a>
+                <span class="text-sm text-slate-500"><b class="text-lg text-slate-900">{{ pipe.open }}</b> open · {{ pipe.total }} total</span>
             </div>
+            <div class="overflow-x-auto pb-1"><div class="grid min-w-[500px] grid-cols-7 gap-1">
+                {% for st in pipe.steps %}
+                <a href="?type=PROJECT&status={{ st.key }}"
+                   class="rounded-lg border px-1 py-2 text-center transition hover:border-blue-400 hover:bg-blue-50 {% if selected_type == 'PROJECT' and status_filter == st.key %}border-blue-500 bg-blue-50{% else %}border-slate-200{% endif %}">
+                    <div class="text-lg font-bold {% if st.count %}text-slate-900{% else %}text-slate-300{% endif %}">{{ st.count }}</div>
+                    <div class="text-[11px] leading-tight text-slate-500">{{ st.label }}</div>
+                </a>
+                {% endfor %}
+            </div></div>
+        </div>
+        {% endwith %}
+
+        {% with pipe=service_pipe %}
+        <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div class="mb-3 flex items-center justify-between">
+                <a href="?type=SERVICE" class="flex items-center gap-2 font-semibold text-slate-900 hover:text-emerald-600">
+                    <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600"><i class="fas fa-tools text-sm"></i></span>
+                    Service tickets
+                </a>
+                <span class="text-sm text-slate-500"><b class="text-lg text-slate-900">{{ pipe.open }}</b> open · {{ pipe.total }} total</span>
+            </div>
+            <div class="overflow-x-auto pb-1"><div class="grid min-w-[500px] grid-cols-7 gap-1">
+                {% for st in pipe.steps %}
+                <a href="?type=SERVICE&status={{ st.key }}"
+                   class="rounded-lg border px-1 py-2 text-center transition hover:border-emerald-400 hover:bg-emerald-50 {% if selected_type == 'SERVICE' and status_filter == st.key %}border-emerald-500 bg-emerald-50{% else %}border-slate-200{% endif %}">
+                    <div class="text-lg font-bold {% if st.count %}text-slate-900{% else %}text-slate-300{% endif %}">{{ st.count }}</div>
+                    <div class="text-[11px] leading-tight text-slate-500">{{ st.label }}</div>
+                </a>
+                {% endfor %}
+            </div></div>
+        </div>
+        {% endwith %}
+    </div>
+
+    <!-- Quick views -->
+    <div class="mb-4 flex flex-wrap gap-2 text-sm">
+        <a href="{% url 'tickets:ticket_list' %}" class="rounded-full border px-3 py-1.5 font-medium {% if not has_filters %}border-slate-800 bg-slate-800 text-white{% else %}border-slate-300 bg-white text-slate-700 hover:bg-slate-50{% endif %}">All</a>
+        <a href="?filter=open" class="rounded-full border px-3 py-1.5 font-medium {% if filter_preset == 'open' %}border-slate-800 bg-slate-800 text-white{% else %}border-slate-300 bg-white text-slate-700 hover:bg-slate-50{% endif %}">Open only</a>
+        <a href="?filter=my_tickets" class="rounded-full border px-3 py-1.5 font-medium {% if filter_preset == 'my_tickets' %}border-blue-600 bg-blue-600 text-white{% else %}border-slate-300 bg-white text-slate-700 hover:bg-slate-50{% endif %}">
+            <i class="fas fa-user-check mr-1"></i>Assigned to me{% if mine_count %} <span class="ml-1 rounded-full bg-blue-100 px-1.5 text-xs text-blue-700">{{ mine_count }}</span>{% endif %}
         </a>
-        <a href="{% url 'tickets:ticket_list' %}?type=SERVICE" class="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm hover:border-emerald-500 transition">
-            <div class="flex items-center justify-between">
-                <div>
-                    <div class="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">Service Tickets</div>
-                    <div class="text-2xl font-bold text-slate-900 dark:text-white mt-1">{{ total_services }}</div>
-                </div>
-                <div class="p-3 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded-lg">
-                    <i class="fas fa-tools fa-lg"></i>
-                </div>
-            </div>
+        <a href="?filter=urgent" class="rounded-full border px-3 py-1.5 font-medium {% if filter_preset == 'urgent' %}border-red-600 bg-red-600 text-white{% else %}border-slate-300 bg-white text-slate-700 hover:bg-slate-50{% endif %}">
+            <i class="fas fa-fire mr-1"></i>High / urgent{% if urgent_count %} <span class="ml-1 rounded-full bg-red-100 px-1.5 text-xs text-red-700">{{ urgent_count }}</span>{% endif %}
         </a>
-        <a href="{% url 'tickets:ticket_list' %}?filter=open" class="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm hover:border-amber-500 transition">
-            <div class="flex items-center justify-between">
-                <div>
-                    <div class="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">Active / Open</div>
-                    <div class="text-2xl font-bold text-slate-900 dark:text-white mt-1">{{ open_tickets }}</div>
-                </div>
-                <div class="p-3 bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-lg">
-                    <i class="fas fa-clock fa-lg"></i>
-                </div>
-            </div>
+        <a href="?filter=expiring_warranty" class="rounded-full border px-3 py-1.5 font-medium {% if filter_preset == 'expiring_warranty' %}border-amber-500 bg-amber-500 text-white{% else %}border-slate-300 bg-white text-slate-700 hover:bg-slate-50{% endif %}">
+            <i class="fas fa-shield-alt mr-1"></i>Warranty ending in 30 days{% if expiring_count %} <span class="ml-1 rounded-full bg-amber-100 px-1.5 text-xs text-amber-700">{{ expiring_count }}</span>{% endif %}
         </a>
     </div>
 
-    <!-- Filter Tabs -->
-    <div class="flex flex-wrap items-center gap-2 border-b border-slate-200 dark:border-slate-700 pb-3 mb-6">
-        <a href="{% url 'tickets:ticket_list' %}" class="px-4 py-2 rounded-lg text-sm font-medium transition {% if not selected_type and not filter_preset %}bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900{% else %}text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800{% endif %}">
-            All Tickets
-        </a>
-        <a href="{% url 'tickets:ticket_list' %}?type=PROJECT" class="px-4 py-2 rounded-lg text-sm font-medium transition {% if selected_type == 'PROJECT' %}bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900{% else %}text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800{% endif %}">
-            Project Jobs
-        </a>
-        <a href="{% url 'tickets:ticket_list' %}?type=SERVICE" class="px-4 py-2 rounded-lg text-sm font-medium transition {% if selected_type == 'SERVICE' %}bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900{% else %}text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800{% endif %}">
-            Service Tickets
-        </a>
-        <a href="{% url 'tickets:ticket_list' %}?filter=expiring_warranty" class="px-4 py-2 rounded-lg text-sm font-medium transition {% if filter_preset == 'expiring_warranty' %}bg-amber-600 text-white{% else %}text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800{% endif %}">
-            <i class="fas fa-shield-alt mr-1"></i> Expiring Warranties (30d)
-        </a>
-        <a href="{% url 'tickets:ticket_list' %}?filter=my_tickets" class="px-4 py-2 rounded-lg text-sm font-medium transition {% if filter_preset == 'my_tickets' %}bg-blue-600 text-white{% else %}text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800{% endif %}">
-            <i class="fas fa-user-check mr-1"></i> My Assigned
-        </a>
-    </div>
-
-    <!-- Search & Filter Controls -->
-    <form method="get" class="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm mb-6 flex flex-wrap items-center gap-3">
-        {% if selected_type %}<input type="hidden" name="type" value="{{ selected_type }}">{% endif %}
+    <!-- Search & filters -->
+    <form method="get" class="mb-4 flex flex-wrap items-center gap-2">
         {% if filter_preset %}<input type="hidden" name="filter" value="{{ filter_preset }}">{% endif %}
-
-        <div class="relative flex-1 min-w-[240px]">
+        <div class="relative min-w-[260px] flex-1">
             <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
-            <input type="text" name="q" value="{{ search_q }}" placeholder="Search by Ticket #, Title, Customer, JOB No, Enquiry No..." class="w-full pl-9 pr-3 py-2 text-sm bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <input type="text" name="q" value="{{ search_q }}" placeholder="Search ticket no., JOB no., ENQ no., quote no., customer, title" class="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm text-slate-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
         </div>
-
-        <select name="status" class="px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-100" onchange="this.form.submit()">
-            <option value="">All Statuses</option>
-            {% if selected_type == 'PROJECT' %}
-                <option value="PO_RECEIVED" {% if status_filter == 'PO_RECEIVED' %}selected{% endif %}>PO Received</option>
-                <option value="ORDERED_FROM_VENDOR" {% if status_filter == 'ORDERED_FROM_VENDOR' %}selected{% endif %}>Ordered from Vendor</option>
-                <option value="IN_TRANSIT" {% if status_filter == 'IN_TRANSIT' %}selected{% endif %}>In Transit</option>
-                <option value="DELIVERED" {% if status_filter == 'DELIVERED' %}selected{% endif %}>Delivered</option>
-                <option value="INSTALLATION" {% if status_filter == 'INSTALLATION' %}selected{% endif %}>Installation</option>
-                <option value="HANDOVER" {% if status_filter == 'HANDOVER' %}selected{% endif %}>Handover</option>
-                <option value="CLOSED" {% if status_filter == 'CLOSED' %}selected{% endif %}>Closed</option>
-            {% elif selected_type == 'SERVICE' %}
-                <option value="OPEN" {% if status_filter == 'OPEN' %}selected{% endif %}>Open</option>
-                <option value="SITE_VISIT_SCHEDULED" {% if status_filter == 'SITE_VISIT_SCHEDULED' %}selected{% endif %}>Site Visit Scheduled</option>
-                <option value="SITE_VISIT_DONE" {% if status_filter == 'SITE_VISIT_DONE' %}selected{% endif %}>Site Visit Done</option>
-                <option value="IN_PROGRESS" {% if status_filter == 'IN_PROGRESS' %}selected{% endif %}>In Progress</option>
-                <option value="WAITING_PARTS" {% if status_filter == 'WAITING_PARTS' %}selected{% endif %}>Waiting Parts</option>
-                <option value="COMPLETED" {% if status_filter == 'COMPLETED' %}selected{% endif %}>Completed</option>
-                <option value="CLOSED" {% if status_filter == 'CLOSED' %}selected{% endif %}>Closed</option>
-            {% else %}
-                <option value="OPEN" {% if status_filter == 'OPEN' %}selected{% endif %}>Open</option>
-                <option value="PO_RECEIVED" {% if status_filter == 'PO_RECEIVED' %}selected{% endif %}>PO Received</option>
-                <option value="IN_PROGRESS" {% if status_filter == 'IN_PROGRESS' %}selected{% endif %}>In Progress</option>
-                <option value="HANDOVER" {% if status_filter == 'HANDOVER' %}selected{% endif %}>Handover</option>
-                <option value="COMPLETED" {% if status_filter == 'COMPLETED' %}selected{% endif %}>Completed</option>
-                <option value="CLOSED" {% if status_filter == 'CLOSED' %}selected{% endif %}>Closed</option>
-            {% endif %}
+        <select name="type" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700" onchange="this.form.status.value='';this.form.submit()">
+            <option value="">Projects &amp; service</option>
+            <option value="PROJECT" {% if selected_type == 'PROJECT' %}selected{% endif %}>Project jobs</option>
+            <option value="SERVICE" {% if selected_type == 'SERVICE' %}selected{% endif %}>Service tickets</option>
         </select>
-
-        <select name="priority" class="px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-100" onchange="this.form.submit()">
-            <option value="">All Priorities</option>
-            <option value="LOW" {% if priority_filter == 'LOW' %}selected{% endif %}>Low</option>
-            <option value="NORMAL" {% if priority_filter == 'NORMAL' %}selected{% endif %}>Normal</option>
-            <option value="HIGH" {% if priority_filter == 'HIGH' %}selected{% endif %}>High</option>
-            <option value="URGENT" {% if priority_filter == 'URGENT' %}selected{% endif %}>Urgent</option>
+        <select name="status" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700" onchange="this.form.submit()">
+            <option value="">All statuses</option>
+            {% for key, label in status_options %}<option value="{{ key }}" {% if status_filter == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
         </select>
-
-        <button type="submit" class="px-4 py-2 bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 text-white dark:text-slate-900 text-sm font-semibold rounded-lg transition">
-            Filter
-        </button>
-        {% if search_q or status_filter or priority_filter or assigned_filter or filter_preset %}
-        <a href="{% url 'tickets:ticket_list' %}" class="px-3 py-2 text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
-            Clear
-        </a>
-        {% endif %}
+        <select name="priority" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700" onchange="this.form.submit()">
+            <option value="">All priorities</option>
+            {% for key, label in priority_options %}<option value="{{ key }}" {% if priority_filter == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        <select name="assigned_to" class="max-w-[200px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700" onchange="this.form.submit()">
+            <option value="">Anyone</option>
+            <option value="me" {% if assigned_filter == 'me' %}selected{% endif %}>Me</option>
+            {% for u in users %}<option value="{{ u.id }}" {% if assigned_filter == u.id|stringformat:'s' %}selected{% endif %}>{{ u.full_name|default:u.email }}</option>{% endfor %}
+        </select>
+        <button class="rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-900">Search</button>
+        {% if has_filters %}<a href="{% url 'tickets:ticket_list' %}" class="px-2 py-2 text-sm text-slate-500 hover:text-slate-800">Clear</a>{% endif %}
     </form>
 
     <!-- Table -->
-    <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+    <div class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-slate-200 dark:divide-slate-700 text-sm">
-                <thead class="bg-slate-50 dark:bg-slate-900 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            <table class="min-w-full divide-y divide-slate-200 text-sm">
+                <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                     <tr>
-                        <th class="px-4 py-3">Ticket #</th>
-                        <th class="px-4 py-3">Type</th>
-                        <th class="px-4 py-3">Title & Customer</th>
-                        <th class="px-4 py-3">JOB / Enquiry No</th>
+                        <th class="px-4 py-3">Ticket</th>
+                        <th class="px-4 py-3">Customer &amp; title</th>
+                        <th class="px-4 py-3">JOB / ENQ</th>
                         <th class="px-4 py-3">Status</th>
                         <th class="px-4 py-3">Priority</th>
                         <th class="px-4 py-3">Warranty</th>
-                        <th class="px-4 py-3">Assigned To</th>
-                        <th class="px-4 py-3 text-right">Created</th>
+                        <th class="px-4 py-3">Assigned</th>
+                        <th class="px-4 py-3">Updated</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-slate-100 dark:divide-slate-700/50">
+                <tbody class="divide-y divide-slate-100">
                     {% for t in page_obj %}
-                    <tr class="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition">
-                        <td class="px-4 py-3 font-semibold">
-                            <a href="{% url 'tickets:ticket_detail' t.id %}" class="text-blue-600 dark:text-blue-400 hover:underline">
-                                {{ t.number }}
-                            </a>
+                    <tr class="cursor-pointer hover:bg-slate-50" onclick="location.href='{% url 'tickets:ticket_detail' t.id %}'">
+                        <td class="whitespace-nowrap px-4 py-3">
+                            <a href="{% url 'tickets:ticket_detail' t.id %}" class="font-semibold text-slate-900 hover:text-blue-600">{{ t.number }}</a>
+                            <div class="mt-0.5">
+                                {% if t.type == 'PROJECT' %}
+                                <span class="inline-flex items-center gap-1 rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700"><i class="fas fa-project-diagram text-[9px]"></i> Project</span>
+                                {% else %}
+                                <span class="inline-flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700"><i class="fas fa-wrench text-[9px]"></i> Service</span>
+                                {% endif %}
+                            </div>
                         </td>
                         <td class="px-4 py-3">
-                            {% if t.type == 'PROJECT' %}
-                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                                <i class="fas fa-project-diagram text-[10px]"></i> Project
-                            </span>
-                            {% else %}
-                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
-                                <i class="fas fa-wrench text-[10px]"></i> Service
-                            </span>
-                            {% endif %}
+                            <div class="font-medium text-slate-900">{{ t.customer_name|default:"—" }}</div>
+                            <div class="max-w-xs truncate text-xs text-slate-500" title="{{ t.title }}">{{ t.title }}</div>
                         </td>
-                        <td class="px-4 py-3">
-                            <div class="font-medium text-slate-900 dark:text-white">{{ t.title }}</div>
-                            <div class="text-xs text-slate-500 dark:text-slate-400">{{ t.customer_name|default:"-" }}</div>
+                        <td class="whitespace-nowrap px-4 py-3 text-xs">
+                            {% if t.job_no %}<div class="font-semibold text-slate-800">JOB {{ t.job_no }}</div>{% endif %}
+                            {% if t.enquiry_number %}<div class="text-slate-500">{{ t.enquiry_number }}</div>{% endif %}
+                            {% if not t.job_no and not t.enquiry_number %}<span class="text-slate-400">—</span>{% endif %}
                         </td>
-                        <td class="px-4 py-3 text-xs text-slate-600 dark:text-slate-300">
-                            {% if t.job_no %}
-                            <div class="font-semibold text-slate-800 dark:text-slate-200">JOB: {{ t.job_no }}</div>
-                            {% endif %}
-                            {% if t.enquiry_number %}
-                            <div class="text-slate-500 dark:text-slate-400">{{ t.enquiry_number }}</div>
-                            {% endif %}
-                            {% if not t.job_no and not t.enquiry_number %}-{% endif %}
+                        <td class="whitespace-nowrap px-4 py-3">{% include 'tickets/_status_badge.html' with status=t.status label=t.status_label %}</td>
+                        <td class="whitespace-nowrap px-4 py-3">
+                            {% if t.priority == 'URGENT' %}<span class="rounded bg-red-100 px-2 py-0.5 text-xs font-bold text-red-800">Urgent</span>
+                            {% elif t.priority == 'HIGH' %}<span class="rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">High</span>
+                            {% elif t.priority == 'LOW' %}<span class="text-xs text-slate-400">Low</span>
+                            {% else %}<span class="text-xs text-slate-500">Normal</span>{% endif %}
                         </td>
-                        <td class="px-4 py-3">
-                            {% include 'tickets/_status_badge.html' with status=t.status label=t.status_label %}
-                        </td>
-                        <td class="px-4 py-3">
-                            {% if t.priority == 'URGENT' %}
-                            <span class="inline-block px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300">URGENT</span>
-                            {% elif t.priority == 'HIGH' %}
-                            <span class="inline-block px-2 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">High</span>
-                            {% elif t.priority == 'LOW' %}
-                            <span class="inline-block px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300">Low</span>
-                            {% else %}
-                            <span class="inline-block px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">Normal</span>
-                            {% endif %}
-                        </td>
-                        <td class="px-4 py-3 text-xs">
+                        <td class="whitespace-nowrap px-4 py-3 text-xs">
                             {% if t.warranty_end %}
                                 {% if t.is_warranty_active %}
-                                    {% if t.is_warranty_expiring_soon %}
-                                    <span class="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-medium">
-                                        <i class="fas fa-exclamation-triangle"></i> {{ t.warranty_days_remaining }}d left
-                                    </span>
-                                    {% else %}
-                                    <span class="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
-                                        <i class="fas fa-check-circle"></i> Active
-                                    </span>
-                                    {% endif %}
-                                {% else %}
-                                <span class="text-slate-400">Expired</span>
-                                {% endif %}
-                            {% else %}
-                            <span class="text-slate-400">-</span>
-                            {% endif %}
+                                    {% if t.is_warranty_expiring_soon %}<span class="font-medium text-amber-600"><i class="fas fa-exclamation-triangle"></i> {{ t.warranty_days_remaining }} days left</span>
+                                    {% else %}<span class="font-medium text-emerald-600"><i class="fas fa-check-circle"></i> Until {{ t.warranty_end|date:"j M Y" }}</span>{% endif %}
+                                {% else %}<span class="text-slate-400">Expired {{ t.warranty_end|date:"j M Y" }}</span>{% endif %}
+                            {% else %}<span class="text-slate-400">—</span>{% endif %}
                         </td>
-                        <td class="px-4 py-3 text-slate-600 dark:text-slate-300">
-                            {% if t.assigned_to %}{{ t.assigned_to.full_name|default:t.assigned_to.email }}{% else %}Unassigned{% endif %}
+                        <td class="whitespace-nowrap px-4 py-3 text-slate-600">
+                            {% if t.assigned_to %}{{ t.assigned_to.full_name|default:t.assigned_to.email }}{% else %}<span class="text-slate-400">Unassigned</span>{% endif %}
                         </td>
-                        <td class="px-4 py-3 text-right text-xs text-slate-400">
-                            {{ t.created_at|date:"M d, Y" }}
-                        </td>
+                        <td class="whitespace-nowrap px-4 py-3 text-xs text-slate-500" title="{{ t.updated_at|date:'j M Y H:i' }}">{{ t.updated_at|date:"j M Y" }}</td>
                     </tr>
                     {% empty %}
-                    <tr>
-                        <td colspan="9" class="px-4 py-12 text-center text-slate-500 dark:text-slate-400">
-                            <i class="fas fa-ticket-alt text-4xl mb-3 text-slate-300 dark:text-slate-600"></i>
-                            <p class="text-base font-semibold">No tickets found</p>
-                            <p class="text-sm mt-1">Try clearing your filters or create a new ticket.</p>
-                            {% if can_create %}
-                            <div class="mt-4">
-                                <a href="{% url 'tickets:ticket_create' %}" class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm">
-                                    <i class="fas fa-plus"></i> Create Ticket
-                                </a>
-                            </div>
-                            {% endif %}
-                        </td>
-                    </tr>
+                    <tr><td colspan="8" class="px-4 py-14 text-center text-slate-500">
+                        <i class="fas fa-ticket-alt mb-2 block text-3xl text-slate-300"></i>
+                        {% if has_filters %}
+                            No tickets match these filters. <a href="{% url 'tickets:ticket_list' %}" class="font-semibold text-blue-600">Clear filters</a>
+                        {% else %}
+                            No tickets yet.
+                            {% if can_create %}Create the first <a href="{% url 'tickets:ticket_create' %}?type=PROJECT" class="font-semibold text-blue-600">project job</a> or <a href="{% url 'tickets:ticket_create' %}?type=SERVICE" class="font-semibold text-emerald-600">service ticket</a>.{% endif %}
+                        {% endif %}
+                    </td></tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
-
-        <!-- Pagination -->
-        {% if page_obj.has_other_pages %}
-        <div class="flex items-center justify-between px-4 py-3 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
-            <div class="text-xs text-slate-500">
-                Showing {{ page_obj.start_index }} to {{ page_obj.end_index }} of {{ page_obj.paginator.count }} tickets
-            </div>
-            <div class="flex items-center gap-1">
-                {% if page_obj.has_previous %}
-                <a href="?page={{ page_obj.previous_page_number }}{% if selected_type %}&type={{ selected_type }}{% endif %}{% if search_q %}&q={{ search_q }}{% endif %}" class="px-3 py-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100">
-                    Previous
-                </a>
-                {% endif %}
-                <span class="px-3 py-1 text-xs text-slate-500">
-                    Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
-                </span>
-                {% if page_obj.has_next %}
-                <a href="?page={{ page_obj.next_page_number }}{% if selected_type %}&type={{ selected_type }}{% endif %}{% if search_q %}&q={{ search_q }}{% endif %}" class="px-3 py-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100">
-                    Next
-                </a>
-                {% endif %}
-            </div>
-        </div>
-        {% endif %}
     </div>
+
+    {% if page_obj.has_other_pages %}
+    <div class="mt-4 flex items-center justify-between text-sm text-slate-600">
+        <span>{{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ page_obj.paginator.count }}</span>
+        <div class="flex gap-2">
+            {% if page_obj.has_previous %}<a href="?{% if querystring %}{{ querystring }}&{% endif %}page={{ page_obj.previous_page_number }}" class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 hover:bg-slate-50">Previous</a>{% endif %}
+            <span class="px-2 py-1.5">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+            {% if page_obj.has_next %}<a href="?{% if querystring %}{{ querystring }}&{% endif %}page={{ page_obj.next_page_number }}" class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 hover:bg-slate-50">Next</a>{% endif %}
+        </div>
+    </div>
+    {% endif %}
 </div>
 {% endblock %}
-

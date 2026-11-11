@@ -66,13 +66,16 @@ def ticket_list(request):
             qs = qs.filter(assigned_to_id=int(assigned_filter))
 
     today = timezone.localdate()
+    closed_states = [Ticket.STATUS_CLOSED]
     if filter_preset == "expiring_warranty":
         in_30_days = today + timezone.timedelta(days=30)
         qs = qs.filter(warranty_end__gte=today, warranty_end__lte=in_30_days)
     elif filter_preset == "my_tickets":
         qs = qs.filter(assigned_to=request.user)
     elif filter_preset == "urgent":
-        qs = qs.filter(priority=Ticket.PRIORITY_URGENT)
+        qs = qs.filter(priority__in=[Ticket.PRIORITY_URGENT, Ticket.PRIORITY_HIGH]).exclude(status__in=closed_states)
+    elif filter_preset == "open":
+        qs = qs.exclude(status__in=closed_states)
 
     if search_q:
         qs = qs.filter(
@@ -82,16 +85,43 @@ def ticket_list(request):
             | Q(job_no__icontains=search_q)
             | Q(enquiry_number__icontains=search_q)
             | Q(client_contact_name__icontains=search_q)
+            | Q(quote_number__icontains=search_q)
         )
 
-    # Counts for tab badges
-    total_projects = Ticket.objects.filter(is_deleted=False, type=Ticket.TYPE_PROJECT).count()
-    total_services = Ticket.objects.filter(is_deleted=False, type=Ticket.TYPE_SERVICE).count()
-    open_tickets = Ticket.objects.filter(is_deleted=False).exclude(status__in=[Ticket.STATUS_CLOSED, Ticket.STATUS_COMPLETED]).count()
+    qs = qs.order_by("-updated_at")
 
-    paginator = Paginator(qs, 20)
-    page_number = request.GET.get("page")
-    page_obj = paginator.get_page(page_number)
+    # One grouped query for every count on the page
+    base = Ticket.objects.filter(is_deleted=False)
+    counts = {(r["type"], r["status"]): r["n"] for r in base.values("type", "status").annotate(n=Count("id"))}
+
+    def pipeline(ticket_type, choices):
+        steps = [{"key": k, "label": lbl, "count": counts.get((ticket_type, k), 0)} for k, lbl in choices]
+        return {"steps": steps, "open": sum(x["count"] for x in steps if x["key"] not in closed_states),
+                "total": sum(x["count"] for x in steps)}
+
+    project_pipe = pipeline(Ticket.TYPE_PROJECT, Ticket.PROJECT_STATUS_CHOICES)
+    service_pipe = pipeline(Ticket.TYPE_SERVICE, Ticket.SERVICE_STATUS_CHOICES)
+    in_30_days = today + timezone.timedelta(days=30)
+    expiring_count = base.filter(warranty_end__gte=today, warranty_end__lte=in_30_days).count()
+    urgent_count = base.filter(priority__in=[Ticket.PRIORITY_URGENT, Ticket.PRIORITY_HIGH]).exclude(status__in=closed_states).count()
+    mine_count = base.filter(assigned_to=request.user).exclude(status__in=closed_states).count()
+
+    if ticket_type == Ticket.TYPE_PROJECT:
+        status_options = Ticket.PROJECT_STATUS_CHOICES
+    elif ticket_type == Ticket.TYPE_SERVICE:
+        status_options = Ticket.SERVICE_STATUS_CHOICES
+    else:
+        seen, status_options = set(), []
+        for k, lbl in Ticket.PROJECT_STATUS_CHOICES + Ticket.SERVICE_STATUS_CHOICES:
+            if k not in seen:
+                seen.add(k)
+                status_options.append((k, lbl))
+
+    paginator = Paginator(qs, 25)
+    page_obj = paginator.get_page(request.GET.get("page"))
+
+    keep = request.GET.copy()
+    keep.pop("page", None)
 
     users = User.objects.filter(is_active=True).order_by("full_name", "email")
 
@@ -103,9 +133,15 @@ def ticket_list(request):
         "assigned_filter": assigned_filter,
         "filter_preset": filter_preset,
         "search_q": search_q,
-        "total_projects": total_projects,
-        "total_services": total_services,
-        "open_tickets": open_tickets,
+        "project_pipe": project_pipe,
+        "service_pipe": service_pipe,
+        "expiring_count": expiring_count,
+        "urgent_count": urgent_count,
+        "mine_count": mine_count,
+        "status_options": status_options,
+        "priority_options": Ticket.PRIORITY_CHOICES,
+        "querystring": keep.urlencode(),
+        "has_filters": bool(search_q or status_filter or priority_filter or assigned_filter or filter_preset or ticket_type),
         "users": users,
         "can_create": workflow.can_create_ticket(request.user),
     }
