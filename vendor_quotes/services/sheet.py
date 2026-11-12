@@ -134,20 +134,25 @@ def first_sheet(snapshot):
 # Layout (Excel rows/columns, everything stays editable):
 #   Row 1        title
 #   Rows 2-6     B/C  Enquiry No., Customer, Vendor, Vendor Quote No., Currency
-#                F:H label / I value: Exchange Rate, Margin 1, Margin 2, Margin 3, Vendor Quote Total
-#   Row 8        item table headers, items from row 9
+#   Rows 2-8     F:H label / I value: Exchange Rate, Margin 1, Margin 2, Margin 3,
+#                Import Duty %, Import Duty (IDR), Vendor Quote Total
+#   Row 10       item table headers, items from row 11
 #   below items  TOTAL row, check row, PACKING block, CHARGES block (IDR)
+#
+# Import Duty (IDR) = Duty % x (total vendor invoice in IDR [Total Cost + Total Packing] + Total Charges)
 #
 # Per item row (x):
 #   H Price after Discount     = F*(1-G)
 #   I Cost per Unit (IDR)      = H*Rate
-#   J Price after Margin (IDR) = I/Margin1/Margin2/Margin3
-#   K Line Value (IDR)         = J*Qty
-#   L Freight Ratio            = K / total of K
-#   M Freight per Unit (IDR)   = Ratio * Total Charges / Qty
-#   N Packing per Unit (IDR)   = packing of this item (+ share of a lot packing amount)
-#   O Selling Price per Unit   = ROUNDUP(J+M+N, -3)
-#   P Total Selling Price      = O*Qty
+#   J Total Cost (IDR)         = I*Qty
+#   K Price after Margin (IDR) = I/Margin1/Margin2/Margin3
+#   L Line Value (IDR)         = K*Qty
+#   M Freight Ratio            = L / total of L
+#   N Freight per Unit (IDR)   = Ratio * Total Charges / Qty
+#   O Duty per Unit (IDR)      = Ratio * Import Duty / Qty
+#   P Packing per Unit (IDR)   = packing of this item (+ share of a lot packing amount)
+#   Q Selling Price per Unit   = ROUNDUP(K+N+O+P, -3)
+#   R Total Selling Price      = Q*Qty
 
 STYLES = {
     "ttl": {"bl": 1, "fs": 13},
@@ -159,6 +164,7 @@ STYLES = {
     "inpi": {"bg": {"rgb": "#FEF9C3"}, "n": {"pattern": "#,##0"}},
     "inpf": {"bg": {"rgb": "#FEF9C3"}, "n": {"pattern": "0.00"}},
     "pct": {"bg": {"rgb": "#FEF9C3"}, "n": {"pattern": "0%"}},
+    "pctd": {"bg": {"rgb": "#FEF9C3"}, "n": {"pattern": "0.0%"}},
     "hdr": {"bl": 1, "bg": {"rgb": "#1E3A8A"}, "cl": {"rgb": "#FFFFFF"}, "tb": 3, "ht": 2, "vt": 2},
     "cur": {"n": {"pattern": "#,##0.00"}},
     "idr": {"n": {"pattern": "#,##0"}},
@@ -174,16 +180,17 @@ STYLES = {
 HEADERS = [
     ("No.", 45), ("Part No.", 110), ("Description", 260), ("Qty", 50), ("Unit", 55),
     ("Vendor Price per Unit ({cur})", 125), ("Discount %", 80), ("Price after Discount ({cur})", 125),
-    ("Cost per Unit (IDR)", 125), ("Price after Margin (IDR)", 135),
-    ("Line Value (IDR) (Price after Margin × Qty)", 150),
-    ("Freight Ratio", 85), ("Freight per Unit (IDR)", 130), ("Packing per Unit (IDR)", 130),
-    ("Selling Price per Unit (IDR)", 150), ("Total Selling Price (IDR)", 150),
+    ("Cost per Unit (IDR)", 125), ("Total Cost (IDR) (Cost per Unit × Qty)", 145),
+    ("Price after Margin (IDR)", 135), ("Line Value (IDR) (Price after Margin × Qty)", 150),
+    ("Freight Ratio", 85), ("Freight per Unit (IDR)", 130), ("Duty per Unit (IDR)", 125),
+    ("Packing per Unit (IDR)", 130), ("Selling Price per Unit (IDR)", 150), ("Total Selling Price (IDR)", 150),
 ]
-HEADER_ROW = 7          # 0-based -> Excel row 8
-FIRST_LINE_ROW = 8      # 0-based -> Excel row 9
+HEADER_ROW = 9          # 0-based -> Excel row 10
+FIRST_LINE_ROW = 10     # 0-based -> Excel row 11
 
 # Settings cells (label merged F:H, value in I)
-P_RATE, P_M1, P_M2, P_M3, P_VQ_TOTAL = "$I$2", "$I$3", "$I$4", "$I$5", "$I$6"
+P_RATE, P_M1, P_M2, P_M3 = "$I$2", "$I$3", "$I$4", "$I$5"
+P_DUTY_PCT, P_DUTY, P_VQ_TOTAL = "$I$6", "$I$7", "$I$8"
 
 CHARGE_LABELS = [
     "Freight (Air / Sea)",
@@ -191,7 +198,6 @@ CHARGE_LABELS = [
     "Port Demurrage Charges",
     "Port Warehouse Charges",
     "Local Transport",
-    "Import Duty (if needed)",
     "Other Charges",
 ]
 LOT_PACKING_LABEL = "Packing - one lot amount (if vendor gives only a total)"
@@ -238,13 +244,14 @@ def _roundup(x, digits):
 def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_no, currency,
                             exchange_rate, margin1=1, margin2=1, margin3=1, discount=0,
                             lines=None, blank_lines=10, title=None, quote_total="",
-                            lot_packing=0, charges=None):
+                            lot_packing=0, charges=None, duty_pct=""):
     """Build the standard price calculation sheet.
 
     lines: [{part, description, qty, unit, unit_price, discount, packing_per_unit}]
            unit_price / packing_per_unit are in the quote currency.
     lot_packing: one packing amount for the whole quote (quote currency), shared by Freight Ratio.
     charges: {label: IDR amount} for the CHARGES block (all typed by the user in IDR).
+    duty_pct: import duty as a fraction (0.05 = 5%); empty = no duty.
     """
     cur = normalize_currency(currency) or "EUR"
     lines = list(lines or [])
@@ -268,7 +275,7 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
     X = lambda r: r + 1                        # 0-based row -> Excel row number
     F1, FL, T = X(first), X(last), X(total_row)
     PKL, PKT, CHT = X(pk_lot), X(pk_total), X(ch_total)
-    R_CHARGES, R_LOT = f"$J${CHT}", f"$J${PKL}"
+    R_CHARGES, R_LOT, R_PKTOT = f"$J${CHT}", f"$J${PKL}", f"$J${PKT}"
 
     cells, merges = {}, []
 
@@ -291,26 +298,10 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
         put(1 + i, 1, label, s="lbl")
         put(1 + i, 2, value, s="inp")
 
-    # ---- settings
+    # ---- pre-compute every value (same maths as the formulas) so prices show at once
     rate_v = _num(exchange_rate)
     m1, m2, m3 = (_num(margin1, 1) or 1), (_num(margin2, 1) or 1), (_num(margin3, 1) or 1)
-    for i, (label, value, style, note) in enumerate([
-        (f"Exchange Rate (IDR per 1 {cur})", rate_v, "inpn", ""),
-        ("Margin 1", m1, "inpf", "Price after Margin = Cost / Margin 1 / Margin 2 / Margin 3"),
-        ("Margin 2 (1 = not used)", m2, "inpf", ""),
-        ("Margin 3 (1 = not used)", m3, "inpf", ""),
-        (f"Vendor Quote Total ({cur}, for the check)", "" if quote_total in (None, "") else _num(quote_total), "inpc", ""),
-    ]):
-        r = 1 + i
-        put(r, 5, label, s="lbl")
-        put(r, 6, "", s="lbl")
-        put(r, 7, "", s="lbl")
-        merges.append({"startRow": r, "endRow": r, "startColumn": 5, "endColumn": 7})
-        put(r, 8, value, s=style)
-        if note:
-            put(r, 9, note, s="note")
-
-    # ---- pre-compute every value (same maths as the formulas) so prices show at once
+    duty_in = "" if duty_pct in (None, "") else _num(duty_pct)
     lot_v = _num(lot_packing)
     ch_vals = [_num(charges.get(lbl)) for lbl in CHARGE_LABELS]
     ch_sum = sum(ch_vals)
@@ -323,16 +314,42 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
         pk = _num(ln.get("packing_per_unit"))
         h = price * (1 - disc)
         ic = h * rate_v
-        j = ic / m1 / m2 / m3
-        rows.append({"qty": qty, "h": h, "i": ic, "j": j, "k": j * qty, "pk": pk})
-    k_tot = sum(r["k"] for r in rows)
+        k = ic / m1 / m2 / m3
+        rows.append({"qty": qty, "h": h, "i": ic, "j": ic * qty, "k": k, "l": k * qty, "pk": pk,
+                     "pk_idr": pk * rate_v})
+    l_tot = sum(r["l"] for r in rows)
+    pk_tot_cur = sum(r["pk"] * r["qty"] for r in rows) + lot_v
+    pk_tot_idr = pk_tot_cur * rate_v
+    duty_v = _num(duty_in) * (sum(r["j"] for r in rows) + pk_tot_idr + ch_sum)
     for r in rows:
-        r["l"] = r["k"] / k_tot if k_tot else 0
-        r["m"] = r["l"] * ch_sum / r["qty"] if r["qty"] else 0
-        r["pk_idr"] = r["pk"] * rate_v
-        r["n"] = r["pk_idr"] + (r["l"] * lot_v * rate_v / r["qty"] if r["qty"] else 0)
-        r["o"] = _roundup(r["j"] + r["m"] + r["n"], -3)
-        r["p"] = r["o"] * r["qty"]
+        q = r["qty"]
+        r["m"] = r["l"] / l_tot if l_tot else 0
+        r["n"] = r["m"] * ch_sum / q if q else 0
+        r["o"] = r["m"] * duty_v / q if q else 0
+        r["p"] = r["pk_idr"] + (r["m"] * lot_v * rate_v / q if q else 0)
+        r["q"] = _roundup(r["k"] + r["n"] + r["o"] + r["p"], -3)
+        r["r"] = r["q"] * q
+
+    # ---- settings
+    for i, (label, value, style, note, formula) in enumerate([
+        (f"Exchange Rate (IDR per 1 {cur})", rate_v, "inpn", "", None),
+        ("Margin 1", m1, "inpf", "Price after Margin = Cost / Margin 1 / Margin 2 / Margin 3", None),
+        ("Margin 2 (1 = not used)", m2, "inpf", "", None),
+        ("Margin 3 (1 = not used)", m3, "inpf", "", None),
+        ("Import Duty % (empty = no duty)", duty_in, "pctd", "", None),
+        ("Import Duty (IDR)", duty_v, "tot",
+         "Import Duty = Duty % x (Total Cost + Total Packing + Total Charges)",
+         f'=IF({P_DUTY_PCT}="",0,{P_DUTY_PCT}*(SUM(J{F1}:J{FL})+{R_PKTOT}+{R_CHARGES}))'),
+        (f"Vendor Quote Total ({cur}, for the check)", "" if quote_total in (None, "") else _num(quote_total), "inpc", "", None),
+    ]):
+        r = 1 + i
+        put(r, 5, label, s="lbl")
+        put(r, 6, "", s="lbl")
+        put(r, 7, "", s="lbl")
+        merges.append({"startRow": r, "endRow": r, "startColumn": 5, "endColumn": 7})
+        put(r, 8, value, f=formula, s=style)
+        if note:
+            put(r, 9, note, s="note")
 
     # ---- item table
     for c, (label, _w) in enumerate(HEADERS):
@@ -350,26 +367,29 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
         put(r, 6, _num(ln.get("discount"), _num(discount)) if ln else _num(discount), s="pct")
         put(r, 7, v["h"], f=f"=F{x}*(1-G{x})", s="cur")
         put(r, 8, v["i"], f=f"=H{x}*{P_RATE}", s="idr")
-        put(r, 9, v["j"], f=f"=I{x}/{P_M1}/{P_M2}/{P_M3}", s="idr")
-        put(r, 10, v["k"], f=f"=J{x}*D{x}", s="idr")
-        put(r, 11, v["l"], f=f"=IFERROR(K{x}/$K${T},0)", s="ratio")
-        put(r, 12, v["m"], f=f"=IFERROR(L{x}*{R_CHARGES}/D{x},0)", s="idr")
-        put(r, 13, v["n"], f=f"=I{pkx}+IFERROR(L{x}*{R_LOT}/D{x},0)", s="idr")
-        put(r, 14, v["o"], f=f"=ROUNDUP(J{x}+M{x}+N{x},-3)", s="sell")
-        put(r, 15, v["p"], f=f"=O{x}*D{x}", s="idr")
+        put(r, 9, v["j"], f=f"=I{x}*D{x}", s="idr")
+        put(r, 10, v["k"], f=f"=I{x}/{P_M1}/{P_M2}/{P_M3}", s="idr")
+        put(r, 11, v["l"], f=f"=K{x}*D{x}", s="idr")
+        put(r, 12, v["m"], f=f"=IFERROR(L{x}/$L${T},0)", s="ratio")
+        put(r, 13, v["n"], f=f"=IFERROR(M{x}*{R_CHARGES}/D{x},0)", s="idr")
+        put(r, 14, v["o"], f=f"=IFERROR(M{x}*{P_DUTY}/D{x},0)", s="idr")
+        put(r, 15, v["p"], f=f"=I{pkx}+IFERROR(M{x}*{R_LOT}/D{x},0)", s="idr")
+        put(r, 16, v["q"], f=f"=ROUNDUP(K{x}+N{x}+O{x}+P{x},-3)", s="sell")
+        put(r, 17, v["r"], f=f"=Q{x}*D{x}", s="idr")
 
     # ---- TOTAL row
     put(total_row, 0, "TOTAL", s="totl")
-    for c in range(1, 16):
+    for c in range(1, len(HEADERS)):
         put(total_row, c, "", s="totl")
-    put(total_row, 10, k_tot, f=f"=SUM(K{F1}:K{FL})", s="tot")
-    put(total_row, 11, sum(r["l"] for r in rows), f=f"=SUM(L{F1}:L{FL})", s="totp")
-    put(total_row, 12, sum(r["m"] * r["qty"] for r in rows), f=f"=SUMPRODUCT(M{F1}:M{FL},D{F1}:D{FL})", s="tot")
-    put(total_row, 13, sum(r["n"] * r["qty"] for r in rows), f=f"=SUMPRODUCT(N{F1}:N{FL},D{F1}:D{FL})", s="tot")
-    put(total_row, 15, sum(r["p"] for r in rows), f=f"=SUM(P{F1}:P{FL})", s="tot")
+    put(total_row, 9, sum(r["j"] for r in rows), f=f"=SUM(J{F1}:J{FL})", s="tot")
+    put(total_row, 11, l_tot, f=f"=SUM(L{F1}:L{FL})", s="tot")
+    put(total_row, 12, sum(r["m"] for r in rows), f=f"=SUM(M{F1}:M{FL})", s="totp")
+    for c, key, col in ((13, "n", "N"), (14, "o", "O"), (15, "p", "P")):
+        put(total_row, c, sum(r[key] * r["qty"] for r in rows),
+            f=f"=SUMPRODUCT({col}{F1}:{col}{FL},D{F1}:D{FL})", s="tot")
+    put(total_row, 17, sum(r["r"] for r in rows), f=f"=SUM(R{F1}:R{FL})", s="tot")
 
     # ---- check row: goods after discount + packing (quote currency) vs vendor quote total
-    pk_tot_cur = sum(r["pk"] * r["qty"] for r in rows) + lot_v
     vendor_sum = sum(r["h"] * r["qty"] for r in rows) + pk_tot_cur
     check = "" if quote_total in (None, "") else ("OK" if round(vendor_sum - _num(quote_total), 2) == 0 else "CHECK")
     put(check_row, 2, f"Check: items after discount + packing ({cur}) = vendor quote total?", s="note")
@@ -401,7 +421,7 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
     for c in (0, 1, 3, 4, 5, 6, 8):
         put(pk_total, c, "", s="totl")
     put(pk_total, 7, pk_tot_cur, f=f"=SUM(H{X(pk_first)}:H{PKL})", s="totc")
-    put(pk_total, 9, pk_tot_cur * rate_v, f=f"=SUM(J{X(pk_first)}:J{PKL})", s="tot")
+    put(pk_total, 9, pk_tot_idr, f=f"=SUM(J{X(pk_first)}:J{PKL})", s="tot")
 
     # ---- CHARGES block (IDR, typed by the user), shared over the items by Freight Ratio
     put(ch_title, 0, "CHARGES (IDR) - shared over the items by Freight Ratio (no margin)", s="sec")
@@ -454,6 +474,7 @@ _PARAM_KEYS = [
     ("margin 2", "m2"), ("duty factor", "m2"),          # older sheets: duty factor was a 2nd divisor
     ("margin 3", "m3"), ("freight factor", "m3"),       # older sheets: freight factor was a 3rd divisor
     ("vendor quote total", "vq_total"),
+    ("import duty %", "duty_pct"),
     ("freight / courier", "legacy_freight"),            # older sheets: freight in quote currency
 ]
 
@@ -464,7 +485,7 @@ def read_settings(sheet):
     if not sheet:
         return {}
     out = {}
-    for r in range(0, 8):
+    for r in range(0, HEADER_ROW):
         for label_col, value_col in ((5, 8), (7, 9)):           # new layout F->I, older H->J
             label = _norm(cell_text(get_cell(sheet, r, label_col)))
             for prefix, key in _PARAM_KEYS:

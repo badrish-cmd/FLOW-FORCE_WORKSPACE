@@ -57,7 +57,7 @@ def priced_snapshot(lines):
     sh = sheet_svc.first_sheet(snap)
     for i, ln in enumerate(lines):
         r = sheet_svc.FIRST_LINE_ROW + i
-        sh["cellData"][str(r)]["14"]["v"] = ln["sell"]
+        sh["cellData"][str(r)]["16"]["v"] = ln["sell"]
     return snap
 
 
@@ -69,13 +69,13 @@ class SheetServiceTests(TestCase):
         sh = sheet_svc.first_sheet(snap)
         self.assertEqual(sheet_svc.get_cell(sh, 1, 2)["v"], "ENQ/2026/10/484")
         self.assertEqual(sheet_svc.get_cell(sh, 1, 8)["v"], 22000.0)
-        self.assertEqual(sheet_svc.get_cell(sh, 8, 7)["f"], "=F9*(1-G9)")
-        self.assertEqual(sheet_svc.get_cell(sh, 8, 8)["f"], "=H9*$I$2")
-        self.assertEqual(sheet_svc.get_cell(sh, 8, 9)["f"], "=I9/$I$3/$I$4/$I$5")
-        self.assertEqual(sheet_svc.get_cell(sh, 8, 10)["f"], "=J9*D9")
-        self.assertEqual(sheet_svc.get_cell(sh, 8, 14)["f"], "=ROUNDUP(J9+M9+N9,-3)")
-        self.assertEqual(sheet_svc.get_cell(sh, 8, 15)["f"], "=O9*D9")
-        self.assertEqual(sheet_svc.get_cell(sh, 7, 11)["v"], "Freight Ratio")
+        self.assertEqual(sheet_svc.get_cell(sh, 10, 7)["f"], "=F11*(1-G11)")
+        self.assertEqual(sheet_svc.get_cell(sh, 10, 8)["f"], "=H11*$I$2")
+        self.assertEqual(sheet_svc.get_cell(sh, 10, 9)["f"], "=I11*D11")
+        self.assertEqual(sheet_svc.get_cell(sh, 10, 10)["f"], "=I11/$I$3/$I$4/$I$5")
+        self.assertEqual(sheet_svc.get_cell(sh, 10, 16)["f"], "=ROUNDUP(K11+N11+O11+P11,-3)")
+        self.assertEqual(sheet_svc.get_cell(sh, 10, 17)["f"], "=Q11*D11")
+        self.assertEqual(sheet_svc.get_cell(sh, 9, 12)["v"], "Freight Ratio")
 
     def test_extract_lines_reads_computed_prices(self):
         snap = priced_snapshot([
@@ -93,7 +93,7 @@ class SheetServiceTests(TestCase):
             margin1=1, discount=0,
             lines=[{"part": "A", "description": "x", "qty": 1, "unit_price": 10}])
         sh = sheet_svc.first_sheet(snap)
-        sh["cellData"][str(sheet_svc.FIRST_LINE_ROW)]["14"].pop("v")   # browser hasn't calculated it yet
+        sh["cellData"][str(sheet_svc.FIRST_LINE_ROW)]["16"].pop("v")   # browser hasn't calculated it yet
         lines, problems = sheet_svc.extract_lines(snap)
         self.assertEqual(lines, [])
         self.assertIn("save it once", problems[0])
@@ -107,8 +107,8 @@ class SheetServiceTests(TestCase):
                     "packing_per_unit": 9800}],
             quote_total=4 * (608500 + 9800))
         sh = sheet_svc.first_sheet(snap)
-        self.assertEqual(sheet_svc.get_cell(sh, 8, 13)["v"], 1960000.0)       # packing per unit (IDR)
-        self.assertEqual(sheet_svc.get_cell(sh, 8, 14)["v"], 216599000.0)
+        self.assertEqual(sheet_svc.get_cell(sh, 10, 15)["v"], 1960000.0)       # packing per unit (IDR)
+        self.assertEqual(sheet_svc.get_cell(sh, 10, 16)["v"], 216599000.0)
         lines, problems = sheet_svc.extract_lines(snap)
         self.assertEqual(problems, [])
         self.assertEqual([(l["qty"], l["rate"]) for l in lines], [(4.0, 216599000.0)])   # packing is not a line
@@ -122,13 +122,20 @@ class SheetServiceTests(TestCase):
             lines=[{"part": "A", "description": "valve", "qty": 4, "unit_price": 608500},
                    {"part": "B", "description": "venturi", "qty": 1, "unit_price": 50000}],
             charges={"Freight (Air / Sea)": 60000000, "Port Demurrage Charges": 2500000},
-            lot_packing=1000)
+            lot_packing=1000, duty_pct=0.05)
         sh = sheet_svc.first_sheet(snap)
         total = sheet_svc.FIRST_LINE_ROW + 2
-        self.assertAlmostEqual(sheet_svc.get_cell(sh, total, 11)["v"], 1.0)               # ratios add to 100%
-        self.assertAlmostEqual(sheet_svc.get_cell(sh, total, 12)["v"], 62500000.0, 2)     # charges recovered once
-        self.assertAlmostEqual(sheet_svc.get_cell(sh, total, 13)["v"], 200000.0, 2)       # lot packing (1000 INR)
-        ratio_a = sheet_svc.get_cell(sh, 8, 11)["v"]
+        self.assertAlmostEqual(sheet_svc.get_cell(sh, total, 12)["v"], 1.0)               # ratios add to 100%
+        self.assertAlmostEqual(sheet_svc.get_cell(sh, total, 13)["v"], 62500000.0, 2)     # charges recovered once
+        self.assertAlmostEqual(sheet_svc.get_cell(sh, total, 15)["v"], 200000.0, 2)       # lot packing (1000 INR)
+        # duty = 5% x (vendor invoice in IDR [goods + packing] + total charges), recovered once
+        invoice_idr = (608500 * 4 + 50000) * 200 + 1000 * 200
+        duty = 0.05 * (invoice_idr + 62500000)
+        self.assertAlmostEqual(sheet_svc.get_cell(sh, 6, 8)["v"], duty, 2)
+        self.assertAlmostEqual(sheet_svc.get_cell(sh, total, 14)["v"], duty, 2)
+        self.assertEqual(sheet_svc.get_cell(sh, total, 9)["v"], (608500 * 4 + 50000) * 200)  # Total Cost column
+        self.assertEqual(sheet_svc.read_settings(sh)["duty_pct"], 0.05)
+        ratio_a = sheet_svc.get_cell(sh, 10, 12)["v"]
         self.assertAlmostEqual(ratio_a, (608500 * 4) / (608500 * 4 + 50000))
         self.assertEqual(sheet_svc.read_settings(sh)["charges"],
                          {"Freight (Air / Sea)": 60000000.0, "Port Demurrage Charges": 2500000.0})
@@ -178,8 +185,8 @@ class ExcelImportTests(TestCase):
         wb = openpyxl.load_workbook(io.BytesIO(data))
         self.assertEqual(wb.sheetnames, ["Sheet1", "Sheet106", "ENQ 2026 11 1"])
         ws = wb["ENQ 2026 11 1"]
-        self.assertEqual(ws["O9"].value, "=ROUNDUP(J9+M9+N9,-3)")
-        self.assertEqual(ws["B9"].value, "A")
+        self.assertEqual(ws["Q11"].value, "=ROUNDUP(K11+N11+O11+P11,-3)")
+        self.assertEqual(ws["B11"].value, "A")
         # same title again gets a unique name
         _data2, title2, _count2 = append_to_master(data, snap, "ENQ 2026 11 1")
         self.assertEqual(title2, "ENQ 2026 11 1 (2)")
@@ -515,24 +522,24 @@ class AIQuoteExtractionTests(TestCase):
         self.assertEqual(sheet_svc.get_cell(sh, 2, 8)["v"], 0.85)      # margin 1
         self.assertEqual(sheet_svc.get_cell(sh, 3, 8)["v"], 0.9)       # margin 2
         self.assertEqual(sheet_svc.get_cell(sh, 4, 8)["v"], 1.05)      # margin 3
-        self.assertEqual(sheet_svc.get_cell(sh, 5, 8)["v"], 4500.0)    # vendor quote total
+        self.assertEqual(sheet_svc.get_cell(sh, 7, 8)["v"], 4500.0)    # vendor quote total
         # freight from the vendor quote is NOT put into the sheet - charges are typed in IDR
         self.assertEqual(sheet_svc.read_settings(sh)["charges"], {})
         self.assertIn("enter the charges in IDR", quote.events.get(action="ai_filled").message)
 
         # Line 1 (Excel row 9, 0-based row 8)
-        self.assertEqual(sheet_svc.get_cell(sh, 8, 1)["v"], "P-100")
-        self.assertEqual(sheet_svc.get_cell(sh, 8, 2)["v"], "Pump Model A")
-        self.assertEqual(sheet_svc.get_cell(sh, 8, 3)["v"], 2.0)
-        self.assertEqual(sheet_svc.get_cell(sh, 8, 5)["v"], 1000.0)
-        self.assertEqual(sheet_svc.get_cell(sh, 8, 6)["v"], 0.20)
+        self.assertEqual(sheet_svc.get_cell(sh, 10, 1)["v"], "P-100")
+        self.assertEqual(sheet_svc.get_cell(sh, 10, 2)["v"], "Pump Model A")
+        self.assertEqual(sheet_svc.get_cell(sh, 10, 3)["v"], 2.0)
+        self.assertEqual(sheet_svc.get_cell(sh, 10, 5)["v"], 1000.0)
+        self.assertEqual(sheet_svc.get_cell(sh, 10, 6)["v"], 0.20)
 
         # Line 2 (Excel row 10, 0-based row 9)
-        self.assertEqual(sheet_svc.get_cell(sh, 9, 1)["v"], "P-200")
-        self.assertEqual(sheet_svc.get_cell(sh, 9, 2)["v"], "Pump Model B")
-        self.assertEqual(sheet_svc.get_cell(sh, 9, 3)["v"], 3.0)
-        self.assertEqual(sheet_svc.get_cell(sh, 9, 5)["v"], 800.0)
-        self.assertEqual(sheet_svc.get_cell(sh, 9, 6)["v"], 0.1)
+        self.assertEqual(sheet_svc.get_cell(sh, 11, 1)["v"], "P-200")
+        self.assertEqual(sheet_svc.get_cell(sh, 11, 2)["v"], "Pump Model B")
+        self.assertEqual(sheet_svc.get_cell(sh, 11, 3)["v"], 3.0)
+        self.assertEqual(sheet_svc.get_cell(sh, 11, 5)["v"], 800.0)
+        self.assertEqual(sheet_svc.get_cell(sh, 11, 6)["v"], 0.1)
 
         self.assertTrue(rev.changes.exists())
         self.assertTrue(quote.events.filter(action="ai_filled").exists())
@@ -556,7 +563,7 @@ class AIQuoteExtractionTests(TestCase):
         sh = sheet_svc.first_sheet(rev.snapshot)
         self.assertEqual(sheet_svc.get_cell(sh, 1, 8)["v"], 200.0)
         self.assertEqual(sheet_svc.get_cell(sh, 5, 2)["v"], "INR")
-        self.assertEqual(sheet_svc.get_cell(sh, 8, 14)["v"], 216599000.0)
+        self.assertEqual(sheet_svc.get_cell(sh, 10, 16)["v"], 216599000.0)
         lines, problems = sheet_svc.extract_lines(rev.snapshot)
         self.assertEqual(problems, [])
         self.assertEqual(len(lines), 1)
@@ -572,7 +579,7 @@ class AIQuoteExtractionTests(TestCase):
         self.assertEqual(quote.currency, "USD")
         sh = sheet_svc.first_sheet(rev.snapshot)
         self.assertEqual(sheet_svc.get_cell(sh, 1, 8)["v"], 18500.0)
-        self.assertIn("USD", sheet_svc.get_cell(sh, 7, 5)["v"])
+        self.assertIn("USD", sheet_svc.get_cell(sh, 9, 5)["v"])
 
     def test_apply_ai_on_copied_master_sheet_ignores_its_cells(self):
         """A sheet copied from an old Rotolok master has other numbers in J1:J6 - they must not
@@ -604,7 +611,9 @@ class AIQuoteExtractionTests(TestCase):
         # user types Margin 1 = 0.75 and a freight charge, then reads the quote again
         snap = rev.snapshot
         sh = sheet_svc.first_sheet(snap)
+        self.assertNotIn("duty_pct", sheet_svc.read_settings(sh))     # duty starts empty
         sh["cellData"]["2"]["8"]["v"] = 0.75
+        sh["cellData"]["5"]["8"]["v"] = 0.05                          # Import Duty % = 5%
         for r, c, cell in sheet_svc.iter_cells(sh):
             if c == 2 and cell.get("v") == "Freight (Air / Sea)":
                 sh["cellData"][str(r)]["9"]["v"] = 5000000
@@ -614,6 +623,7 @@ class AIQuoteExtractionTests(TestCase):
         settings = sheet_svc.read_settings(sheet_svc.first_sheet(rev.snapshot))
         self.assertEqual(settings["m1"], 0.75)
         self.assertEqual(settings["charges"], {"Freight (Air / Sea)": 5000000.0})
+        self.assertEqual(settings["duty_pct"], 0.05)
 
     def test_apply_ai_refuses_approved_revision(self):
         quote, rev = workflow.create_quote(

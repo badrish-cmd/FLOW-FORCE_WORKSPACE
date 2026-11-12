@@ -564,6 +564,7 @@ def apply_ai_result(quote, rev, ai_result, user):
         quote_total=quote_total,
         lot_packing=lot_packing,
         charges=charges,
+        duty_pct=old.get("duty_pct", ""),      # typed by the user; empty = no duty
     )
 
     # 5. Compute diff and record QuoteChange
