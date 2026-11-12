@@ -14,7 +14,7 @@ Row/column keys are 0-based and may be ints or strings (after JSON round trips).
 import os
 import re
 import uuid
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_UP, Decimal
 
 from openpyxl.utils import get_column_letter
 
@@ -130,39 +130,69 @@ def first_sheet(snapshot):
 
 
 # ---------------------------------------------------------------- standard template
+#
+# Layout (Excel rows/columns, everything stays editable):
+#   Row 1        title
+#   Rows 2-6     B/C  Enquiry No., Customer, Vendor, Vendor Quote No., Currency
+#                F:H label / I value: Exchange Rate, Margin 1, Margin 2, Margin 3, Vendor Quote Total
+#   Row 8        item table headers, items from row 9
+#   below items  TOTAL row, check row, PACKING block, CHARGES block (IDR)
+#
+# Per item row (x):
+#   H Price after Discount     = F*(1-G)
+#   I Cost per Unit (IDR)      = H*Rate
+#   J Price after Margin (IDR) = I/Margin1/Margin2/Margin3
+#   K Line Value (IDR)         = J*Qty
+#   L Freight Ratio            = K / total of K
+#   M Freight per Unit (IDR)   = Ratio * Total Charges / Qty
+#   N Packing per Unit (IDR)   = packing of this item (+ share of a lot packing amount)
+#   O Selling Price per Unit   = ROUNDUP(J+M+N, -3)
+#   P Total Selling Price      = O*Qty
 
 STYLES = {
     "ttl": {"bl": 1, "fs": 13},
     "lbl": {"bl": 1, "cl": {"rgb": "#334155"}},
+    "sec": {"bl": 1, "fs": 11, "cl": {"rgb": "#1E3A8A"}},
     "inp": {"bg": {"rgb": "#FEF9C3"}},
     "inpn": {"bg": {"rgb": "#FEF9C3"}, "n": {"pattern": "#,##0.00"}},
+    "inpi": {"bg": {"rgb": "#FEF9C3"}, "n": {"pattern": "#,##0"}},
     "inpf": {"bg": {"rgb": "#FEF9C3"}, "n": {"pattern": "0.00"}},
+    "pct": {"bg": {"rgb": "#FEF9C3"}, "n": {"pattern": "0%"}},
     "hdr": {"bl": 1, "bg": {"rgb": "#1E3A8A"}, "cl": {"rgb": "#FFFFFF"}, "tb": 3, "ht": 2, "vt": 2},
     "cur": {"n": {"pattern": "#,##0.00"}},
-    "pct": {"bg": {"rgb": "#FEF9C3"}, "n": {"pattern": "0%"}},
     "idr": {"n": {"pattern": "#,##0"}},
+    "ratio": {"n": {"pattern": "0.0%"}},
     "sell": {"bl": 1, "bg": {"rgb": "#DCFCE7"}, "n": {"pattern": "#,##0"}},
     "tot": {"bl": 1, "bg": {"rgb": "#E2E8F0"}, "n": {"pattern": "#,##0"}},
+    "totc": {"bl": 1, "bg": {"rgb": "#E2E8F0"}, "n": {"pattern": "#,##0.00"}},
+    "totp": {"bl": 1, "bg": {"rgb": "#E2E8F0"}, "n": {"pattern": "0.0%"}},
     "totl": {"bl": 1, "bg": {"rgb": "#E2E8F0"}},
     "note": {"it": 1, "cl": {"rgb": "#64748B"}},
 }
 
 HEADERS = [
-    ("Line", 50), ("Part No.", 110), ("Description", 260), ("Qty", 55), ("Unit", 55),
-    ("Unit Price ({cur})", 110), ("Discount", 75), ("Net Price ({cur})", 110),
-    ("Net Price (IDR)", 120), ("Cost after factors (IDR)", 150), ("Line Cost (IDR)", 130),
-    ("Freight Share (IDR)", 130), ("Unit Selling Price (IDR)", 160), ("Total Selling (IDR)", 150),
+    ("No.", 45), ("Part No.", 110), ("Description", 260), ("Qty", 50), ("Unit", 55),
+    ("Vendor Price per Unit ({cur})", 125), ("Discount %", 80), ("Price after Discount ({cur})", 125),
+    ("Cost per Unit (IDR)", 125), ("Price after Margin (IDR)", 135), ("Line Value (IDR)", 135),
+    ("Freight Ratio", 85), ("Freight per Unit (IDR)", 130), ("Packing per Unit (IDR)", 130),
+    ("Selling Price per Unit (IDR)", 150), ("Total Selling Price (IDR)", 150),
 ]
 HEADER_ROW = 7          # 0-based -> Excel row 8
 FIRST_LINE_ROW = 8      # 0-based -> Excel row 9
 
-# Parameter cells (Excel refs) used by the formulas
-P_RATE, P_MARGIN, P_DUTY, P_FREIGHT_F, P_FREIGHT, P_VQ_TOTAL = "$J$1", "$J$2", "$J$3", "$J$4", "$J$5", "$J$6"
+# Settings cells (label merged F:H, value in I)
+P_RATE, P_M1, P_M2, P_M3, P_VQ_TOTAL = "$I$2", "$I$3", "$I$4", "$I$5", "$I$6"
 
-
-def _xl_round(x, digits):
-    """Excel ROUND (halves away from zero), e.g. digits=-3 -> nearest thousand."""
-    return float(Decimal(str(x)).quantize(Decimal(1).scaleb(-digits), rounding=ROUND_HALF_UP))
+CHARGE_LABELS = [
+    "Freight (Air / Sea)",
+    "Custom Clearance Processing",
+    "Port Demurrage Charges",
+    "Port Warehouse Charges",
+    "Local Transport",
+    "Import Duty (if needed)",
+    "Other Charges",
+]
+LOT_PACKING_LABEL = "Packing - one lot amount (if vendor gives only a total)"
 
 
 def _num(x, default=0.0):
@@ -176,26 +206,50 @@ def _num(x, default=0.0):
         return default
 
 
-def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_no, currency,
-                            exchange_rate, margin_factor, duty_factor, freight_factor,
-                            discount, lines=None, blank_lines=10, title=None,
-                            freight=0, quote_total=""):
-    """Build the standard (BOS spare-parts style) price table. Everything stays editable.
+def _roundup(x, digits):
+    """Excel ROUNDUP (away from zero), e.g. digits=-3 -> up to the next thousand."""
+    q = Decimal(1).scaleb(-digits)
+    d = Decimal(str(round(x, 6)))
+    return float(d.quantize(q, rounding=ROUND_UP)) if digits >= 0 else \
+        float((d / q).to_integral_value(rounding=ROUND_UP) * q)
 
-    Rows 1-6: quote details (left, B/C) and pricing factors (right, H:I label, J value).
-    Row 8: column headers. Row 9+: lines. Then TOTAL and a check row.
+
+def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_no, currency,
+                            exchange_rate, margin1=1, margin2=1, margin3=1, discount=0,
+                            lines=None, blank_lines=10, title=None, quote_total="",
+                            lot_packing=0, charges=None):
+    """Build the standard price calculation sheet.
+
+    lines: [{part, description, qty, unit, unit_price, discount, packing_per_unit}]
+           unit_price / packing_per_unit are in the quote currency.
+    lot_packing: one packing amount for the whole quote (quote currency), shared by Freight Ratio.
+    charges: {label: IDR amount} for the CHARGES block (all typed by the user in IDR).
     """
-    cur = currency or "EUR"
+    cur = normalize_currency(currency) or "EUR"
     lines = list(lines or [])
+    charges = dict(charges or {})
     n = len(lines) if lines else blank_lines
-    last = FIRST_LINE_ROW + n - 1               # 0-based last line row
+
+    # ---- row positions (0-based) and Excel row numbers
+    first = FIRST_LINE_ROW
+    last = first + n - 1
     total_row = last + 1
     check_row = total_row + 1
-    L, T = last + 1, total_row + 1              # Excel row numbers
-    F1 = FIRST_LINE_ROW + 1
+    pk_title = check_row + 2
+    pk_head = pk_title + 1
+    pk_first = pk_head + 1                     # one packing row per item, same order
+    pk_lot = pk_first + n
+    pk_total = pk_lot + 1
+    ch_title = pk_total + 2
+    ch_head = ch_title + 1
+    ch_first = ch_head + 1
+    ch_total = ch_first + len(CHARGE_LABELS)
+    X = lambda r: r + 1                        # 0-based row -> Excel row number
+    F1, FL, T = X(first), X(last), X(total_row)
+    PKL, PKT, CHT = X(pk_lot), X(pk_total), X(ch_total)
+    R_CHARGES, R_LOT = f"$J${CHT}", f"$J${PKL}"
 
-    cells = {}
-    merges = []
+    cells, merges = {}, []
 
     def put(r, c, v=None, f=None, s=None):
         cell = {}
@@ -207,93 +261,143 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
             cell["s"] = s
         cells.setdefault(str(r), {})[str(c)] = cell
 
-    # Quote details (left block)
-    for r, (label, value) in enumerate([
+    # ---- title + quote details
+    put(0, 0, f"Price Calculation - {vendor_name or ''} {vendor_quote_no or ''}".strip(" -"), s="ttl")
+    for i, (label, value) in enumerate([
         ("Enquiry No.", enquiry_no or ""), ("Customer", customer or ""), ("Vendor", vendor_name or ""),
         ("Vendor Quote No.", vendor_quote_no or ""), ("Currency", cur),
     ]):
-        put(r, 1, label, s="lbl")
-        put(r, 2, value, s="inp")
-    # Pricing factors (right block): label in H:I (merged), value in J
-    for r, (label, value, style) in enumerate([
-        (f"Exchange rate (IDR per 1 {cur})", _num(exchange_rate), "inpn"),
-        ("Margin factor (cost ÷ this)", _num(margin_factor, 1), "inpf"),
-        ("Duty factor (0.9 = 10% duty)", _num(duty_factor, 1), "inpf"),
-        ("Freight factor", _num(freight_factor, 1), "inpf"),
-        (f"Freight / courier ({cur}, spread on lines)", _num(freight, 0), "inpn"),
-        (f"Vendor quote total ({cur}, for the check)", "" if quote_total in (None, "") else _num(quote_total), "inpn"),
-    ]):
-        put(r, 7, label, s="lbl")
-        put(r, 8, "", s="lbl")
-        merges.append({"startRow": r, "endRow": r, "startColumn": 7, "endColumn": 8})
-        put(r, 9, value, s=style)
+        put(1 + i, 1, label, s="lbl")
+        put(1 + i, 2, value, s="inp")
 
+    # ---- settings
+    rate_v = _num(exchange_rate)
+    m1, m2, m3 = (_num(margin1, 1) or 1), (_num(margin2, 1) or 1), (_num(margin3, 1) or 1)
+    for i, (label, value, style, note) in enumerate([
+        (f"Exchange Rate (IDR per 1 {cur})", rate_v, "inpn", ""),
+        ("Margin 1", m1, "inpf", "Price after Margin = Cost / Margin 1 / Margin 2 / Margin 3"),
+        ("Margin 2 (1 = not used)", m2, "inpf", ""),
+        ("Margin 3 (1 = not used)", m3, "inpf", ""),
+        (f"Vendor Quote Total ({cur}, for the check)", "" if quote_total in (None, "") else _num(quote_total), "inpn", ""),
+    ]):
+        r = 1 + i
+        put(r, 5, label, s="lbl")
+        put(r, 6, "", s="lbl")
+        put(r, 7, "", s="lbl")
+        merges.append({"startRow": r, "endRow": r, "startColumn": 5, "endColumn": 7})
+        put(r, 8, value, s=style)
+        if note:
+            put(r, 9, note, s="note")
+
+    # ---- pre-compute every value (same maths as the formulas) so prices show at once
+    lot_v = _num(lot_packing)
+    ch_vals = [_num(charges.get(lbl)) for lbl in CHARGE_LABELS]
+    ch_sum = sum(ch_vals)
+    rows = []
+    for i in range(n):
+        ln = lines[i] if i < len(lines) else {}
+        qty = _num(ln.get("qty"))
+        price = _num(ln.get("unit_price"))
+        disc = _num(ln.get("discount"), _num(discount)) if ln else _num(discount)
+        pk = _num(ln.get("packing_per_unit"))
+        h = price * (1 - disc)
+        ic = h * rate_v
+        j = ic / m1 / m2 / m3
+        rows.append({"qty": qty, "h": h, "i": ic, "j": j, "k": j * qty, "pk": pk})
+    k_tot = sum(r["k"] for r in rows)
+    for r in rows:
+        r["l"] = r["k"] / k_tot if k_tot else 0
+        r["m"] = r["l"] * ch_sum / r["qty"] if r["qty"] else 0
+        r["pk_idr"] = r["pk"] * rate_v
+        r["n"] = r["pk_idr"] + (r["l"] * lot_v * rate_v / r["qty"] if r["qty"] else 0)
+        r["o"] = _roundup(r["j"] + r["m"] + r["n"], -3)
+        r["p"] = r["o"] * r["qty"]
+
+    # ---- item table
     for c, (label, _w) in enumerate(HEADERS):
         put(HEADER_ROW, c, label.format(cur=cur), s="hdr")
-
-    rate_v, marg_v = _num(exchange_rate), _num(margin_factor, 1) or 1
-    duty_v, ff_v = _num(duty_factor, 1) or 1, _num(freight_factor, 1) or 1
-    freight_v = _num(freight, 0)
-
-    # Pre-compute every formula result in Python (same maths as the formulas) so the
-    # sheet shows prices straight away, before anyone opens it in the browser.
-    calc = []
     for i in range(n):
-        line = lines[i] if i < len(lines) else {}
-        price = line.get("unit_price", "") if line else ""
-        qty = line.get("qty", "") if line else ""
-        disc = _num(line.get("discount"), _num(discount)) if line else _num(discount)
-        row = {"h": "", "i": "", "j": "", "k": ""}
-        if price not in (None, ""):
-            row["h"] = _num(price) * (1 - disc)
-            row["i"] = row["h"] * rate_v
-            row["j"] = row["i"] / marg_v / duty_v / ff_v
-            if qty not in (None, ""):
-                row["k"] = row["j"] * _num(qty)
-        calc.append(row)
-    k_total = sum(r["k"] for r in calc if r["k"] != "")
-    for i, row in enumerate(calc):
-        line = lines[i] if i < len(lines) else {}
-        qty = _num(line.get("qty")) if line else 0
-        row["l"] = 0 if (row["k"] == "" or k_total == 0) else row["k"] / k_total * freight_v * rate_v
-        row["m"] = "" if (row["k"] == "" or not qty) else _xl_round((row["k"] + row["l"]) / qty, -3)
-        row["n"] = "" if row["m"] == "" else row["m"] * qty
-
-    for i in range(n):
-        r = FIRST_LINE_ROW + i
-        x = r + 1  # Excel row
-        line = lines[i] if i < len(lines) else {}
-        c = calc[i]
+        r, x, v = first + i, X(first + i), rows[i]
+        ln = lines[i] if i < len(lines) else {}
+        pkx = X(pk_first + i)
         put(r, 0, i + 1)
-        put(r, 1, line.get("part", ""))
-        put(r, 2, line.get("description", ""))
-        put(r, 3, line.get("qty", "") if line else "")
-        put(r, 4, line.get("unit", "pcs") if line else "")
-        put(r, 5, line.get("unit_price", "") if line else "", s="cur")
-        put(r, 6, _num(line.get("discount"), _num(discount)) if line else _num(discount), s="pct")
-        put(r, 7, c["h"], f=f'=IF(F{x}="","",F{x}*(1-G{x}))', s="cur")
-        put(r, 8, c["i"], f=f'=IF(H{x}="","",H{x}*{P_RATE})', s="idr")
-        put(r, 9, c["j"], f=f'=IF(I{x}="","",I{x}/{P_MARGIN}/{P_DUTY}/{P_FREIGHT_F})', s="idr")
-        put(r, 10, c["k"], f=f'=IF(OR(J{x}="",D{x}=""),"",J{x}*D{x})', s="idr")
-        put(r, 11, c["l"], f=f'=IF(OR(K{x}="",$K${T}=0),0,K{x}/$K${T}*{P_FREIGHT}*{P_RATE})', s="idr")
-        put(r, 12, c["m"], f=f'=IF(OR(K{x}="",D{x}=0),"",ROUND((K{x}+L{x})/D{x},-3))', s="sell")
-        put(r, 13, c["n"], f=f'=IF(M{x}="","",M{x}*D{x})', s="idr")
+        put(r, 1, ln.get("part", ""))
+        put(r, 2, ln.get("description", ""))
+        put(r, 3, ln.get("qty", "") if ln else "")
+        put(r, 4, ln.get("unit", "pcs") if ln else "")
+        put(r, 5, ln.get("unit_price", "") if ln else "", s="cur")
+        put(r, 6, _num(ln.get("discount"), _num(discount)) if ln else _num(discount), s="pct")
+        put(r, 7, v["h"], f=f"=F{x}*(1-G{x})", s="cur")
+        put(r, 8, v["i"], f=f"=H{x}*{P_RATE}", s="idr")
+        put(r, 9, v["j"], f=f"=I{x}/{P_M1}/{P_M2}/{P_M3}", s="idr")
+        put(r, 10, v["k"], f=f"=J{x}*D{x}", s="idr")
+        put(r, 11, v["l"], f=f"=IFERROR(K{x}/$K${T},0)", s="ratio")
+        put(r, 12, v["m"], f=f"=IFERROR(L{x}*{R_CHARGES}/D{x},0)", s="idr")
+        put(r, 13, v["n"], f=f"=I{pkx}+IFERROR(L{x}*{R_LOT}/D{x},0)", s="idr")
+        put(r, 14, v["o"], f=f"=ROUNDUP(J{x}+M{x}+N{x},-3)", s="sell")
+        put(r, 15, v["p"], f=f"=O{x}*D{x}", s="idr")
 
+    # ---- TOTAL row
     put(total_row, 0, "TOTAL", s="totl")
-    for c in range(1, 14):
+    for c in range(1, 16):
         put(total_row, c, "", s="totl")
-    put(total_row, 10, k_total, f=f"=SUM(K{F1}:K{L})", s="tot")
-    put(total_row, 11, sum(r["l"] for r in calc), f=f"=SUM(L{F1}:L{L})", s="tot")
-    put(total_row, 13, sum(r["n"] for r in calc if r["n"] != ""), f=f"=SUM(N{F1}:N{L})", s="tot")
+    put(total_row, 10, k_tot, f=f"=SUM(K{F1}:K{FL})", s="tot")
+    put(total_row, 11, sum(r["l"] for r in rows), f=f"=SUM(L{F1}:L{FL})", s="totp")
+    put(total_row, 12, sum(r["m"] * r["qty"] for r in rows), f=f"=SUMPRODUCT(M{F1}:M{FL},D{F1}:D{FL})", s="tot")
+    put(total_row, 13, sum(r["n"] * r["qty"] for r in rows), f=f"=SUMPRODUCT(N{F1}:N{FL},D{F1}:D{FL})", s="tot")
+    put(total_row, 15, sum(r["p"] for r in rows), f=f"=SUM(P{F1}:P{FL})", s="tot")
 
-    net_total = sum(r["h"] * _num((lines[i] if i < len(lines) else {}).get("qty"))
-                    for i, r in enumerate(calc) if r["h"] != "")
-    check = "" if quote_total in (None, "") else ("OK" if round(net_total - _num(quote_total), 2) == 0 else "CHECK")
-    put(check_row, 2, f"Check: net {cur} total vs vendor quote total", s="note")
-    put(check_row, 7, net_total, f=f'=SUMPRODUCT(H{F1}:H{L},D{F1}:D{L})', s="cur")
-    put(check_row, 8, check, f=f'=IF({P_VQ_TOTAL}="","",IF(ROUND(H{check_row + 1}-{P_VQ_TOTAL},2)=0,"OK","CHECK"))', s="lbl")
+    # ---- check row: goods after discount + packing (quote currency) vs vendor quote total
+    pk_tot_cur = sum(r["pk"] * r["qty"] for r in rows) + lot_v
+    vendor_sum = sum(r["h"] * r["qty"] for r in rows) + pk_tot_cur
+    check = "" if quote_total in (None, "") else ("OK" if round(vendor_sum - _num(quote_total), 2) == 0 else "CHECK")
+    put(check_row, 2, f"Check: items after discount + packing ({cur}) = vendor quote total?", s="note")
+    put(check_row, 7, vendor_sum, f=f"=SUMPRODUCT(H{F1}:H{FL},D{F1}:D{FL})+$H${PKT}", s="cur")
+    put(check_row, 8, check, f=f'=IF({P_VQ_TOTAL}="","",IF(ROUND(H{X(check_row)}-{P_VQ_TOTAL},2)=0,"OK","CHECK"))', s="lbl")
+
+    # ---- PACKING block (quote currency -> IDR), added to the selling price, no margin
+    put(pk_title, 0, "PACKING - added to the selling price per unit (no margin)", s="sec")
+    for c, label in [(0, "No."), (2, "Packing for"), (3, "Qty"), (5, f"Packing per Unit ({cur})"),
+                     (7, f"Packing Total ({cur})"), (8, "Packing per Unit (IDR)"), (9, "Packing Total (IDR)")]:
+        put(pk_head, c, label, s="hdr")
+    for c in (1, 4, 6):
+        put(pk_head, c, "", s="hdr")
+    for i in range(n):
+        r, x, v = pk_first + i, X(pk_first + i), rows[i]
+        lx = X(first + i)
+        ln = lines[i] if i < len(lines) else {}
+        put(r, 0, i + 1, f=f"=A{lx}")
+        put(r, 2, ln.get("description", "") or ln.get("part", ""), f=f'=IF(C{lx}="",B{lx},C{lx})')
+        put(r, 3, v["qty"], f=f"=D{lx}")
+        put(r, 5, ln.get("packing_per_unit", "") if ln and ln.get("packing_per_unit") not in (None, "") else 0, s="inpn")
+        put(r, 7, v["pk"] * v["qty"], f=f"=F{x}*D{x}", s="cur")
+        put(r, 8, v["pk_idr"], f=f"=F{x}*{P_RATE}", s="idr")
+        put(r, 9, v["pk_idr"] * v["qty"], f=f"=I{x}*D{x}", s="idr")
+    put(pk_lot, 2, LOT_PACKING_LABEL)
+    put(pk_lot, 7, lot_v, s="inpn")
+    put(pk_lot, 9, lot_v * rate_v, f=f"=H{PKL}*{P_RATE}", s="idr")
+    put(pk_total, 2, "Total Packing", s="totl")
+    for c in (0, 1, 3, 4, 5, 6, 8):
+        put(pk_total, c, "", s="totl")
+    put(pk_total, 7, pk_tot_cur, f=f"=SUM(H{X(pk_first)}:H{PKL})", s="totc")
+    put(pk_total, 9, pk_tot_cur * rate_v, f=f"=SUM(J{X(pk_first)}:J{PKL})", s="tot")
+
+    # ---- CHARGES block (IDR, typed by the user), shared over the items by Freight Ratio
+    put(ch_title, 0, "CHARGES (IDR) - shared over the items by Freight Ratio (no margin)", s="sec")
+    put(ch_head, 2, "Charge", s="hdr")
+    put(ch_head, 9, "Amount (IDR)", s="hdr")
+    for c in (0, 1, 3, 4, 5, 6, 7, 8):
+        put(ch_head, c, "", s="hdr")
+    for i, label in enumerate(CHARGE_LABELS):
+        put(ch_first + i, 2, label)
+        put(ch_first + i, 9, ch_vals[i], s="inpi")
+    put(ch_total, 2, "Total Charges", s="totl")
+    for c in (0, 1, 3, 4, 5, 6, 7, 8):
+        put(ch_total, c, "", s="totl")
+    put(ch_total, 9, ch_sum, f=f"=SUM(J{X(ch_first)}:J{X(ch_total - 1)})", s="tot")
+
     if rate_v <= 0:
-        put(check_row + 1, 2, f"Exchange rate for {cur} is 0 - type the IDR rate in J1.", s="note")
+        put(ch_total + 2, 2, f"Exchange rate for {cur} is 0 - type the IDR rate in I2.", s="note")
 
     sid = new_id()
     return {
@@ -307,12 +411,12 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
             sid: {
                 "id": sid,
                 "name": "Price Table",
-                "rowCount": max(60, check_row + 20),
+                "rowCount": max(60, ch_total + 20),
                 "columnCount": 20,
                 "defaultColumnWidth": 90,
                 "defaultRowHeight": 24,
                 "freeze": {"xSplit": 0, "ySplit": HEADER_ROW + 1, "startRow": HEADER_ROW + 1, "startColumn": 0},
-                "rowData": {str(HEADER_ROW): {"h": 40}},
+                "rowData": {str(HEADER_ROW): {"h": 48}, str(pk_head): {"h": 40}},
                 "columnData": {str(c): {"w": w} for c, (_l, w) in enumerate(HEADERS)},
                 "mergeData": merges,
                 "cellData": cells,
@@ -321,13 +425,50 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
     }
 
 
-def is_standard_layout(sheet):
-    """True when the sheet uses the standard template (factors in H1:J6), so its
-    parameter cells can be read by position. Copied vendor master sheets use other layouts."""
+# ---------------------------------------------------------------- reading settings back
+
+_PARAM_KEYS = [
+    ("exchange rate", "rate"),
+    ("margin 1", "m1"), ("margin factor", "m1"),
+    ("margin 2", "m2"), ("duty factor", "m2"),          # older sheets: duty factor was a 2nd divisor
+    ("margin 3", "m3"), ("freight factor", "m3"),       # older sheets: freight factor was a 3rd divisor
+    ("vendor quote total", "vq_total"),
+    ("freight / courier", "legacy_freight"),            # older sheets: freight in quote currency
+]
+
+
+def read_settings(sheet):
+    """Read the settings, currency and IDR charges of a standard sheet (new or older layout).
+    Returns {} when the sheet isn't a standard sheet (e.g. a copied vendor master sheet)."""
     if not sheet:
-        return False
-    return _norm(cell_text(get_cell(sheet, 0, 7))).startswith("exchange rate") and \
-        _norm(cell_text(get_cell(sheet, 1, 7))).startswith("margin")
+        return {}
+    out = {}
+    for r in range(0, 8):
+        for label_col, value_col in ((5, 8), (7, 9)):           # new layout F->I, older H->J
+            label = _norm(cell_text(get_cell(sheet, r, label_col)))
+            for prefix, key in _PARAM_KEYS:
+                if label.startswith(prefix) and key not in out:
+                    num = cell_number(get_cell(sheet, r, value_col))
+                    if num is not None:
+                        out[key] = num
+        if _norm(cell_text(get_cell(sheet, r, 1))) == "currency":
+            out["currency"] = normalize_currency(cell_text(get_cell(sheet, r, 2)))
+    if "rate" not in out and "m1" not in out:
+        return {}
+    wanted = {_norm(lbl): lbl for lbl in CHARGE_LABELS}
+    charges = {}
+    for r, c, cell in iter_cells(sheet):
+        if c == 2 and _norm(cell_text(cell)) in wanted:
+            num = cell_number(get_cell(sheet, r, 9))
+            if num:
+                charges[wanted[_norm(cell_text(cell))]] = num
+    out["charges"] = charges
+    return out
+
+
+def is_standard_layout(sheet):
+    """True when the sheet is one of our standard sheets (new or older layout)."""
+    return bool(read_settings(sheet))
 
 
 def fresh_copy(snapshot, *, title=None):

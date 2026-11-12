@@ -36,6 +36,8 @@ class LineItemSchema(BaseModel):
     discount_percent: Optional[float] = Field(None, description="Discount percentage between 0 and 100, if any")
     notes: Optional[str] = Field(None, description="Additional notes, specifications, model, or make for this item")
     commodity_code: Optional[str] = Field(None, description="HS code, customs tariff number, or commodity code if printed")
+    packing_amount: Optional[float] = Field(None, description="Packing / packaging charge printed for THIS item, in vendor currency")
+    packing_basis: Optional[str] = Field(None, description="'per_unit' if packing_amount is for each unit, 'per_line' if it is for the whole line quantity")
 
 
 class QuoteExtractSchema(BaseModel):
@@ -44,6 +46,7 @@ class QuoteExtractSchema(BaseModel):
     currency: Optional[str] = Field(None, description="3-letter ISO code of the prices, e.g. EUR, USD, INR, IDR. 'Rs.'/'₹' = INR, '$'/'US$' = USD")
     freight_or_courier: Optional[float] = Field(None, description="One lump-sum freight/courier/transport amount in vendor currency (not per-unit packing)")
     quote_total: Optional[float] = Field(None, description="Total quotation amount in vendor currency")
+    packing_total: Optional[float] = Field(None, description="One packing amount for the whole quote when it is NOT printed per item, in vendor currency")
     quote_subject: Optional[str] = Field(None, description="Short product summary, max ~80 characters, e.g. 'Airlock DMN Westinghouse AML300 4TCO'")
     delivery_time: Optional[str] = Field(None, description="Delivery or lead time stated in quote, formatted e.g. '10 to 12 weeks from PO'")
     lines: List[LineItemSchema] = Field(default_factory=list, description="Extracted line items")
@@ -59,12 +62,13 @@ Strict extraction rules:
    Indian formatting groups digits in lakhs: 'Rs. 2,46,000/-' means 246000 and 'INR 6,08,500/-' means 608500. Drop the trailing '/-'.
 3. Unit Price: 'unit_price' MUST be the price per single unit BEFORE discount.
 4. Discount: If the quote indicates a discount percentage on a line item, set 'discount_percent' (0 to 100, e.g. 15 for 15%). If no discount is shown, use null.
-5. Freight / Packing / Courier:
-   - A single lump-sum freight, courier, transport or handling amount goes into 'freight_or_courier', NOT into 'lines'.
-   - Packing charged per unit (e.g. 'Packing Charges: Extra @9800/- each' for an item of 4 nos) is a separate line
-     in 'lines': description 'Packing for <item>', qty = that item's quantity, unit_price = the per-unit packing price.
-   - A packing amount per line of a quote (e.g. 'Packaging Costs EUR 500.00' under a line) is a separate line with qty 1.
-   - 'Freight extra at actuals', 'client scope' or any charge without an amount: leave it out and add a warning.
+5. Packing is NEVER a line in 'lines':
+   - Packing printed for an item goes on that item: 'packing_amount' + 'packing_basis'.
+     'Packing Charges: Extra @9800/- each' for an item of 4 nos -> packing_amount 9800, packing_basis 'per_unit'.
+     'Packaging Costs EUR 500.00' printed under a line of 4 nos -> packing_amount 500, packing_basis 'per_line'.
+   - One packing amount for the whole quote (not tied to an item) -> 'packing_total'.
+   - Freight, courier or transport with an amount -> 'freight_or_courier' (information only). 'Freight extra at
+     actuals' / 'client scope' or any charge without an amount: leave it out and add a warning.
 5b. Priced accessories and options quoted 'each' under an item (e.g. 'Venturi: INR 50,000/- each', 'ZSS: INR 53,000/- each')
    are separate lines with the qty of the item they belong to. Quantities written like '04 x 350mm' or 'Number of units: 03' mean qty 4 / 3.
 6. Price on request: Skip any line items where the price is 'price on request', 'on request', 'price will follow', 'TBA', or missing, and add an explanatory warning string to 'warnings' for each skipped item.
@@ -159,6 +163,12 @@ def validate_and_clean_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 disc = float(disc)
 
+        packing_per_unit = 0.0
+        pk = item.get("packing_amount")
+        if isinstance(pk, (int, float)) and not isinstance(pk, bool) and pk > 0:
+            basis = str(item.get("packing_basis") or "per_unit").strip().lower()
+            packing_per_unit = round(float(pk) / float(qty), 4) if basis == "per_line" else float(pk)
+
         cleaned_lines.append({
             "line_no": item.get("line_no") or len(cleaned_lines) + 1,
             "part_no": part_no,
@@ -169,6 +179,7 @@ def validate_and_clean_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
             "discount_percent": disc,
             "notes": (item.get("notes") or "").strip(),
             "commodity_code": (item.get("commodity_code") or "").strip() or None,
+            "packing_per_unit": packing_per_unit,
         })
 
     from .sheet import normalize_currency
@@ -192,6 +203,14 @@ def validate_and_clean_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
         except (ValueError, TypeError):
             quote_total = None
 
+    packing_total = raw_data.get("packing_total")
+    try:
+        packing_total = float(packing_total) if packing_total is not None else None
+        if packing_total is not None and packing_total <= 0:
+            packing_total = None
+    except (ValueError, TypeError):
+        packing_total = None
+
     subject = (raw_data.get("quote_subject") or "").strip()
     if subject:
         subject = subject[:255]
@@ -210,6 +229,7 @@ def validate_and_clean_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
         "currency": currency or None,
         "freight_or_courier": freight,
         "quote_total": quote_total,
+        "packing_total": packing_total,
         "quote_subject": subject,
         "delivery_time": deliv,
         "lines": cleaned_lines,

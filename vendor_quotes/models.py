@@ -37,9 +37,11 @@ class Vendor(models.Model):
     # Defaults that pre-fill the standard price template (all editable per quote)
     default_discount = models.DecimalField(max_digits=6, decimal_places=4, default=0, help_text="0.15 = 15%")
     default_exchange_rate = models.DecimalField(max_digits=14, decimal_places=4, default=0, help_text="IDR per 1 unit of vendor currency")
-    default_margin_factor = models.DecimalField(max_digits=6, decimal_places=4, default=0.8, help_text="Cost is divided by this, e.g. 0.8")
-    default_duty_factor = models.DecimalField(max_digits=6, decimal_places=4, default=0.9, help_text="0.9 = duty 10%")
-    default_freight_factor = models.DecimalField(max_digits=6, decimal_places=4, default=1)
+    # The three margins of the price sheet: cost / Margin 1 / Margin 2 / Margin 3 (1 = not used).
+    # Field names kept from the first version (duty/freight factor) so no data is lost.
+    default_margin_factor = models.DecimalField(max_digits=6, decimal_places=4, default=0.8, help_text="Margin 1 - cost is divided by this, e.g. 0.8")
+    default_duty_factor = models.DecimalField(max_digits=6, decimal_places=4, default=1, help_text="Margin 2 - 1 = not used")
+    default_freight_factor = models.DecimalField(max_digits=6, decimal_places=4, default=1, help_text="Margin 3 - 1 = not used")
     is_active = models.BooleanField(default=True)
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

@@ -15,8 +15,8 @@ from ..models import (AIBudgetNotification, AIRequestLog, Enquiry, MasterSheet, 
                       QuoteEvent, QuoteRevision, Vendor, VendorMasterFile, VendorQuote)
 from . import zoho
 from .excel_io import append_to_master, build_single_workbook, import_master
-from .sheet import (build_standard_snapshot, cell_number, cell_text, diff_snapshots, extract_lines,
-                    first_sheet, fresh_copy, get_cell, is_standard_layout, normalize_currency, resolve_rate)
+from .sheet import (build_standard_snapshot, diff_snapshots, extract_lines, first_sheet, fresh_copy,
+                    normalize_currency, read_settings, resolve_rate)
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -243,8 +243,8 @@ def create_quote(*, enquiry_number, customer_name, vendor, vendor_quote_no, quot
         snapshot = build_standard_snapshot(
             enquiry_no=enquiry.number, customer=enquiry.customer_name, vendor_name=vendor.name,
             vendor_quote_no=quote.vendor_quote_no, currency=quote.currency,
-            exchange_rate=resolve_rate(quote.currency, vendor), margin_factor=vendor.default_margin_factor,
-            duty_factor=vendor.default_duty_factor, freight_factor=vendor.default_freight_factor,
+            exchange_rate=resolve_rate(quote.currency, vendor), margin1=vendor.default_margin_factor,
+            margin2=vendor.default_duty_factor, margin3=vendor.default_freight_factor,
             discount=vendor.default_discount, title=title)
     rev = QuoteRevision.objects.create(quote=quote, number=0, snapshot=snapshot, created_by=user)
     event(quote, "created", f"Vendor quote uploaded for {enquiry.number}", user, rev)
@@ -510,62 +510,34 @@ def apply_ai_result(quote, rev, ai_result, user):
     # 2. Currency: what the AI detected on the quote (INR, USD, EUR ...) wins over the vendor default,
     #    because the same vendor can quote in different currencies (e.g. Rotolok INR or USD).
     old_snap = rev.snapshot or {}
-    sh = first_sheet(old_snap)
-    standard = is_standard_layout(sh)
-    old_cur = normalize_currency(cell_text(get_cell(sh, 4, 2))) if standard else ""
+    old = read_settings(first_sheet(old_snap))     # {} for a sheet copied from a vendor master
+    old_cur = old.get("currency", "")
     extracted_cur = normalize_currency(ai_result.get("currency"))
     if extracted_cur and extracted_cur != quote.currency:
         quote.currency = extracted_cur
         quote.save(update_fields=["currency", "updated_at"])
     cur = quote.currency or normalize_currency(quote.vendor.currency) or "EUR"
+    vendor = quote.vendor
 
-    # 3. Factors: keep what the user already typed in a standard sheet. A sheet copied from an
-    #    old vendor master has a different layout, so its cells are NOT read by position.
-    margin_factor = quote.vendor.default_margin_factor
-    duty_factor = quote.vendor.default_duty_factor
-    freight_factor = quote.vendor.default_freight_factor
-    freight = 0
-    quote_total = ""
-    typed_rate = None
-
-    if standard:
-        typed_rate = cell_number(get_cell(sh, 0, 9))
-        c_margin = cell_number(get_cell(sh, 1, 9))
-        if c_margin is not None and c_margin > 0:
-            margin_factor = c_margin
-        c_duty = cell_number(get_cell(sh, 2, 9))
-        if c_duty is not None and c_duty > 0:
-            duty_factor = c_duty
-        c_ffactor = cell_number(get_cell(sh, 3, 9))
-        if c_ffactor is not None and c_ffactor > 0:
-            freight_factor = c_ffactor
-        if old_cur == cur:   # freight / total are in quote currency - only reuse if it didn't change
-            c_freight = cell_number(get_cell(sh, 4, 9))
-            if c_freight is not None:
-                freight = c_freight
-            c_total = cell_number(get_cell(sh, 5, 9))
-            if c_total is not None:
-                quote_total = c_total
-
-    exchange_rate = resolve_rate(cur, quote.vendor, current=typed_rate, current_currency=old_cur)
-
-    # Overwrite freight and quote_total if AI found them
-    if ai_result.get("freight_or_courier") is not None:
-        freight = ai_result["freight_or_courier"]
+    # 3. Settings: keep what the user already typed in a standard sheet, else vendor defaults.
+    margin1 = old.get("m1") or vendor.default_margin_factor
+    margin2 = old.get("m2") or vendor.default_duty_factor
+    margin3 = old.get("m3") or vendor.default_freight_factor
+    exchange_rate = resolve_rate(cur, vendor, current=old.get("rate"), current_currency=old_cur)
+    charges = dict(old.get("charges") or {})          # IDR amounts typed by the user - always kept
+    if old.get("legacy_freight") and old_cur == cur and "Freight (Air / Sea)" not in charges:
+        charges["Freight (Air / Sea)"] = old["legacy_freight"] * exchange_rate   # older sheet: freight in quote currency
+    quote_total = old.get("vq_total", "") if old_cur == cur else ""
     if ai_result.get("quote_total") is not None:
         quote_total = ai_result["quote_total"]
+    lot_packing = ai_result.get("packing_total") or 0
 
-    # 4. Map lines
+    # 4. Map lines (packing is kept out of the item lines - it goes to the PACKING block)
     ai_lines = ai_result.get("lines") or []
     sheet_lines = []
     for ln in ai_lines:
         disc = ln.get("discount_percent")
-        # discount as a fraction (e.g. 15 -> 0.15)
-        if disc is not None:
-            disc_fraction = round(float(disc) / 100.0, 4)
-        else:
-            disc_fraction = float(quote.vendor.default_discount)
-
+        disc_fraction = round(float(disc) / 100.0, 4) if disc is not None else float(vendor.default_discount)
         sheet_lines.append({
             "part": ln.get("part_no") or "",
             "description": ln.get("description") or "",
@@ -573,26 +545,25 @@ def apply_ai_result(quote, rev, ai_result, user):
             "unit": ln.get("unit") or "pcs",
             "unit_price": ln.get("unit_price") if ln.get("unit_price") is not None else "",
             "discount": disc_fraction,
+            "packing_per_unit": ln.get("packing_per_unit") or 0,
         })
 
-    title = f"{quote.enquiry.number} {quote.vendor.code or quote.vendor.name}"
-
+    title = f"{quote.enquiry.number} {vendor.code or vendor.name}"
     new_snap = build_standard_snapshot(
         enquiry_no=quote.enquiry.number,
         customer=quote.enquiry.customer_name,
-        vendor_name=quote.vendor.name,
+        vendor_name=vendor.name,
         vendor_quote_no=quote.vendor_quote_no,
         currency=cur,
         exchange_rate=exchange_rate,
-        margin_factor=margin_factor,
-        duty_factor=duty_factor,
-        freight_factor=freight_factor,
-        discount=quote.vendor.default_discount,
+        margin1=margin1, margin2=margin2, margin3=margin3,
+        discount=vendor.default_discount,
         lines=sheet_lines,
         blank_lines=max(10, len(sheet_lines)),
         title=title,
-        freight=freight,
         quote_total=quote_total,
+        lot_packing=lot_packing,
+        charges=charges,
     )
 
     # 5. Compute diff and record QuoteChange
@@ -651,7 +622,10 @@ def apply_ai_result(quote, rev, ai_result, user):
     filename = os.path.basename(quote.quote_file.name) if quote.quote_file else "file"
     warnings = list(ai_result.get("warnings") or [])
     if not exchange_rate:
-        warnings.append(f"No exchange rate known for {cur} - type the IDR rate in J1")
+        warnings.append(f"No exchange rate known for {cur} - type the IDR rate in I2")
+    if ai_result.get("freight_or_courier"):
+        warnings.append(f"Vendor quote mentions freight/courier {ai_result['freight_or_courier']:,.2f} {cur} - "
+                        f"enter the charges in IDR in the CHARGES block")
     msg = f"AI filled {len(sheet_lines)} lines from {filename}"
     if warnings:
         msg += f" (Warnings: {'; '.join(warnings)})"

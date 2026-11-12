@@ -50,9 +50,9 @@ class VendorForm(forms.ModelForm):
         labels = {
             "default_discount": "Default discount (0.15 = 15%)",
             "default_exchange_rate": "Exchange rate (IDR per 1 unit)",
-            "default_margin_factor": "Margin factor (cost ÷ this)",
-            "default_duty_factor": "Duty factor (0.9 = 10% duty)",
-            "default_freight_factor": "Freight factor",
+            "default_margin_factor": "Margin 1 (cost ÷ this)",
+            "default_duty_factor": "Margin 2 (1 = not used)",
+            "default_freight_factor": "Margin 3 (1 = not used)",
         }
         widgets = {
             "notes": forms.Textarea(attrs={"rows": 2, "class": INPUT}),
