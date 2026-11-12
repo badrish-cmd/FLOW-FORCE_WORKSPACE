@@ -2,10 +2,19 @@
 {% load static humanize %}
 {% block title %}{{ quote.enquiry.number }} · {{ quote.vendor.name }} - Vendor Quotes{% endblock %}
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'vendor_quotes/ff-sheet.css' %}">
+<link rel="stylesheet" href="{% static 'vendor_quotes/ff-sheet.css' %}?v=20261112">
 <style>
     #sheet-host { height: calc(100vh - 230px); min-height: 520px; }
     .vq-panel iframe { width: 100%; height: calc(100vh - 230px); min-height: 520px; border: 0; }
+    /* Full-screen sheet: covers the whole window, keeps Save and the vendor quote at hand */
+    .vq-full { position: fixed; inset: 0; z-index: 1040;   /* above the sidebar (1000), below dialogs (1050+) */
+               display: flex; flex-direction: column; gap: 6px;
+               padding: 6px 8px 8px; background: #f8fafc; }
+    .vq-full .vq-body { flex: 1 1 auto; min-height: 0; }
+    .vq-full #sheet-host, .vq-full .vq-panel iframe { height: calc(100vh - 58px); min-height: 0; }
+    /* the page fade-in animation would keep the full-screen sheet underneath the sidebar */
+    body.vq-fullscreen .page-container { animation: none !important; transform: none !important; }
+    body.vq-fullscreen .sidebar, body.vq-fullscreen .app-header { z-index: auto !important; }
 </style>
 {% endblock %}
 {% block content %}
@@ -187,8 +196,31 @@
     <div x-show="summary.problems && summary.problems.length" x-cloak class="mb-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800"><i class="fas fa-exclamation-triangle mr-2"></i><span x-text="summary.problems && summary.problems[0]"></span></div>
     {% endif %}
 
-    <!-- Sheet + vendor quote -->
-    <div class="flex gap-3">
+    <!-- Sheet + vendor quote (can go full screen) -->
+    <div :class="full ? 'vq-full' : ''">
+    <div class="mb-2 flex items-center gap-2" :class="full ? 'mb-0' : ''">
+        <template x-if="full">
+            <div class="min-w-0 flex-1 truncate text-sm font-semibold text-slate-700">
+                {{ quote.enquiry.number }} · {{ quote.vendor.name }}{% if quote.vendor_quote_no %} · {{ quote.vendor_quote_no }}{% endif %}
+            </div>
+        </template>
+        <div x-show="!full" class="flex-1"></div>
+        {% if editable %}
+        <template x-if="full">
+            <div class="flex items-center gap-2">
+                <span class="text-xs" :class="dirty ? 'text-amber-600' : 'text-slate-400'" x-text="saveLabel"></span>
+                <button type="button" @click="save()" class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50" title="Ctrl+S"><i class="fas fa-save mr-1.5"></i>Save</button>
+            </div>
+        </template>
+        {% endif %}
+        {% if quote.quote_file %}
+        <button type="button" x-show="full" x-cloak @click="showPdf = !showPdf" class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"><i class="fas fa-file-pdf mr-1.5 text-red-500"></i><span x-text="showPdf ? 'Hide vendor quote' : 'Show vendor quote'"></span></button>
+        {% endif %}
+        <button type="button" @click="toggleFull()" class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50" :title="full ? 'Back to the normal page' : 'Show the sheet on the whole screen'">
+            <i class="fas mr-1.5" :class="full ? 'fa-compress' : 'fa-expand'"></i><span x-text="full ? 'Exit full screen' : 'Full screen'"></span>
+        </button>
+    </div>
+    <div class="vq-body flex gap-3">
         <div class="min-w-0 flex-1 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <div id="sheet-host"></div>
         </div>
@@ -201,6 +233,7 @@
             {% endif %}
         </div>
         {% endif %}
+    </div>
     </div>
 
     <!-- Quotation details card (Zoho draft quotation parameters) -->
@@ -510,7 +543,7 @@
 {{ quotation_details_json|json_script:"quotation-details-data" }}
 {% endblock %}
 {% block extra_js %}
-<script src="{% static 'vendor_quotes/ff-sheet.js' %}"></script>
+<script src="{% static 'vendor_quotes/ff-sheet.js' %}?v=20261112"></script>
 <script>
 window.VQ = {
     editable: {{ editable|yesno:"true,false" }},
@@ -523,5 +556,5 @@ window.VQ = {
     details: JSON.parse(document.getElementById("quotation-details-data").textContent || "{}"),
 };
 </script>
-<script src="{% static 'vendor_quotes/quote_sheet.js' %}"></script>
+<script src="{% static 'vendor_quotes/quote_sheet.js' %}?v=20261112"></script>
 {% endblock %}

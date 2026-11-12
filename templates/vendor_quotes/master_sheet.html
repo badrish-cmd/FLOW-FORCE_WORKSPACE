@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% load static %}
 {% block title %}{{ sheet.vendor.name }} · {{ sheet.sheet_name }}{% endblock %}
-{% block extra_css %}<link rel="stylesheet" href="{% static 'vendor_quotes/ff-sheet.css' %}"><style>#sheet-host{height:calc(100vh - 300px);min-height:480px}</style>{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'vendor_quotes/ff-sheet.css' %}?v=20261112"><style>#sheet-host{height:calc(100vh - 300px);min-height:480px}</style>{% endblock %}
 {% block content %}
 <div class="mx-auto max-w-[1800px]">
     <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -34,6 +34,6 @@
 {{ sheet.snapshot|json_script:"sheet-data" }}
 {% endblock %}
 {% block extra_js %}
-<script src="{% static 'vendor_quotes/ff-sheet.js' %}"></script>
+<script src="{% static 'vendor_quotes/ff-sheet.js' %}?v=20261112"></script>
 <script>FFSheet.mount(document.getElementById('sheet-host'), JSON.parse(document.getElementById('sheet-data').textContent), { readOnly: true });</script>
 {% endblock %}

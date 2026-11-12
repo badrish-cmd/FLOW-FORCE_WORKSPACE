@@ -13,6 +13,7 @@
     window.quotePage = function () {
         return {
             showPdf: false,
+            full: false,
             dirty: false,
             saving: false,
             saveLabel: window.VQ.editable ? "All changes saved" : "",
@@ -115,6 +116,16 @@
                     this.aiRunning = false;
                     alert("Network error: " + err.message);
                 }
+            },
+            toggleFull() {
+                this.full = !this.full;
+                document.body.style.overflow = this.full ? "hidden" : "";
+                document.body.classList.toggle("vq-fullscreen", this.full);
+                // let the sheet re-measure its new size
+                this.$nextTick(() => {
+                    window.dispatchEvent(new Event("resize"));
+                    setTimeout(() => window.dispatchEvent(new Event("resize")), 200);
+                });
             },
             fmt(n) { return Math.round(n || 0).toLocaleString("en-US"); },
             openDecision(kind) { this.decision = kind; },

@@ -57,7 +57,7 @@ def priced_snapshot(lines):
     sh = sheet_svc.first_sheet(snap)
     for i, ln in enumerate(lines):
         r = sheet_svc.FIRST_LINE_ROW + i
-        sh["cellData"][str(r)]["16"]["v"] = ln["sell"]
+        sh["cellData"][str(r)]["20"]["v"] = ln["sell"]
     return snap
 
 
@@ -72,10 +72,12 @@ class SheetServiceTests(TestCase):
         self.assertEqual(sheet_svc.get_cell(sh, 10, 7)["f"], "=F11*(1-G11)")
         self.assertEqual(sheet_svc.get_cell(sh, 10, 8)["f"], "=H11*$I$2")
         self.assertEqual(sheet_svc.get_cell(sh, 10, 9)["f"], "=I11*D11")
-        self.assertEqual(sheet_svc.get_cell(sh, 10, 10)["f"], "=I11/$I$3/$I$4/$I$5")
-        self.assertEqual(sheet_svc.get_cell(sh, 10, 16)["f"], "=ROUNDUP(K11+N11+O11+P11,-3)")
-        self.assertEqual(sheet_svc.get_cell(sh, 10, 17)["f"], "=Q11*D11")
-        self.assertEqual(sheet_svc.get_cell(sh, 9, 12)["v"], "Freight Ratio")
+        self.assertEqual(sheet_svc.get_cell(sh, 10, 10)["f"], "=I11/$I$3")
+        self.assertEqual(sheet_svc.get_cell(sh, 10, 11)["f"], "=K11/$I$4")
+        self.assertEqual(sheet_svc.get_cell(sh, 10, 12)["f"], "=L11/$I$5")
+        self.assertEqual(sheet_svc.get_cell(sh, 10, 20)["f"], "=ROUNDUP(M11+Q11+S11+T11,-3)")
+        self.assertEqual(sheet_svc.get_cell(sh, 10, 21)["f"], "=U11*D11")
+        self.assertEqual(sheet_svc.get_cell(sh, 9, 14)["v"], "Freight Ratio")
 
     def test_extract_lines_reads_computed_prices(self):
         snap = priced_snapshot([
@@ -93,7 +95,7 @@ class SheetServiceTests(TestCase):
             margin1=1, discount=0,
             lines=[{"part": "A", "description": "x", "qty": 1, "unit_price": 10}])
         sh = sheet_svc.first_sheet(snap)
-        sh["cellData"][str(sheet_svc.FIRST_LINE_ROW)]["16"].pop("v")   # browser hasn't calculated it yet
+        sh["cellData"][str(sheet_svc.FIRST_LINE_ROW)]["20"].pop("v")   # browser hasn't calculated it yet
         lines, problems = sheet_svc.extract_lines(snap)
         self.assertEqual(lines, [])
         self.assertIn("save it once", problems[0])
@@ -107,8 +109,8 @@ class SheetServiceTests(TestCase):
                     "packing_per_unit": 9800}],
             quote_total=4 * (608500 + 9800))
         sh = sheet_svc.first_sheet(snap)
-        self.assertEqual(sheet_svc.get_cell(sh, 10, 15)["v"], 1960000.0)       # packing per unit (IDR)
-        self.assertEqual(sheet_svc.get_cell(sh, 10, 16)["v"], 216599000.0)
+        self.assertEqual(sheet_svc.get_cell(sh, 10, 19)["v"], 1960000.0)       # packing per unit (IDR)
+        self.assertEqual(sheet_svc.get_cell(sh, 10, 20)["v"], 216599000.0)
         lines, problems = sheet_svc.extract_lines(snap)
         self.assertEqual(problems, [])
         self.assertEqual([(l["qty"], l["rate"]) for l in lines], [(4.0, 216599000.0)])   # packing is not a line
@@ -125,17 +127,17 @@ class SheetServiceTests(TestCase):
             lot_packing=1000, duty_pct=0.05)
         sh = sheet_svc.first_sheet(snap)
         total = sheet_svc.FIRST_LINE_ROW + 2
-        self.assertAlmostEqual(sheet_svc.get_cell(sh, total, 12)["v"], 1.0)               # ratios add to 100%
-        self.assertAlmostEqual(sheet_svc.get_cell(sh, total, 13)["v"], 62500000.0, 2)     # charges recovered once
-        self.assertAlmostEqual(sheet_svc.get_cell(sh, total, 15)["v"], 200000.0, 2)       # lot packing (1000 INR)
+        self.assertAlmostEqual(sheet_svc.get_cell(sh, total, 14)["v"], 1.0)               # ratios add to 100%
+        self.assertAlmostEqual(sheet_svc.get_cell(sh, total, 15)["v"], 62500000.0, 2)     # charges recovered once
+        self.assertAlmostEqual(sheet_svc.get_cell(sh, total, 19)["v"], 200000.0, 2)       # lot packing (1000 INR)
         # duty = 5% x (vendor invoice in IDR [goods + packing] + total charges), recovered once
         invoice_idr = (608500 * 4 + 50000) * 200 + 1000 * 200
         duty = 0.05 * (invoice_idr + 62500000)
         self.assertAlmostEqual(sheet_svc.get_cell(sh, 6, 8)["v"], duty, 2)
-        self.assertAlmostEqual(sheet_svc.get_cell(sh, total, 14)["v"], duty, 2)
+        self.assertAlmostEqual(sheet_svc.get_cell(sh, total, 17)["v"], duty, 2)
         self.assertEqual(sheet_svc.get_cell(sh, total, 9)["v"], (608500 * 4 + 50000) * 200)  # Total Cost column
         self.assertEqual(sheet_svc.read_settings(sh)["duty_pct"], 0.05)
-        ratio_a = sheet_svc.get_cell(sh, 10, 12)["v"]
+        ratio_a = sheet_svc.get_cell(sh, 10, 14)["v"]
         self.assertAlmostEqual(ratio_a, (608500 * 4) / (608500 * 4 + 50000))
         self.assertEqual(sheet_svc.read_settings(sh)["charges"],
                          {"Freight (Air / Sea)": 60000000.0, "Port Demurrage Charges": 2500000.0})
@@ -185,7 +187,7 @@ class ExcelImportTests(TestCase):
         wb = openpyxl.load_workbook(io.BytesIO(data))
         self.assertEqual(wb.sheetnames, ["Sheet1", "Sheet106", "ENQ 2026 11 1"])
         ws = wb["ENQ 2026 11 1"]
-        self.assertEqual(ws["Q11"].value, "=ROUNDUP(K11+N11+O11+P11,-3)")
+        self.assertEqual(ws["U11"].value, "=ROUNDUP(M11+Q11+S11+T11,-3)")
         self.assertEqual(ws["B11"].value, "A")
         # same title again gets a unique name
         _data2, title2, _count2 = append_to_master(data, snap, "ENQ 2026 11 1")
@@ -563,7 +565,7 @@ class AIQuoteExtractionTests(TestCase):
         sh = sheet_svc.first_sheet(rev.snapshot)
         self.assertEqual(sheet_svc.get_cell(sh, 1, 8)["v"], 200.0)
         self.assertEqual(sheet_svc.get_cell(sh, 5, 2)["v"], "INR")
-        self.assertEqual(sheet_svc.get_cell(sh, 10, 16)["v"], 216599000.0)
+        self.assertEqual(sheet_svc.get_cell(sh, 10, 20)["v"], 216599000.0)
         lines, problems = sheet_svc.extract_lines(rev.snapshot)
         self.assertEqual(problems, [])
         self.assertEqual(len(lines), 1)
