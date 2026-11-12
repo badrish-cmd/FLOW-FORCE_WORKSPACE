@@ -88,9 +88,45 @@ class SheetServiceTests(TestCase):
             enquiry_no="E", customer="C", vendor_name="V", vendor_quote_no="", currency="EUR", exchange_rate=1,
             margin_factor=1, duty_factor=1, freight_factor=1, discount=0,
             lines=[{"part": "A", "description": "x", "qty": 1, "unit_price": 10}])
+        sh = sheet_svc.first_sheet(snap)
+        sh["cellData"][str(sheet_svc.FIRST_LINE_ROW)]["12"].pop("v")   # browser hasn't calculated it yet
         lines, problems = sheet_svc.extract_lines(snap)
         self.assertEqual(lines, [])
         self.assertIn("save it once", problems[0])
+
+    def test_builder_fills_calculated_prices(self):
+        # Rotolok-style INR quote: 608,500 x 200 / 0.7 / 0.9 / 0.9 = 214,638,448 -> 214,638,000
+        snap = sheet_svc.build_standard_snapshot(
+            enquiry_no="E", customer="C", vendor_name="Rotolok", vendor_quote_no="RV 399-26", currency="INR",
+            exchange_rate=200, margin_factor=0.7, duty_factor=0.9, freight_factor=0.9, discount=0,
+            lines=[{"part": "35RVCLSS2B0P0I", "description": "350mm RV", "qty": 4, "unit_price": 608500},
+                   {"part": "", "description": "Packing for 350mm RV", "qty": 4, "unit_price": 9800}],
+            quote_total=2473200)
+        sh = sheet_svc.first_sheet(snap)
+        self.assertEqual(sheet_svc.get_cell(sh, 8, 12)["v"], 214638000.0)
+        self.assertEqual(sheet_svc.get_cell(sh, 9, 12)["v"], 3457000.0)
+        lines, problems = sheet_svc.extract_lines(snap)
+        self.assertEqual(problems, [])
+        self.assertEqual([l["rate"] for l in lines], [214638000.0, 3457000.0])
+        check_row = sheet_svc.FIRST_LINE_ROW + 2 + 1   # 2 lines, then TOTAL, then the check row
+        self.assertEqual(sheet_svc.get_cell(sh, check_row, 8)["v"], "OK")
+
+    def test_zero_exchange_rate_is_flagged(self):
+        snap = sheet_svc.build_standard_snapshot(
+            enquiry_no="E", customer="C", vendor_name="V", vendor_quote_no="", currency="CHF", exchange_rate=0,
+            margin_factor=1, duty_factor=1, freight_factor=1, discount=0,
+            lines=[{"part": "A", "description": "x", "qty": 1, "unit_price": 10}])
+        lines, problems = sheet_svc.extract_lines(snap)
+        self.assertEqual(lines, [])
+        self.assertIn("exchange rate", problems[0])
+
+    def test_currency_detection_helpers(self):
+        self.assertEqual(sheet_svc.normalize_currency("Rs."), "INR")
+        self.assertEqual(sheet_svc.normalize_currency("\u20b9"), "INR")
+        self.assertEqual(sheet_svc.normalize_currency("us$"), "USD")
+        self.assertEqual(sheet_svc.normalize_currency("\u20ac"), "EUR")
+        self.assertEqual(sheet_svc.resolve_rate("INR"), 200.0)
+        self.assertEqual(sheet_svc.resolve_rate("USD"), 18500.0)
 
     def test_diff_snapshots(self):
         a = priced_snapshot([{"part": "A", "description": "x", "qty": 1, "unit_price": 10, "sell": 100}])
@@ -465,6 +501,62 @@ class AIQuoteExtractionTests(TestCase):
 
         self.assertTrue(rev.changes.exists())
         self.assertTrue(quote.events.filter(action="ai_filled").exists())
+
+    def _rotolok(self, currency="INR", rate=0):
+        return Vendor.objects.create(name="Rotolok Valves", code="ROTOLOK", currency=currency,
+                                     default_exchange_rate=rate, default_margin_factor=0.7,
+                                     default_duty_factor=0.9, default_freight_factor=0.9)
+
+    def test_apply_ai_detects_inr_and_uses_inr_rate(self):
+        vendor = self._rotolok(currency="EUR", rate=22000)   # vendor default is EUR, quote is in INR
+        quote, rev = workflow.create_quote(enquiry_number="ENQ/2026/09/2668", customer_name="PT. X",
+                                           vendor=vendor, vendor_quote_no="", quote_file=None, user=self.ibrahim)
+        workflow.apply_ai_result(quote, rev, {
+            "currency": "Rs.", "quote_total": 2473200,
+            "lines": [{"part_no": "35RVCLSS2B0P0I", "description": "350mm RV", "qty": 4, "unit_price": 608500},
+                      {"part_no": "", "description": "Packing for 350mm RV", "qty": 4, "unit_price": 9800}],
+        }, self.ibrahim)
+        quote.refresh_from_db(); rev.refresh_from_db()
+        self.assertEqual(quote.currency, "INR")
+        sh = sheet_svc.first_sheet(rev.snapshot)
+        self.assertEqual(sheet_svc.get_cell(sh, 0, 9)["v"], 200.0)
+        self.assertEqual(sheet_svc.get_cell(sh, 4, 2)["v"], "INR")
+        self.assertEqual(sheet_svc.get_cell(sh, 8, 12)["v"], 214638000.0)
+        lines, problems = sheet_svc.extract_lines(rev.snapshot)
+        self.assertEqual(problems, [])
+        self.assertEqual(len(lines), 2)
+
+    def test_apply_ai_detects_usd(self):
+        vendor = self._rotolok(currency="INR", rate=200)
+        quote, rev = workflow.create_quote(enquiry_number="ENQ/2026/09/2701", customer_name="PT. Y",
+                                           vendor=vendor, vendor_quote_no="", quote_file=None, user=self.ibrahim)
+        workflow.apply_ai_result(quote, rev, {
+            "currency": "USD", "lines": [{"part_no": "20ECCSLSS2B0P0I", "description": "200mm RV", "qty": 6, "unit_price": 6750}],
+        }, self.ibrahim)
+        quote.refresh_from_db(); rev.refresh_from_db()
+        self.assertEqual(quote.currency, "USD")
+        sh = sheet_svc.first_sheet(rev.snapshot)
+        self.assertEqual(sheet_svc.get_cell(sh, 0, 9)["v"], 18500.0)
+        self.assertIn("USD", sheet_svc.get_cell(sh, 7, 5)["v"])
+
+    def test_apply_ai_on_copied_master_sheet_ignores_its_cells(self):
+        """A sheet copied from an old Rotolok master has other numbers in J1:J6 - they must not
+        become the exchange rate / freight (this produced rate 0 and freight 178,392,857)."""
+        vendor = self._rotolok(currency="INR", rate=0)
+        master = {"sheetOrder": ["s"], "sheets": {"s": {"id": "s", "name": "Sheet49", "cellData": {
+            "0": {"9": {"v": ""}}, "3": {"9": {"v": "margin 1"}},
+            "4": {"9": {"v": 178392857.14}, "7": {"v": 0.7}}, "5": {"9": {"v": 99}}}}}}
+        quote, rev = workflow.create_quote(enquiry_number="ENQ/2026/09/2669", customer_name="PT. Z",
+                                           vendor=vendor, vendor_quote_no="", quote_file=None,
+                                           user=self.ibrahim, start_from=master)
+        workflow.apply_ai_result(quote, rev, {
+            "currency": "INR", "lines": [{"part_no": "RV", "description": "RV", "qty": 1, "unit_price": 100000}],
+        }, self.ibrahim)
+        rev.refresh_from_db()
+        sh = sheet_svc.first_sheet(rev.snapshot)
+        self.assertEqual(sheet_svc.get_cell(sh, 0, 9)["v"], 200.0)
+        self.assertEqual(sheet_svc.get_cell(sh, 4, 9)["v"], 0.0)
+        self.assertEqual(sheet_svc.get_cell(sh, 1, 9)["v"], 0.7)
 
     def test_apply_ai_refuses_approved_revision(self):
         quote, rev = workflow.create_quote(

@@ -41,8 +41,8 @@ class LineItemSchema(BaseModel):
 class QuoteExtractSchema(BaseModel):
     vendor_quote_no: Optional[str] = Field(None, description="Vendor's quotation or offer number")
     quote_date: Optional[str] = Field(None, description="Date of quote in YYYY-MM-DD or original format")
-    currency: Optional[str] = Field(None, description="3-letter currency ISO code, e.g. EUR, USD, IDR")
-    freight_or_courier: Optional[float] = Field(None, description="Freight, transport, courier, or packing charge in vendor currency")
+    currency: Optional[str] = Field(None, description="3-letter ISO code of the prices, e.g. EUR, USD, INR, IDR. 'Rs.'/'₹' = INR, '$'/'US$' = USD")
+    freight_or_courier: Optional[float] = Field(None, description="One lump-sum freight/courier/transport amount in vendor currency (not per-unit packing)")
     quote_total: Optional[float] = Field(None, description="Total quotation amount in vendor currency")
     quote_subject: Optional[str] = Field(None, description="Short product summary, max ~80 characters, e.g. 'Airlock DMN Westinghouse AML300 4TCO'")
     delivery_time: Optional[str] = Field(None, description="Delivery or lead time stated in quote, formatted e.g. '10 to 12 weeks from PO'")
@@ -56,11 +56,21 @@ Extract all line items and quotation details from the attached vendor quote file
 Strict extraction rules:
 1. Copy numbers exactly as printed in the document. Never invent or guess values.
 2. Decimal commas vs periods: Note European formatting where periods are thousands separators and commas are decimal points (e.g., '1.234,56' means 1234.56). Convert European comma decimals to standard decimals.
+   Indian formatting groups digits in lakhs: 'Rs. 2,46,000/-' means 246000 and 'INR 6,08,500/-' means 608500. Drop the trailing '/-'.
 3. Unit Price: 'unit_price' MUST be the price per single unit BEFORE discount.
 4. Discount: If the quote indicates a discount percentage on a line item, set 'discount_percent' (0 to 100, e.g. 15 for 15%). If no discount is shown, use null.
-5. Freight / Packing / Courier: Put freight, packing, courier, handling, or transport charges into 'freight_or_courier', NOT as a line item in 'lines'.
+5. Freight / Packing / Courier:
+   - A single lump-sum freight, courier, transport or handling amount goes into 'freight_or_courier', NOT into 'lines'.
+   - Packing charged per unit (e.g. 'Packing Charges: Extra @9800/- each' for an item of 4 nos) is a separate line
+     in 'lines': description 'Packing for <item>', qty = that item's quantity, unit_price = the per-unit packing price.
+   - A packing amount per line of a quote (e.g. 'Packaging Costs EUR 500.00' under a line) is a separate line with qty 1.
+   - 'Freight extra at actuals', 'client scope' or any charge without an amount: leave it out and add a warning.
+5b. Priced accessories and options quoted 'each' under an item (e.g. 'Venturi: INR 50,000/- each', 'ZSS: INR 53,000/- each')
+   are separate lines with the qty of the item they belong to. Quantities written like '04 x 350mm' or 'Number of units: 03' mean qty 4 / 3.
 6. Price on request: Skip any line items where the price is 'price on request', 'on request', 'price will follow', 'TBA', or missing, and add an explanatory warning string to 'warnings' for each skipped item.
-7. Currency: Extract the currency as a 3-letter ISO code (e.g. EUR, USD, IDR, SGD, GBP, JPY).
+7. Currency: Detect the currency the PRICES are written in and return its 3-letter ISO code
+   (EUR, USD, INR, IDR, SGD, GBP, JPY ...). 'Rs.', 'Rs', '₹' or 'Rupees' = INR; '$', 'US$', 'USD' = USD; '€' = EUR.
+   Look at the price lines themselves, not the company address or bank details.
 8. Quote Subject: Extract a concise product summary (max ~80 characters) summarizing the quoted equipment or goods (e.g. 'Airlock DMN Westinghouse AML300 4TCO').
 9. Delivery Time: If the vendor quote states a delivery time or lead time, extract it as 'X to Y weeks from PO' (or the printed lead time).
 10. Commodity Code: If an HS code, tariff code, or commodity code is printed for an item, extract it into 'commodity_code'.
@@ -161,9 +171,8 @@ def validate_and_clean_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
             "commodity_code": (item.get("commodity_code") or "").strip() or None,
         })
 
-    currency = raw_data.get("currency")
-    if currency:
-        currency = str(currency).strip().upper()[:10]
+    from .sheet import normalize_currency
+    currency = normalize_currency(raw_data.get("currency")) or None
 
     freight = raw_data.get("freight_or_courier")
     if freight is not None:

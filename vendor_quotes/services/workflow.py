@@ -15,8 +15,8 @@ from ..models import (AIBudgetNotification, AIRequestLog, Enquiry, MasterSheet, 
                       QuoteEvent, QuoteRevision, Vendor, VendorMasterFile, VendorQuote)
 from . import zoho
 from .excel_io import append_to_master, build_single_workbook, import_master
-from .sheet import (build_standard_snapshot, cell_number, cell_text, diff_snapshots,
-                    extract_lines, first_sheet, fresh_copy, get_cell)
+from .sheet import (build_standard_snapshot, cell_number, cell_text, diff_snapshots, extract_lines,
+                    first_sheet, fresh_copy, get_cell, is_standard_layout, normalize_currency, resolve_rate)
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -232,7 +232,7 @@ def create_quote(*, enquiry_number, customer_name, vendor, vendor_quote_no, quot
         enquiry.customer_name = customer_name.strip()
         enquiry.save(update_fields=["customer_name"])
     quote = VendorQuote.objects.create(enquiry=enquiry, vendor=vendor, vendor_quote_no=vendor_quote_no.strip(),
-                                       currency=(currency or vendor.currency), created_by=user)
+                                       currency=normalize_currency(currency or vendor.currency), created_by=user)
     if quote_file:
         quote.quote_file = quote_file
         quote.save(update_fields=["quote_file"])
@@ -243,7 +243,7 @@ def create_quote(*, enquiry_number, customer_name, vendor, vendor_quote_no, quot
         snapshot = build_standard_snapshot(
             enquiry_no=enquiry.number, customer=enquiry.customer_name, vendor_name=vendor.name,
             vendor_quote_no=quote.vendor_quote_no, currency=quote.currency,
-            exchange_rate=vendor.default_exchange_rate, margin_factor=vendor.default_margin_factor,
+            exchange_rate=resolve_rate(quote.currency, vendor), margin_factor=vendor.default_margin_factor,
             duty_factor=vendor.default_duty_factor, freight_factor=vendor.default_freight_factor,
             discount=vendor.default_discount, title=title)
     rev = QuoteRevision.objects.create(quote=quote, number=0, snapshot=snapshot, created_by=user)
@@ -507,27 +507,29 @@ def apply_ai_result(quote, rev, ai_result, user):
         quote.vendor_quote_no = extracted_vq_no
         quote.save(update_fields=["vendor_quote_no", "updated_at"])
 
-    # 2. Update quote currency if empty
-    extracted_cur = (ai_result.get("currency") or "").strip().upper()
-    if extracted_cur and not quote.currency:
-        quote.currency = extracted_cur
-        quote.save(update_fields=["currency", "updated_at"])
-
-    # 3. Read existing parameters and factor values from current snapshot to preserve user's factors
+    # 2. Currency: what the AI detected on the quote (INR, USD, EUR ...) wins over the vendor default,
+    #    because the same vendor can quote in different currencies (e.g. Rotolok INR or USD).
     old_snap = rev.snapshot or {}
     sh = first_sheet(old_snap)
+    standard = is_standard_layout(sh)
+    old_cur = normalize_currency(cell_text(get_cell(sh, 4, 2))) if standard else ""
+    extracted_cur = normalize_currency(ai_result.get("currency"))
+    if extracted_cur and extracted_cur != quote.currency:
+        quote.currency = extracted_cur
+        quote.save(update_fields=["currency", "updated_at"])
+    cur = quote.currency or normalize_currency(quote.vendor.currency) or "EUR"
 
-    exchange_rate = quote.vendor.default_exchange_rate
+    # 3. Factors: keep what the user already typed in a standard sheet. A sheet copied from an
+    #    old vendor master has a different layout, so its cells are NOT read by position.
     margin_factor = quote.vendor.default_margin_factor
     duty_factor = quote.vendor.default_duty_factor
     freight_factor = quote.vendor.default_freight_factor
     freight = 0
     quote_total = ""
+    typed_rate = None
 
-    if sh:
-        c_rate = cell_number(get_cell(sh, 0, 9))
-        if c_rate is not None and c_rate > 0:
-            exchange_rate = c_rate
+    if standard:
+        typed_rate = cell_number(get_cell(sh, 0, 9))
         c_margin = cell_number(get_cell(sh, 1, 9))
         if c_margin is not None and c_margin > 0:
             margin_factor = c_margin
@@ -537,12 +539,15 @@ def apply_ai_result(quote, rev, ai_result, user):
         c_ffactor = cell_number(get_cell(sh, 3, 9))
         if c_ffactor is not None and c_ffactor > 0:
             freight_factor = c_ffactor
-        c_freight = cell_number(get_cell(sh, 4, 9))
-        if c_freight is not None:
-            freight = c_freight
-        c_total = cell_number(get_cell(sh, 5, 9))
-        if c_total is not None:
-            quote_total = c_total
+        if old_cur == cur:   # freight / total are in quote currency - only reuse if it didn't change
+            c_freight = cell_number(get_cell(sh, 4, 9))
+            if c_freight is not None:
+                freight = c_freight
+            c_total = cell_number(get_cell(sh, 5, 9))
+            if c_total is not None:
+                quote_total = c_total
+
+    exchange_rate = resolve_rate(cur, quote.vendor, current=typed_rate, current_currency=old_cur)
 
     # Overwrite freight and quote_total if AI found them
     if ai_result.get("freight_or_courier") is not None:
@@ -571,7 +576,6 @@ def apply_ai_result(quote, rev, ai_result, user):
         })
 
     title = f"{quote.enquiry.number} {quote.vendor.code or quote.vendor.name}"
-    cur = quote.currency or quote.vendor.currency or "EUR"
 
     new_snap = build_standard_snapshot(
         enquiry_no=quote.enquiry.number,
@@ -645,7 +649,9 @@ def apply_ai_result(quote, rev, ai_result, user):
 
     # 7. Record QuoteEvent
     filename = os.path.basename(quote.quote_file.name) if quote.quote_file else "file"
-    warnings = ai_result.get("warnings") or []
+    warnings = list(ai_result.get("warnings") or [])
+    if not exchange_rate:
+        warnings.append(f"No exchange rate known for {cur} - type the IDR rate in J1")
     msg = f"AI filled {len(sheet_lines)} lines from {filename}"
     if warnings:
         msg += f" (Warnings: {'; '.join(warnings)})"

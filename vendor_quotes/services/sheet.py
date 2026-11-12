@@ -11,11 +11,62 @@ Snapshot shape (subset of Univer's IWorkbookData):
 }
 Row/column keys are 0-based and may be ints or strings (after JSON round trips).
 """
+import os
 import re
 import uuid
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from openpyxl.utils import get_column_letter
+
+# ---------------------------------------------------------------- currencies
+
+# IDR per 1 unit of currency, used when the vendor has no rate for the quote's currency.
+# Values follow the company's Excel price templates. Override on the server with
+# VQ_EXCHANGE_RATES="EUR:22000,USD:18500,INR:200".
+DEFAULT_RATES = {"EUR": 22000.0, "USD": 18500.0, "INR": 200.0, "IDR": 1.0}
+
+
+def default_rates():
+    rates = dict(DEFAULT_RATES)
+    for part in (os.getenv("VQ_EXCHANGE_RATES") or "").split(","):
+        if ":" in part:
+            k, v = part.split(":", 1)
+            try:
+                rates[k.strip().upper()] = float(v)
+            except ValueError:
+                pass
+    return rates
+
+
+_CUR_ALIASES = {
+    "RS": "INR", "RS.": "INR", "RUPEE": "INR", "RUPEES": "INR", "\u20b9": "INR", "INR.": "INR",
+    "$": "USD", "US$": "USD", "USD$": "USD", "US DOLLAR": "USD", "US DOLLARS": "USD", "DOLLAR": "USD",
+    "\u20ac": "EUR", "EURO": "EUR", "EUROS": "EUR",
+    "RP": "IDR", "RP.": "IDR", "RUPIAH": "IDR",
+}
+
+
+def normalize_currency(value):
+    """'Rs.', '\u20b9', 'inr' -> 'INR'; '$', 'US$' -> 'USD'; '\u20ac' -> 'EUR'. Unknown -> upper-cased text."""
+    t = re.sub(r"\s+", " ", str(value or "")).strip().upper()
+    if not t:
+        return ""
+    return _CUR_ALIASES.get(t, t)[:10]
+
+
+def resolve_rate(currency, vendor=None, current=None, current_currency=None):
+    """Exchange rate (IDR per 1 unit) for a quote currency.
+    Order: rate already typed in the sheet for the same currency -> vendor default
+    (only if the vendor's currency matches) -> company default for that currency."""
+    cur = normalize_currency(currency)
+    if current and float(current) > 0 and normalize_currency(current_currency) == cur:
+        return float(current)
+    if vendor is not None and normalize_currency(getattr(vendor, "currency", "")) == cur:
+        v = float(getattr(vendor, "default_exchange_rate", 0) or 0)
+        if v > 0:
+            return v
+    return float(default_rates().get(cur, 0.0))
+
 
 # ---------------------------------------------------------------- basics
 
@@ -109,6 +160,11 @@ FIRST_LINE_ROW = 8      # 0-based -> Excel row 9
 P_RATE, P_MARGIN, P_DUTY, P_FREIGHT_F, P_FREIGHT, P_VQ_TOTAL = "$J$1", "$J$2", "$J$3", "$J$4", "$J$5", "$J$6"
 
 
+def _xl_round(x, digits):
+    """Excel ROUND (halves away from zero), e.g. digits=-3 -> nearest thousand."""
+    return float(Decimal(str(x)).quantize(Decimal(1).scaleb(-digits), rounding=ROUND_HALF_UP))
+
+
 def _num(x, default=0.0):
     if x is None or x == "":
         return default
@@ -175,10 +231,39 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
     for c, (label, _w) in enumerate(HEADERS):
         put(HEADER_ROW, c, label.format(cur=cur), s="hdr")
 
+    rate_v, marg_v = _num(exchange_rate), _num(margin_factor, 1) or 1
+    duty_v, ff_v = _num(duty_factor, 1) or 1, _num(freight_factor, 1) or 1
+    freight_v = _num(freight, 0)
+
+    # Pre-compute every formula result in Python (same maths as the formulas) so the
+    # sheet shows prices straight away, before anyone opens it in the browser.
+    calc = []
+    for i in range(n):
+        line = lines[i] if i < len(lines) else {}
+        price = line.get("unit_price", "") if line else ""
+        qty = line.get("qty", "") if line else ""
+        disc = _num(line.get("discount"), _num(discount)) if line else _num(discount)
+        row = {"h": "", "i": "", "j": "", "k": ""}
+        if price not in (None, ""):
+            row["h"] = _num(price) * (1 - disc)
+            row["i"] = row["h"] * rate_v
+            row["j"] = row["i"] / marg_v / duty_v / ff_v
+            if qty not in (None, ""):
+                row["k"] = row["j"] * _num(qty)
+        calc.append(row)
+    k_total = sum(r["k"] for r in calc if r["k"] != "")
+    for i, row in enumerate(calc):
+        line = lines[i] if i < len(lines) else {}
+        qty = _num(line.get("qty")) if line else 0
+        row["l"] = 0 if (row["k"] == "" or k_total == 0) else row["k"] / k_total * freight_v * rate_v
+        row["m"] = "" if (row["k"] == "" or not qty) else _xl_round((row["k"] + row["l"]) / qty, -3)
+        row["n"] = "" if row["m"] == "" else row["m"] * qty
+
     for i in range(n):
         r = FIRST_LINE_ROW + i
         x = r + 1  # Excel row
         line = lines[i] if i < len(lines) else {}
+        c = calc[i]
         put(r, 0, i + 1)
         put(r, 1, line.get("part", ""))
         put(r, 2, line.get("description", ""))
@@ -186,24 +271,29 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
         put(r, 4, line.get("unit", "pcs") if line else "")
         put(r, 5, line.get("unit_price", "") if line else "", s="cur")
         put(r, 6, _num(line.get("discount"), _num(discount)) if line else _num(discount), s="pct")
-        put(r, 7, f=f'=IF(F{x}="","",F{x}*(1-G{x}))', s="cur")
-        put(r, 8, f=f'=IF(H{x}="","",H{x}*{P_RATE})', s="idr")
-        put(r, 9, f=f'=IF(I{x}="","",I{x}/{P_MARGIN}/{P_DUTY}/{P_FREIGHT_F})', s="idr")
-        put(r, 10, f=f'=IF(OR(J{x}="",D{x}=""),"",J{x}*D{x})', s="idr")
-        put(r, 11, f=f'=IF(OR(K{x}="",$K${T}=0),0,K{x}/$K${T}*{P_FREIGHT}*{P_RATE})', s="idr")
-        put(r, 12, f=f'=IF(OR(K{x}="",D{x}=0),"",ROUND((K{x}+L{x})/D{x},-3))', s="sell")
-        put(r, 13, f=f'=IF(M{x}="","",M{x}*D{x})', s="idr")
+        put(r, 7, c["h"], f=f'=IF(F{x}="","",F{x}*(1-G{x}))', s="cur")
+        put(r, 8, c["i"], f=f'=IF(H{x}="","",H{x}*{P_RATE})', s="idr")
+        put(r, 9, c["j"], f=f'=IF(I{x}="","",I{x}/{P_MARGIN}/{P_DUTY}/{P_FREIGHT_F})', s="idr")
+        put(r, 10, c["k"], f=f'=IF(OR(J{x}="",D{x}=""),"",J{x}*D{x})', s="idr")
+        put(r, 11, c["l"], f=f'=IF(OR(K{x}="",$K${T}=0),0,K{x}/$K${T}*{P_FREIGHT}*{P_RATE})', s="idr")
+        put(r, 12, c["m"], f=f'=IF(OR(K{x}="",D{x}=0),"",ROUND((K{x}+L{x})/D{x},-3))', s="sell")
+        put(r, 13, c["n"], f=f'=IF(M{x}="","",M{x}*D{x})', s="idr")
 
     put(total_row, 0, "TOTAL", s="totl")
     for c in range(1, 14):
         put(total_row, c, "", s="totl")
-    put(total_row, 10, f=f"=SUM(K{F1}:K{L})", s="tot")
-    put(total_row, 11, f=f"=SUM(L{F1}:L{L})", s="tot")
-    put(total_row, 13, f=f"=SUM(N{F1}:N{L})", s="tot")
+    put(total_row, 10, k_total, f=f"=SUM(K{F1}:K{L})", s="tot")
+    put(total_row, 11, sum(r["l"] for r in calc), f=f"=SUM(L{F1}:L{L})", s="tot")
+    put(total_row, 13, sum(r["n"] for r in calc if r["n"] != ""), f=f"=SUM(N{F1}:N{L})", s="tot")
 
+    net_total = sum(r["h"] * _num((lines[i] if i < len(lines) else {}).get("qty"))
+                    for i, r in enumerate(calc) if r["h"] != "")
+    check = "" if quote_total in (None, "") else ("OK" if round(net_total - _num(quote_total), 2) == 0 else "CHECK")
     put(check_row, 2, f"Check: net {cur} total vs vendor quote total", s="note")
-    put(check_row, 7, f=f'=SUMPRODUCT(H{F1}:H{L},D{F1}:D{L})', s="cur")
-    put(check_row, 8, f=f'=IF({P_VQ_TOTAL}="","",IF(ROUND(H{check_row + 1}-{P_VQ_TOTAL},2)=0,"OK","CHECK"))', s="lbl")
+    put(check_row, 7, net_total, f=f'=SUMPRODUCT(H{F1}:H{L},D{F1}:D{L})', s="cur")
+    put(check_row, 8, check, f=f'=IF({P_VQ_TOTAL}="","",IF(ROUND(H{check_row + 1}-{P_VQ_TOTAL},2)=0,"OK","CHECK"))', s="lbl")
+    if rate_v <= 0:
+        put(check_row + 1, 2, f"Exchange rate for {cur} is 0 - type the IDR rate in J1.", s="note")
 
     sid = new_id()
     return {
@@ -229,6 +319,15 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
             }
         },
     }
+
+
+def is_standard_layout(sheet):
+    """True when the sheet uses the standard template (factors in H1:J6), so its
+    parameter cells can be read by position. Copied vendor master sheets use other layouts."""
+    if not sheet:
+        return False
+    return _norm(cell_text(get_cell(sheet, 0, 7))).startswith("exchange rate") and \
+        _norm(cell_text(get_cell(sheet, 1, 7))).startswith("margin")
 
 
 def fresh_copy(snapshot, *, title=None):
@@ -309,6 +408,9 @@ def extract_lines(snapshot):
                 problems.append(f"Row {r + 1}: selling price not calculated - open the sheet and save it once.")
             continue
         if not qty or qty <= 0 or rate is None:
+            continue
+        if rate <= 0:
+            problems.append(f"Row {r + 1}: selling price is 0 - check the exchange rate and the unit price.")
             continue
         unit = cell_text(get_cell(sheet, r, layout["unit"])) if layout["unit"] is not None else ""
         lines.append({"part": part, "description": desc, "qty": qty, "unit": unit, "rate": round(rate, 2)})
