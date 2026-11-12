@@ -155,6 +155,7 @@ STYLES = {
     "sec": {"bl": 1, "fs": 11, "cl": {"rgb": "#1E3A8A"}},
     "inp": {"bg": {"rgb": "#FEF9C3"}},
     "inpn": {"bg": {"rgb": "#FEF9C3"}, "n": {"pattern": "#,##0.00"}},
+    "inpc": {"bg": {"rgb": "#FEF9C3"}, "n": {"pattern": "#,##0.00"}},       # input in quote currency
     "inpi": {"bg": {"rgb": "#FEF9C3"}, "n": {"pattern": "#,##0"}},
     "inpf": {"bg": {"rgb": "#FEF9C3"}, "n": {"pattern": "0.00"}},
     "pct": {"bg": {"rgb": "#FEF9C3"}, "n": {"pattern": "0%"}},
@@ -173,7 +174,8 @@ STYLES = {
 HEADERS = [
     ("No.", 45), ("Part No.", 110), ("Description", 260), ("Qty", 50), ("Unit", 55),
     ("Vendor Price per Unit ({cur})", 125), ("Discount %", 80), ("Price after Discount ({cur})", 125),
-    ("Cost per Unit (IDR)", 125), ("Price after Margin (IDR)", 135), ("Line Value (IDR)", 135),
+    ("Cost per Unit (IDR)", 125), ("Price after Margin (IDR)", 135),
+    ("Line Value (IDR) (Price after Margin × Qty)", 150),
     ("Freight Ratio", 85), ("Freight per Unit (IDR)", 130), ("Packing per Unit (IDR)", 130),
     ("Selling Price per Unit (IDR)", 150), ("Total Selling Price (IDR)", 150),
 ]
@@ -193,6 +195,25 @@ CHARGE_LABELS = [
     "Other Charges",
 ]
 LOT_PACKING_LABEL = "Packing - one lot amount (if vendor gives only a total)"
+
+# Amounts in the quote currency are shown the way the vendor writes them:
+# INR in lakhs/crores (6,08,500.00), everything else 608,500.00.
+INDIAN_NUMBER_FORMAT = "[>=10000000]##\\,##\\,##\\,##0.00;[>=100000]##\\,##\\,##0.00;##,##0.00"
+STANDARD_NUMBER_FORMAT = "#,##0.00"
+
+
+def currency_number_format(currency):
+    return INDIAN_NUMBER_FORMAT if normalize_currency(currency) == "INR" else STANDARD_NUMBER_FORMAT
+
+
+def _styles_for(currency):
+    """Sheet styles with the quote-currency columns formatted for that currency."""
+    import copy
+    styles = copy.deepcopy(STYLES)
+    fmt = currency_number_format(currency)
+    for key in ("cur", "inpc", "totc"):
+        styles[key]["n"] = {"pattern": fmt}
+    return styles
 
 
 def _num(x, default=0.0):
@@ -278,7 +299,7 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
         ("Margin 1", m1, "inpf", "Price after Margin = Cost / Margin 1 / Margin 2 / Margin 3"),
         ("Margin 2 (1 = not used)", m2, "inpf", ""),
         ("Margin 3 (1 = not used)", m3, "inpf", ""),
-        (f"Vendor Quote Total ({cur}, for the check)", "" if quote_total in (None, "") else _num(quote_total), "inpn", ""),
+        (f"Vendor Quote Total ({cur}, for the check)", "" if quote_total in (None, "") else _num(quote_total), "inpc", ""),
     ]):
         r = 1 + i
         put(r, 5, label, s="lbl")
@@ -369,12 +390,12 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
         put(r, 0, i + 1, f=f"=A{lx}")
         put(r, 2, ln.get("description", "") or ln.get("part", ""), f=f'=IF(C{lx}="",B{lx},C{lx})')
         put(r, 3, v["qty"], f=f"=D{lx}")
-        put(r, 5, ln.get("packing_per_unit", "") if ln and ln.get("packing_per_unit") not in (None, "") else 0, s="inpn")
+        put(r, 5, ln.get("packing_per_unit", "") if ln and ln.get("packing_per_unit") not in (None, "") else 0, s="inpc")
         put(r, 7, v["pk"] * v["qty"], f=f"=F{x}*D{x}", s="cur")
         put(r, 8, v["pk_idr"], f=f"=F{x}*{P_RATE}", s="idr")
         put(r, 9, v["pk_idr"] * v["qty"], f=f"=I{x}*D{x}", s="idr")
     put(pk_lot, 2, LOT_PACKING_LABEL)
-    put(pk_lot, 7, lot_v, s="inpn")
+    put(pk_lot, 7, lot_v, s="inpc")
     put(pk_lot, 9, lot_v * rate_v, f=f"=H{PKL}*{P_RATE}", s="idr")
     put(pk_total, 2, "Total Packing", s="totl")
     for c in (0, 1, 3, 4, 5, 6, 8):
@@ -405,7 +426,7 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
         "name": title or f"{enquiry_no or 'Quote'}",
         "appVersion": "1.4.0",
         "locale": "enUS",
-        "styles": STYLES,
+        "styles": _styles_for(cur),
         "sheetOrder": [sid],
         "sheets": {
             sid: {
