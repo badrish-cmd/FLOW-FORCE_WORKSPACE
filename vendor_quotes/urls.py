@@ -24,6 +24,7 @@ urlpatterns = [
     path("revisions/<int:pk>/discard/", views.revision_discard, name="revision_discard"),
     path("revisions/<int:pk>/void/", views.revision_void, name="revision_void"),
     path("revisions/<int:pk>/retry/", views.revision_retry, name="revision_retry"),
+    path("revisions/<int:pk>/zoho-sync/", views.revision_zoho_sync, name="revision_zoho_sync"),
     path("revisions/<int:pk>/excel/", views.revision_excel, name="revision_excel"),
     path("vendors/", views.vendor_list, name="vendor_list"),
     path("vendors/<int:pk>/", views.vendor_detail, name="vendor_detail"),

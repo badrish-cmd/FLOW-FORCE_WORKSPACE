@@ -188,21 +188,11 @@ def quote_detail(request, pk):
 
     salesperson_options = zoho.get_salespersons_list()
 
+    # Same function as the Zoho draft uses, so this preview is exactly what Zoho gets.
     quotation_lines = []
-    line_details = rev.line_details or {}
+    line_details = zoho.clean_line_details(rev.line_details or {}, lines)
     for idx, ln in enumerate(lines, 1):
-        k = str(idx)
-        ld = line_details.get(k) or {}
-        edited_desc = ld.get("quote_description") or ld.get("description")
-        spec = ld.get("notes") or ld.get("spec") or ""
-        cc = ld.get("commodity_code") or ""
-        built_desc = zoho.build_line_description(
-            description=ln.get("description", ""),
-            part=ln.get("part", ""),
-            spec=spec,
-            commodity_code=cc,
-            edited_description=edited_desc,
-        )
+        ql = zoho.quotation_line(idx, ln, line_details)
         quotation_lines.append({
             "line_no": idx,
             "part": ln.get("part", ""),
@@ -210,9 +200,9 @@ def quote_detail(request, pk):
             "qty": ln.get("qty", ""),
             "unit": ln.get("unit", ""),
             "rate": ln.get("rate", 0),
-            "quote_description": built_desc,
-            "commodity_code": cc,
-            "spec": spec,
+            "quote_description": ql["description"],
+            "commodity_code": ql["commodity_code"],
+            "spec": ql["spec"],
         })
 
     quotation_details_json = {
@@ -224,7 +214,7 @@ def quote_detail(request, pk):
         "payment_terms": rev.payment_terms or "",
         "customer_notes": rev.customer_notes or "",
         "extra_terms": rev.extra_terms or "",
-        "line_details": rev.line_details or {},
+        "line_details": line_details,
     }
 
     return render(request, "vendor_quotes/quote_detail.html", _ctx(
@@ -289,7 +279,8 @@ def revision_save(request, pk):
                 rev.extra_terms = str(qd["extra_terms"])
                 update_fields.append("extra_terms")
             if "line_details" in qd and isinstance(qd["line_details"], dict):
-                rev.line_details = qd["line_details"]
+                cur_lines, _ = extract_lines(rev.snapshot)
+                rev.line_details = zoho.stamp_line_details(qd["line_details"], cur_lines)
                 update_fields.append("line_details")
             if update_fields:
                 update_fields.append("updated_at")
@@ -321,8 +312,8 @@ def revision_update_details(request, pk):
     rev.extra_terms = request.POST.get("extra_terms", rev.extra_terms)
 
     # Process line details from form POST if any
-    line_details = dict(rev.line_details or {})
     lines, _ = extract_lines(rev.snapshot)
+    line_details = zoho.clean_line_details(rev.line_details or {}, lines)
     for idx in range(1, len(lines) + 1):
         k = str(idx)
         cur_ld = dict(line_details.get(k) or {})
@@ -404,6 +395,24 @@ def revision_retry(request, pk):
         rev.save(update_fields=["excel_status", "zoho_status"])
         run_approval_outputs.delay(rev.id)
         messages.success(request, "Retrying the outputs now.")
+    return redirect(f"{reverse('vendor_quotes:quote_detail', args=[rev.quote_id])}?rev={rev.number}")
+
+
+@login_required
+@require_POST
+def revision_zoho_sync(request, pk):
+    """Rewrite the existing Zoho draft's lines from the approved price sheet."""
+    if (resp := _guard(request)):
+        return resp
+    rev = get_object_or_404(QuoteRevision.objects.select_related("quote"), pk=pk)
+    if rev.status != QuoteRevision.STATUS_APPROVED:
+        messages.error(request, "Only an approved version can update the Zoho draft.")
+    else:
+        try:
+            n = workflow.sync_zoho_draft(rev, request.user)
+            messages.success(request, f"Zoho draft {rev.zoho_estimate_number} now matches the price sheet ({n} lines).")
+        except workflow.WorkflowError as e:
+            messages.error(request, str(e))
     return redirect(f"{reverse('vendor_quotes:quote_detail', args=[rev.quote_id])}?rev={rev.number}")
 
 

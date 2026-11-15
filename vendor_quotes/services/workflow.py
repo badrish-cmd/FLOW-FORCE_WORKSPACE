@@ -502,6 +502,29 @@ def run_zoho_output(rev):
     rev.save()
 
 
+def sync_zoho_draft(rev, user):
+    """Rewrite the lines of the existing Zoho draft quotation from this revision's price sheet."""
+    if not rev.zoho_estimate_id:
+        raise WorkflowError("This version has no Zoho draft yet.")
+    if formula_error_message(rev.snapshot):
+        raise WorkflowError(formula_error_message(rev.snapshot))
+    lines, problems = extract_lines(rev.snapshot)
+    if not lines:
+        raise WorkflowError(problems[0] if problems else "No priced lines found.")
+    try:
+        diffs = zoho.update_draft_estimate(rev.zoho_estimate_id, lines=lines, line_details=rev.line_details,
+                                           quote_subject=rev.quote_subject)
+    except zoho.ZohoError as e:
+        raise WorkflowError(str(e))
+    if diffs:
+        msg = f"Zoho draft {rev.zoho_estimate_number} updated, but Zoho shows different {', '.join(diffs)} - check it in Zoho."
+        event(rev.quote, "zoho_warning", msg, user, rev)
+        raise WorkflowError(msg)
+    event(rev.quote, "zoho_done", f"Zoho draft {rev.zoho_estimate_number} updated from the price sheet "
+                                  f"({len(lines)} lines)", user, rev)
+    return len(lines)
+
+
 def run_outputs(rev, excel=True, zoho_draft=True):
     if excel and rev.excel_status != QuoteRevision.OUTPUT_DONE:
         run_excel_output(rev)
@@ -612,26 +635,21 @@ def apply_ai_result(quote, rev, ai_result, user):
     if extracted_deliv:
         rev.delivery_time = extracted_deliv[:255]
 
-    line_details = dict(rev.line_details or {})
-    for i, ln in enumerate(ai_lines, 1):
-        k = str(i)
-        cur_ld = dict(line_details.get(k) or {})
+    # Quotation line details follow the NEW sheet lines. A description the user wrote is kept only
+    # for the same line (same part no. + description); everything else is rebuilt from this quote.
+    old_details = rev.line_details or {}
+    line_details = {}
+    for i, (ln, sl) in enumerate(zip(ai_lines, sheet_lines), 1):
+        sheet_line = {"part": sl["part"], "description": sl["description"]}
+        cur_ld = dict(zoho.detail_for_line(old_details, i, sheet_line))
         cc = (ln.get("commodity_code") or "").strip()
         notes = (ln.get("notes") or "").strip()
         if cc and not cur_ld.get("commodity_code"):
             cur_ld["commodity_code"] = cc
         if notes and not cur_ld.get("notes"):
             cur_ld["notes"] = notes
-        if not cur_ld.get("quote_description"):
-            part = (ln.get("part_no") or "").strip()
-            desc = (ln.get("description") or "").strip()
-            cur_ld["quote_description"] = zoho.build_line_description(
-                description=desc,
-                part=part,
-                spec=notes,
-                commodity_code=cc,
-            )
-        line_details[k] = cur_ld
+        cur_ld["src"] = zoho.line_signature(sheet_line)
+        line_details[str(i)] = cur_ld
     rev.line_details = line_details
 
     rev.snapshot = new_snap

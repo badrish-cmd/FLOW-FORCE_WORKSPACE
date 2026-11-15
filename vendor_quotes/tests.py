@@ -1495,6 +1495,52 @@ class ZohoDraftQuotationFieldsTests(TestCase):
         self.assertEqual(desc, "Custom edited line description text")
 
     @patch("vendor_quotes.services.zoho.api")
+    def test_update_existing_zoho_draft_from_sheet(self, mock_api):
+        lines = [{"part": "H035608", "description": "PUMP VALVE", "qty": 3, "rate": 8777000.0, "unit": "pcs"}]
+        stored = {}
+
+        def router(method, path, params=None, payload=None):
+            if method == "PUT":
+                stored["items"] = payload["line_items"]
+                stored["customer_id"] = payload["customer_id"]
+                return {}
+            return {"estimate": {"status": stored.get("status", "draft"), "customer_id": "c1",
+                                 "estimate_number": "FFI_26000286",
+                                 **({"line_items": stored["items"]} if "items" in stored else {})}}
+        mock_api.side_effect = router
+        stale = {"1": {"quote_description": "Supply of O-RING - Z000040"}}
+        diffs = zoho.update_draft_estimate("est1", lines=lines, line_details=stale)
+        self.assertEqual(diffs, [])
+        self.assertEqual(stored["items"][0]["description"], "Supply of PUMP VALVE - H035608")
+        self.assertEqual((stored["items"][0]["quantity"], stored["items"][0]["rate"]), (3, 8777000.0))
+        self.assertEqual(stored["customer_id"], "c1")
+        stored.clear(); stored["status"] = "sent"
+        with self.assertRaises(zoho.ZohoError):
+            zoho.update_draft_estimate("est1", lines=lines)
+
+    def test_zoho_lines_come_from_price_sheet_not_stale_details(self):
+        """A quote read again with AI: old descriptions saved for line 1..n must not reach Zoho."""
+        lines = [{"part": "H035608", "description": "PUMP VALVE", "qty": 3, "rate": 8777000.0, "unit": "pcs"},
+                 {"part": "507396", "description": "PLUNGER PACKING", "qty": 17, "rate": 884000.0, "unit": "pcs"}]
+        stale = {"1": {"quote_description": "Supply of O-RING - Z000040"},
+                 "2": {"quote_description": "Supply of O-RING - Z000029", "commodity_code": "4016"}}
+        items = zoho.build_line_items(lines, stale)
+        self.assertEqual([i["description"] for i in items],
+                         ["Supply of PUMP VALVE - H035608", "Supply of PLUNGER PACKING - 507396"])
+        self.assertEqual([(i["quantity"], i["rate"]) for i in items], [(3, 8777000.0), (17, 884000.0)])
+        # a user edit stays with its line, even when rows move
+        details = zoho.stamp_line_details({"2": {"quote_description": "Supply of Plunger packing set (custom)"}}, lines)
+        moved = [lines[1], lines[0]]
+        self.assertEqual(zoho.build_line_items(moved, details)[0]["description"], "Supply of Plunger packing set (custom)")
+        self.assertEqual(zoho.build_line_items(moved, details)[1]["description"], "Supply of PUMP VALVE - H035608")
+        # Zoho read-back comparison
+        sent = zoho.build_line_items(lines, {})
+        self.assertEqual(zoho.compare_line_items(sent, {"line_items": [dict(i) for i in sent]}), [])
+        bad = [dict(i) for i in sent]
+        bad[1]["rate"] = 1.0
+        self.assertEqual(zoho.compare_line_items(sent, {"line_items": bad}), ["line 2 price"])
+
+    @patch("vendor_quotes.services.zoho.api")
     def test_zoho_create_draft_estimate_payload_all_fields(self, mock_api):
         from datetime import date
 

@@ -248,6 +248,135 @@ def build_line_description(*, description="", part="", spec="", commodity_code="
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------- quotation lines
+# The price sheet is the single source of truth. A description the user saved in "Quotation
+# details" is stored with the sheet line it was written for ("src" = part|description) and is
+# only used for that line - never for whatever line happens to sit at the same position later.
+
+def _n(text):
+    return " ".join(str(text or "").split()).lower()
+
+
+def line_signature(ln):
+    return f"{_n(ln.get('part'))}|{_n(ln.get('description'))}"
+
+
+def detail_for_line(line_details, idx, ln):
+    """The saved quotation details (description / commodity code / spec) for sheet line `ln`
+    at position `idx`, or {} when nothing saved belongs to this line."""
+    lds = line_details or {}
+    sig = line_signature(ln)
+    ld = lds.get(str(idx)) or lds.get(idx) or {}
+    if isinstance(ld, dict) and ld.get("src") == sig:
+        return ld
+    for v in lds.values():
+        if isinstance(v, dict) and v.get("src") == sig:
+            return v
+    if isinstance(ld, dict) and ld and not ld.get("src"):
+        # saved before lines were tied to the sheet: use it only if it clearly is about this line
+        text = _n(ld.get("quote_description") or ld.get("description") or "")
+        part, desc = _n(ln.get("part")), _n(ln.get("description"))
+        if not text:
+            return ld                  # only a commodity code / spec typed for this line
+        if (part and part in text) or (not part and desc and desc in text):
+            return ld
+    return {}
+
+
+def clean_line_details(line_details, lines):
+    """line_details re-keyed to the current sheet lines (1, 2, ...), each stamped with its line;
+    saved texts that belong to no current line are dropped."""
+    out = {}
+    for i, ln in enumerate(lines, 1):
+        ld = dict(detail_for_line(line_details, i, ln))
+        ld["src"] = line_signature(ln)
+        out[str(i)] = ld
+    return out
+
+
+def stamp_line_details(line_details, lines):
+    """After the user edited quotation details: entries without a line get the line shown at
+    that position, so the edit stays with that line even if rows move later."""
+    out = {}
+    for k, v in (line_details or {}).items():
+        if not isinstance(v, dict):
+            continue
+        v = dict(v)
+        if not v.get("src"):
+            try:
+                i = int(k)
+            except (TypeError, ValueError):
+                i = 0
+            if 1 <= i <= len(lines):
+                v["src"] = line_signature(lines[i - 1])
+        out[str(k)] = v
+    return out
+
+
+def quotation_line(idx, ln, line_details):
+    """Description text and details for one quotation line, exactly as it goes to Zoho."""
+    ld = detail_for_line(line_details, idx, ln)
+    spec = ld.get("notes") or ld.get("spec") or ""
+    cc = ld.get("commodity_code") or ""
+    text = build_line_description(
+        description=ln.get("description", ""), part=ln.get("part", ""), spec=spec, commodity_code=cc,
+        edited_description=ld.get("quote_description") or ld.get("description"),
+    )
+    return {"description": text, "commodity_code": cc, "spec": spec}
+
+
+def build_line_items(lines, line_details):
+    """Zoho line_items from the price sheet lines: description, qty, unit, rate (IDR)."""
+    items = []
+    for i, ln in enumerate(lines, 1):
+        item = {
+            "description": quotation_line(i, ln, line_details)["description"][:2000],
+            "quantity": ln["qty"],
+            "rate": ln["rate"],
+        }
+        if ln.get("unit"):
+            item["unit"] = ln["unit"][:20]
+        items.append(item)
+    return items
+
+
+def compare_line_items(sent, est):
+    """Differences between the line items sent and what Zoho stored, e.g. ['line 2 price']."""
+    if "line_items" not in (est or {}):
+        return []                      # nothing to compare against
+    got = est.get("line_items") or []
+    if len(got) != len(sent):
+        return [f"{len(got)} lines instead of {len(sent)}"]
+    diffs = []
+    for i, (a, b) in enumerate(zip(sent, got), 1):
+        if abs(float(a["quantity"]) - float(b.get("quantity") or 0)) > 1e-6:
+            diffs.append(f"line {i} qty")
+        if abs(float(a["rate"]) - float(b.get("rate") or 0)) > 0.01:
+            diffs.append(f"line {i} price")
+        if _n(a["description"]) != _n(b.get("description")):
+            diffs.append(f"line {i} description")
+    return diffs
+
+
+def update_draft_estimate(estimate_id, *, lines, line_details=None, quote_subject=""):
+    """Rewrite the lines (and subject) of an existing Zoho DRAFT quotation from the price sheet."""
+    data = api("GET", f"estimates/{estimate_id}")
+    est = data.get("estimate") or {}
+    if not est:
+        raise ZohoError("The quotation was not found in Zoho.")
+    status = str(est.get("status") or "").lower()
+    if status and status != "draft":
+        raise ZohoError(f"Zoho quotation {est.get('estimate_number', '')} is '{status}', not a draft - "
+                        f"it can't be changed from here. Make a revision instead.")
+    items = build_line_items(lines, line_details)
+    payload = {"customer_id": est.get("customer_id"), "line_items": items}
+    if quote_subject and str(quote_subject).strip():
+        payload["subject_content"] = str(quote_subject).strip()[:255]
+    api("PUT", f"estimates/{estimate_id}", None, payload)
+    check = api("GET", f"estimates/{estimate_id}").get("estimate") or {}
+    return compare_line_items(items, check)
+
+
 def get_primary_contact_person_id(customer_id):
     """Get the primary contact person ID for a customer in Zoho Books."""
     if not customer_id or not is_configured():
@@ -343,28 +472,7 @@ def create_draft_estimate(
     val_days = int(validity_days or 30)
     expiry = quote_date + timedelta(days=val_days)
 
-    line_items = []
-    for i, ln in enumerate(lines, 1):
-        ld = (line_details or {}).get(str(i)) or (line_details or {}).get(i) or {}
-        edited_desc = ld.get("quote_description") or ld.get("description")
-        commodity_code = ld.get("commodity_code") or ""
-        spec = ld.get("notes") or ld.get("spec") or ""
-
-        desc_text = build_line_description(
-            description=ln.get("description", ""),
-            part=ln.get("part", ""),
-            spec=spec,
-            commodity_code=commodity_code,
-            edited_description=edited_desc,
-        )
-        item = {
-            "description": desc_text[:2000],
-            "quantity": ln["qty"],
-            "rate": ln["rate"],
-        }
-        if ln.get("unit"):
-            item["unit"] = ln["unit"][:20]
-        line_items.append(item)
+    line_items = build_line_items(lines, line_details)
 
     payload = {
         "customer_id": customer_id,
@@ -434,6 +542,9 @@ def create_draft_estimate(
             fetched_est.get("salesperson_id") or fetched_est.get("salesperson_name")
         ):
             stick_warnings.append("Salesperson")
+        line_diffs = compare_line_items(line_items, fetched_est)
+        if line_diffs:
+            stick_warnings.append("the line items (" + ", ".join(line_diffs) + ")")
     except Exception as verify_err:
         logger.warning("Could not verify created estimate %s in Zoho: %s", estimate_id, verify_err)
 
