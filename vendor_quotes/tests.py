@@ -654,6 +654,26 @@ class AIQuoteExtractionTests(TestCase):
         # a correct sheet is not touched
         self.assertFalse(sheet_svc.repair_standard_formulas(rev.snapshot)[1])
 
+    def test_formula_error_blocks_sending(self):
+        vendor = self._rotolok(currency="INR", rate=200)
+        quote, rev = workflow.create_quote(enquiry_number="ENQ/2026/09/2672", customer_name="PT. E",
+                                           vendor=vendor, vendor_quote_no="", quote_file=None, user=self.ibrahim)
+        workflow.apply_ai_result(quote, rev, {"currency": "INR", "lines": [
+            {"part_no": "RV", "description": "RV", "qty": 2, "unit_price": 100000}]}, self.ibrahim)
+        rev.refresh_from_db()
+        snap = rev.snapshot
+        sheet_svc.first_sheet(snap)["cellData"]["6"]["8"]["v"] = "#REF!"
+        rev.snapshot = snap
+        rev.save()
+        self.assertEqual(sheet_svc.formula_errors(rev.snapshot), ["I7 shows #REF!"])
+        lines, problems = sheet_svc.extract_lines(rev.snapshot)
+        self.assertIn("I7 shows #REF!", problems[0])
+        with self.assertRaises(workflow.WorkflowError) as e:
+            workflow.submit(rev, self.ibrahim)
+        self.assertIn("#REF!", str(e.exception))
+        rev.refresh_from_db()
+        self.assertEqual(rev.status, rev.STATUS_DRAFT)
+
     def test_ai_reread_keeps_typed_margins_and_charges(self):
         vendor = self._rotolok(currency="INR", rate=200)
         quote, rev = workflow.create_quote(enquiry_number="ENQ/2026/09/2670", customer_name="PT. K",

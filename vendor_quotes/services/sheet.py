@@ -674,6 +674,33 @@ def find_price_table(sheet):
     return None
 
 
+FORMULA_ERRORS = ("#REF!", "#VALUE!", "#DIV/0!", "#NAME?", "#N/A", "#NUM!", "#NULL!", "#SPILL!", "#CALC!", "#ERROR!")
+
+
+def formula_errors(snapshot):
+    """Cells whose formula result is an Excel error, e.g. ['I7 shows #REF!']. Amounts go to
+    customers, so a sheet with any of these must not be sent for approval or to Zoho."""
+    sheet = first_sheet(snapshot)
+    if not sheet:
+        return []
+    found = []
+    for r, c, cell in iter_cells(sheet):
+        v = cell.get("v")
+        if isinstance(v, str) and v.strip().upper() in FORMULA_ERRORS:
+            found.append((r, c, v.strip().upper()))
+    found.sort()
+    return [f"{get_column_letter(c + 1)}{r + 1} shows {v}" for r, c, v in found]
+
+
+def formula_error_message(snapshot):
+    errs = formula_errors(snapshot)
+    if not errs:
+        return ""
+    more = f" (and {len(errs) - 3} more)" if len(errs) > 3 else ""
+    return ("The sheet has a formula error: " + ", ".join(errs[:3]) + more +
+            ". Fix it (or click Read with AI to rebuild the sheet) before sending - the prices may be wrong.")
+
+
 def extract_lines(snapshot):
     """Return (lines, problems). Each line: part, description, qty, unit, rate (IDR)."""
     sheet = first_sheet(snapshot)
@@ -708,6 +735,9 @@ def extract_lines(snapshot):
         lines.append({"part": part, "description": desc, "qty": qty, "unit": unit, "rate": round(rate, 2)})
     if not lines and not problems:
         problems.append("No priced lines found (need a quantity and a unit selling price).")
+    err = formula_error_message(snapshot)
+    if err:
+        problems.insert(0, err)
     return lines, problems
 
 

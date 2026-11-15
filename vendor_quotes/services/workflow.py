@@ -15,8 +15,8 @@ from ..models import (AIBudgetNotification, AIRequestLog, Enquiry, MasterSheet, 
                       QuoteEvent, QuoteRevision, Vendor, VendorMasterFile, VendorQuote)
 from . import zoho
 from .excel_io import append_to_master, build_single_workbook, import_master
-from .sheet import (build_standard_snapshot, diff_snapshots, extract_lines, first_sheet, fresh_copy,
-                    normalize_currency, read_settings, repair_standard_formulas, resolve_rate)
+from .sheet import (build_standard_snapshot, diff_snapshots, extract_lines, first_sheet, formula_error_message,
+                    fresh_copy, normalize_currency, read_settings, repair_standard_formulas, resolve_rate)
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -286,6 +286,8 @@ def submit(rev, user):
     if rev.status not in (QuoteRevision.STATUS_DRAFT, QuoteRevision.STATUS_SENT_BACK):
         raise WorkflowError("Only a draft can be sent for approval.")
     lines, problems = extract_lines(rev.snapshot)
+    if formula_error_message(rev.snapshot):
+        raise WorkflowError(formula_error_message(rev.snapshot))
     if problems and not lines:
         raise WorkflowError(problems[0])
     rev.status = QuoteRevision.STATUS_IN_REVIEW
@@ -318,6 +320,8 @@ def _decide(rev, user, status, comment, action):
 @transaction.atomic
 def approve(rev, user, comment=""):
     lines, problems = extract_lines(rev.snapshot)
+    if formula_error_message(rev.snapshot):
+        raise WorkflowError(formula_error_message(rev.snapshot))
     if not lines:
         raise WorkflowError(problems[0] if problems else "No priced lines found.")
     rev = _decide(rev, user, QuoteRevision.STATUS_APPROVED, comment, "approved")
@@ -438,6 +442,8 @@ def run_zoho_output(rev):
         return
     lines, problems = extract_lines(rev.snapshot)
     try:
+        if formula_error_message(rev.snapshot):
+            raise zoho.ZohoError(formula_error_message(rev.snapshot))
         if not lines:
             raise zoho.ZohoError(problems[0] if problems else "No priced lines found.")
         estimate_number = None
