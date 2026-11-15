@@ -530,6 +530,93 @@ def read_settings(sheet):
     return out
 
 
+def repair_standard_formulas(snapshot):
+    """Put back the Import Duty formula of a standard sheet and bring older duty settings up to date.
+
+    The Import Duty (IDR) cell is a formula. Typing or pasting a value over it removes the
+    formula, and sheets from the first duty version used a % cell (0.05 = 5%). This:
+      * converts the Duty % cell to a plain number (5 = 5%) with the current label / format,
+      * writes the current Import Duty formula into the Import Duty (IDR) cell.
+    Returns (snapshot, changed). Sheets without the duty rows are returned unchanged.
+    """
+    import copy
+    sheet = first_sheet(snapshot)
+    if not sheet or not read_settings(sheet):
+        return snapshot, False
+
+    pct_row = duty_row = None
+    for r in range(0, HEADER_ROW + 2):
+        label = _norm(cell_text(get_cell(sheet, r, 5)))
+        if label.startswith("import duty %"):
+            pct_row = r
+        elif label.startswith("import duty (idr)"):
+            duty_row = r
+    if pct_row is None or duty_row is None:
+        return snapshot, False
+
+    # find the item table, its TOTAL row, Total Packing and Total Charges rows
+    hdr = total_row = pk_total = ch_total = None
+    cost_col = None
+    max_row = max((int(k) for k in (sheet.get("cellData") or {}).keys()), default=0)
+    for r in range(0, max_row + 1):
+        c0 = _norm(cell_text(get_cell(sheet, r, 0)))
+        c2 = _norm(cell_text(get_cell(sheet, r, 2)))
+        if hdr is None and c0 == "no." and _norm(cell_text(get_cell(sheet, r, 2))) == "description":
+            hdr = r
+            for c in range(0, 30):
+                if _norm(cell_text(get_cell(sheet, r, c))).startswith("total cost"):
+                    cost_col = c
+                    break
+        elif hdr is not None and total_row is None and c0 == "total":
+            total_row = r
+        elif c2 == "total packing":
+            pk_total = r
+        elif c2 == "total charges":
+            ch_total = r
+    if None in (hdr, total_row, pk_total, ch_total, cost_col) or total_row <= hdr + 1:
+        return snapshot, False
+
+    snap = copy.deepcopy(snapshot)
+    sheet = first_sheet(snap)
+    cells = sheet.setdefault("cellData", {})
+    col = get_column_letter(cost_col + 1)
+    pct_ref = f"$I${pct_row + 1}"
+    formula = (f'=IF({pct_ref}="",0,{pct_ref}/100*(SUM({col}{hdr + 2}:{col}{total_row})'
+               f'+$J${pk_total + 1}+$J${ch_total + 1}))')
+    changed = False
+
+    # Duty % cell: label, plain-number value, format
+    old_label = _norm(cell_text(get_cell(sheet, pct_row, 5)))
+    pct_cell = cells.setdefault(str(pct_row), {}).setdefault("8", {})
+    if old_label != _norm(DUTY_LABEL):
+        v = pct_cell.get("v")
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 < v < 1:
+            pct_cell["v"] = round(v * 100, 6)          # 0.05 in the old % cell -> 5
+        cells[str(pct_row)].setdefault("5", {})["v"] = DUTY_LABEL
+        changed = True
+    if pct_cell.get("s") != "pctd":
+        pct_cell["s"] = "pctd"
+        changed = True
+    styles = snap.setdefault("styles", {})
+    if (styles.get("pctd") or {}).get("n", {}).get("pattern") != STYLES["pctd"]["n"]["pattern"]:
+        styles["pctd"] = dict(STYLES["pctd"])
+        changed = True
+
+    # Import Duty (IDR) cell: always the formula
+    duty_cell = cells.setdefault(str(duty_row), {}).setdefault("8", {})
+    if duty_cell.get("f") != formula:
+        duty_cell["f"] = formula
+        duty_cell.pop("si", None)
+        duty_cell["s"] = duty_cell.get("s") or "tot"
+        changed = True
+    note = cells.setdefault(str(duty_row), {}).setdefault("9", {})
+    if note.get("v") != "Import Duty = Duty % / 100 x (Total Cost + Total Packing + Total Charges)":
+        note["v"] = "Import Duty = Duty % / 100 x (Total Cost + Total Packing + Total Charges)"
+        note.setdefault("s", "note")
+        changed = True
+    return (snap, True) if changed else (snapshot, False)
+
+
 def is_standard_layout(sheet):
     """True when the sheet is one of our standard sheets (new or older layout)."""
     return bool(read_settings(sheet))

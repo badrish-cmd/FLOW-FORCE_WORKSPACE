@@ -2,7 +2,7 @@
 {% load static humanize %}
 {% block title %}{{ quote.enquiry.number }} · {{ quote.vendor.name }} - Vendor Quotes{% endblock %}
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'vendor_quotes/ff-sheet.css' %}?v=20261115">
+<link rel="stylesheet" href="{% static 'vendor_quotes/ff-sheet.css' %}?v=20261115b">
 <style>
     #sheet-host { height: calc(100vh - 230px); min-height: 520px; }
     .vq-panel iframe { width: 100%; height: calc(100vh - 230px); min-height: 520px; border: 0; }
@@ -543,7 +543,7 @@
 {{ quotation_details_json|json_script:"quotation-details-data" }}
 {% endblock %}
 {% block extra_js %}
-<script src="{% static 'vendor_quotes/ff-sheet.js' %}?v=20261115"></script>
+<script src="{% static 'vendor_quotes/ff-sheet.js' %}?v=20261115b"></script>
 <script>
 window.VQ = {
     editable: {{ editable|yesno:"true,false" }},
@@ -556,5 +556,5 @@ window.VQ = {
     details: JSON.parse(document.getElementById("quotation-details-data").textContent || "{}"),
 };
 </script>
-<script src="{% static 'vendor_quotes/quote_sheet.js' %}?v=20261115"></script>
+<script src="{% static 'vendor_quotes/quote_sheet.js' %}?v=20261115b"></script>
 {% endblock %}

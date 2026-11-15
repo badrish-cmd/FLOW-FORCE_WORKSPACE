@@ -21,7 +21,7 @@ from .forms import MasterUploadForm, QuoteCreateForm, VendorForm
 from .models import (AIRequestLog, Enquiry, MasterSheet, QuoteRevision, Vendor, VendorMasterFile, VendorQuote,
                      ZohoConnection)
 from .services import workflow, zoho
-from .services.sheet import extract_lines
+from .services.sheet import extract_lines, repair_standard_formulas
 
 
 User = get_user_model()
@@ -140,6 +140,7 @@ def quote_detail(request, pk):
         raise Http404
     wanted = request.GET.get("rev")
     rev = next((r for r in revisions if str(r.number) == wanted), revisions[-1])
+    workflow.repair_revision(rev, request.user)     # Import Duty formula back if it was typed over
     lines, problems = extract_lines(rev.snapshot)
     total = sum(ln["qty"] * ln["rate"] for ln in lines)
     editable = workflow.can_edit_revision(request.user, rev)
@@ -250,7 +251,9 @@ def revision_save(request, pk):
     rev = get_object_or_404(QuoteRevision, pk=pk)
     try:
         payload = json.loads(request.body or b"{}")
+        repaired = False
         if "snapshot" in payload and payload["snapshot"]:
+            _snap, repaired = repair_standard_formulas(payload.get("snapshot"))
             n = workflow.save_snapshot(rev, payload.get("snapshot"), request.user)
         else:
             n = 0
@@ -295,7 +298,7 @@ def revision_save(request, pk):
         return JsonResponse({"ok": False, "error": str(e)}, status=400)
     rev.refresh_from_db()
     lines, problems = extract_lines(rev.snapshot)
-    return JsonResponse({"ok": True, "changes": n, "lines": len(lines),
+    return JsonResponse({"ok": True, "changes": n, "lines": len(lines), "repaired": repaired,
                          "total": sum(ln["qty"] * ln["rate"] for ln in lines), "problems": problems})
 
 

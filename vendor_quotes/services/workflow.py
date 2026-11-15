@@ -16,7 +16,7 @@ from ..models import (AIBudgetNotification, AIRequestLog, Enquiry, MasterSheet, 
 from . import zoho
 from .excel_io import append_to_master, build_single_workbook, import_master
 from .sheet import (build_standard_snapshot, diff_snapshots, extract_lines, first_sheet, fresh_copy,
-                    normalize_currency, read_settings, resolve_rate)
+                    normalize_currency, read_settings, repair_standard_formulas, resolve_rate)
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -258,6 +258,7 @@ def save_snapshot(rev, snapshot, user):
         raise WorkflowError("This version can't be edited any more.")
     if not isinstance(snapshot, dict) or not snapshot.get("sheets"):
         raise WorkflowError("The sheet data was empty - nothing saved.")
+    snapshot, _ = repair_standard_formulas(snapshot)     # Import Duty is always a formula
     changes = diff_snapshots(rev.snapshot, snapshot)
     QuoteChange.objects.bulk_create([
         QuoteChange(revision=rev, user=user, sheet=s[:100], cell=c, old_value=o[:2000], new_value=n[:2000])
@@ -266,6 +267,17 @@ def save_snapshot(rev, snapshot, user):
     rev.snapshot = snapshot
     rev.save(update_fields=["snapshot", "updated_at"])
     return len(changes)
+
+
+def repair_revision(rev, user):
+    """Repair the duty formula of an editable draft sheet before it is shown. Returns True if changed."""
+    if not can_edit_revision(user, rev):
+        return False
+    snapshot, changed = repair_standard_formulas(rev.snapshot)
+    if changed:
+        rev.snapshot = snapshot
+        rev.save(update_fields=["snapshot", "updated_at"])
+    return changed
 
 
 @transaction.atomic

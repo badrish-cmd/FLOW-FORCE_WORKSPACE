@@ -152,6 +152,11 @@
                     this.dirty = false;
                     this.summary = { lines: out.lines, total: out.total, problems: out.problems || [] };
                     this.saveLabel = "Saved " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                    if (out.repaired) {
+                        // The Import Duty cell had been typed over - the server put its formula back.
+                        this.saveLabel = "Saved - Import Duty formula restored, reloading…";
+                        setTimeout(() => window.location.reload(), 900);
+                    }
                     return true;
                 } catch (err) {
                     this.saveLabel = "Not saved: " + err.message;

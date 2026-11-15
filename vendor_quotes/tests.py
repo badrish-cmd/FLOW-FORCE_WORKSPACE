@@ -617,6 +617,43 @@ class AIQuoteExtractionTests(TestCase):
         self.assertEqual(settings["m1"], 0.7)
         self.assertEqual(settings["charges"], {})
 
+    def _break_duty(self, rev):
+        """Make the sheet look like one from the first duty version where the formula was typed over."""
+        snap = rev.snapshot
+        sh = sheet_svc.first_sheet(snap)
+        sh["cellData"]["5"]["5"]["v"] = "Import Duty % (empty = no duty)"
+        sh["cellData"]["5"]["8"] = {"v": 5, "s": "pctd"}
+        sh["cellData"]["6"]["8"] = {"v": 0, "s": "tot"}
+        return snap
+
+    def test_duty_formula_repaired_when_page_opens_and_on_save(self):
+        vendor = self._rotolok(currency="INR", rate=200)
+        quote, rev = workflow.create_quote(enquiry_number="ENQ/2026/09/2671", customer_name="PT. D",
+                                           vendor=vendor, vendor_quote_no="", quote_file=None, user=self.ibrahim)
+        workflow.apply_ai_result(quote, rev, {"currency": "INR", "lines": [
+            {"part_no": "RV", "description": "RV", "qty": 2, "unit_price": 100000}]}, self.ibrahim)
+        rev.refresh_from_db()
+        rev.snapshot = self._break_duty(rev)
+        rev.save()
+        # opening the page puts the formula back
+        self.client.force_login(self.ibrahim)
+        self.assertEqual(self.client.get(reverse("vendor_quotes:quote_detail", args=[quote.id])).status_code, 200)
+        rev.refresh_from_db()
+        sh = sheet_svc.first_sheet(rev.snapshot)
+        self.assertIn("$I$6/100*", sheet_svc.get_cell(sh, 6, 8)["f"])
+        self.assertEqual(sheet_svc.get_cell(sh, 5, 8)["v"], 5)
+        self.assertEqual(sheet_svc.get_cell(sh, 5, 5)["v"], sheet_svc.DUTY_LABEL)
+        # typing over Import Duty and saving: formula restored, page told to reload
+        broken = self._break_duty(rev)
+        resp = self.client.post(reverse("vendor_quotes:revision_save", args=[rev.id]),
+                                data=json.dumps({"snapshot": broken}), content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["repaired"])
+        rev.refresh_from_db()
+        self.assertIn("$I$6/100*", sheet_svc.get_cell(sheet_svc.first_sheet(rev.snapshot), 6, 8)["f"])
+        # a correct sheet is not touched
+        self.assertFalse(sheet_svc.repair_standard_formulas(rev.snapshot)[1])
+
     def test_ai_reread_keeps_typed_margins_and_charges(self):
         vendor = self._rotolok(currency="INR", rate=200)
         quote, rev = workflow.create_quote(enquiry_number="ENQ/2026/09/2670", customer_name="PT. K",
