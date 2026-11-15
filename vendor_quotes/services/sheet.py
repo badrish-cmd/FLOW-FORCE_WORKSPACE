@@ -284,6 +284,10 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
     F1, FL, T = X(first), X(last), X(total_row)
     PKL, PKT, CHT = X(pk_lot), X(pk_total), X(ch_total)
     R_CHARGES, R_LOT, R_PKTOT = f"$J${CHT}", f"$J${PKL}", f"$J${PKT}"
+    # Rows only refer to other rows through whole ranges (looked up by No.), never cell-to-cell,
+    # so inserting or deleting item / packing rows can't break a formula (#REF!).
+    PK1, PKN = X(pk_first), X(pk_lot - 1)
+    ITEM_NO, PK_NO, PK_IDR = f"$A${F1}:$A${FL}", f"$A${PK1}:$A${PKN}", f"$I${PK1}:$I${PKN}"
 
     cells, merges = {}, []
 
@@ -369,7 +373,6 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
     for i in range(n):
         r, x, v = first + i, X(first + i), rows[i]
         ln = lines[i] if i < len(lines) else {}
-        pkx = X(pk_first + i)
         put(r, 0, i + 1)
         put(r, 1, ln.get("part", ""))
         put(r, 2, ln.get("description", ""))
@@ -389,7 +392,7 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
         put(r, 16, v["frt_u"], f=f"=IFERROR(P{x}/D{x},0)", s="idr")
         put(r, 17, v["duty"], f=f"=O{x}*{P_DUTY}", s="idr")
         put(r, 18, v["duty_u"], f=f"=IFERROR(R{x}/D{x},0)", s="idr")
-        put(r, 19, v["pk_u"], f=f"=I{pkx}+IFERROR(O{x}*{R_LOT}/D{x},0)", s="idr")
+        put(r, 19, v["pk_u"], f=f"=IFERROR(INDEX({PK_IDR},MATCH(A{x},{PK_NO},0)),0)+IFERROR(O{x}*{R_LOT}/D{x},0)", s="idr")
         put(r, 20, v["sell"], f=f"=ROUNDUP(M{x}+Q{x}+S{x}+T{x},-3)", s="sell")
         put(r, 21, v["sell_tot"], f=f"=U{x}*D{x}", s="idr")
 
@@ -414,7 +417,7 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
     put(check_row, 8, check, f=f'=IF({P_VQ_TOTAL}="","",IF(ROUND(H{X(check_row)}-{P_VQ_TOTAL},2)=0,"OK","CHECK"))', s="lbl")
 
     # ---- PACKING block (quote currency -> IDR), added to the selling price, no margin
-    put(pk_title, 0, "PACKING - added to the selling price per unit (no margin)", s="sec")
+    put(pk_title, 0, "PACKING - added to the selling price per unit (no margin). Each row is linked to the item by its No.", s="sec")
     for c, label in [(0, "No."), (2, "Packing for"), (3, "Qty"), (5, f"Packing per Unit ({cur})"),
                      (7, f"Packing Total ({cur})"), (8, "Packing per Unit (IDR)"), (9, "Packing Total (IDR)")]:
         put(pk_head, c, label, s="hdr")
@@ -422,11 +425,11 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
         put(pk_head, c, "", s="hdr")
     for i in range(n):
         r, x, v = pk_first + i, X(pk_first + i), rows[i]
-        lx = X(first + i)
         ln = lines[i] if i < len(lines) else {}
-        put(r, 0, i + 1, f=f"=A{lx}")
-        put(r, 2, ln.get("description", "") or ln.get("part", ""), f=f'=IF(C{lx}="",B{lx},C{lx})')
-        put(r, 3, v["qty"], f=f"=D{lx}")
+        put(r, 0, i + 1)                                   # item No. this packing belongs to
+        put(r, 2, ln.get("description", "") or ln.get("part", ""),
+            f=f'=IFERROR(INDEX($C${F1}:$C${FL},MATCH(A{x},{ITEM_NO},0)),"")')
+        put(r, 3, v["qty"], f=f"=IFERROR(INDEX($D${F1}:$D${FL},MATCH(A{x},{ITEM_NO},0)),0)")
         put(r, 5, ln.get("packing_per_unit", "") if ln and ln.get("packing_per_unit") not in (None, "") else 0, s="inpc")
         put(r, 7, v["pk"] * v["qty"], f=f"=F{x}*D{x}", s="cur")
         put(r, 8, v["pk_idr"], f=f"=F{x}*{P_RATE}", s="idr")
@@ -530,91 +533,147 @@ def read_settings(sheet):
     return out
 
 
-def repair_standard_formulas(snapshot):
-    """Put back the Import Duty formula of a standard sheet and bring older duty settings up to date.
+def _find_item_header(sheet):
+    """Row of the item table header (No. / ... / Description) or None."""
+    max_row = max((int(k) for k in (sheet.get("cellData") or {}).keys()), default=0)
+    for r in range(0, max_row + 1):
+        if _norm(cell_text(get_cell(sheet, r, 0))) == "no." and _norm(cell_text(get_cell(sheet, r, 2))) == "description":
+            return r
+    return None
 
-    The Import Duty (IDR) cell is a formula. Typing or pasting a value over it removes the
-    formula, and sheets from the first duty version used a % cell (0.05 = 5%). This:
-      * converts the Duty % cell to a plain number (5 = 5%) with the current label / format,
-      * writes the current Import Duty formula into the Import Duty (IDR) cell.
-    Returns (snapshot, changed). Sheets without the duty rows are returned unchanged.
-    """
-    import copy
+
+def is_current_layout(sheet):
+    """True when the sheet was built by the current template: same item headers, packing looked up
+    by No. (safe to insert/delete rows) and the Import Duty formula in percent form."""
+    hdr = _find_item_header(sheet)
+    if hdr is None:
+        return False
+    for c, (label, _w) in enumerate(HEADERS):
+        want = _norm(label.split("({cur})")[0])
+        if not _norm(cell_text(get_cell(sheet, hdr, c))).startswith(want):
+            return False
+    first_pack = get_cell(sheet, hdr + 1, 19).get("f") or ""
+    if _norm(cell_text(get_cell(sheet, hdr + 1, 0))) != "total" and "MATCH(" not in first_pack.upper():
+        return False
+    for r in range(0, hdr):
+        if _norm(cell_text(get_cell(sheet, r, 5))).startswith("import duty (idr)"):
+            return "/100*" in (get_cell(sheet, r, 8).get("f") or "")
+    return False
+
+
+def read_sheet_inputs(sheet):
+    """Everything the user typed into a standard sheet (any of our layouts), so the sheet can be
+    rebuilt cleanly: details, settings, item lines, packing, lot packing and IDR charges.
+    Returns None when the sheet isn't one of our standard sheets."""
+    settings = read_settings(sheet)
+    hdr = _find_item_header(sheet)
+    if not settings or hdr is None:
+        return None
+    cols = {}
+    for c in range(0, 40):
+        h = _norm(cell_text(get_cell(sheet, hdr, c)))
+        for key, prefix in (("part", "part no"), ("desc", "description"), ("qty", "qty"),
+                            ("price", "vendor price per unit"), ("disc", "discount")):
+            if key not in cols and h.startswith(prefix):
+                cols[key] = c
+        if h == "unit" and "unit" not in cols:
+            cols["unit"] = c
+    if not {"desc", "qty", "price"} <= set(cols):
+        return None
+
+    details = {}
+    for r in range(0, hdr):
+        label = _norm(cell_text(get_cell(sheet, r, 1)))
+        # "vendor quote no." is checked before "vendor" because both start with "vendor"
+        for key, prefix in (("enquiry_no", "enquiry no"), ("customer", "customer"), ("vendor_quote_no", "vendor quote"),
+                            ("vendor_name", "vendor"), ("currency", "currency")):
+            if label.startswith(prefix) and key not in details:
+                details[key] = cell_text(get_cell(sheet, r, 2))
+                break
+
+    max_row = max((int(k) for k in (sheet.get("cellData") or {}).keys()), default=0)
+    items, total_row = [], None
+    for r in range(hdr + 1, max_row + 1):
+        if _norm(cell_text(get_cell(sheet, r, 0))).startswith("total"):
+            total_row = r
+            break
+        part = cell_text(get_cell(sheet, r, cols["part"])) if "part" in cols else ""
+        desc = cell_text(get_cell(sheet, r, cols["desc"]))
+        price = cell_number(get_cell(sheet, r, cols["price"]))
+        if not part and not desc and price is None:
+            continue
+        no = cell_number(get_cell(sheet, r, 0))
+        items.append({
+            "no": no,
+            "part": part,
+            "description": desc,
+            "qty": cell_number(get_cell(sheet, r, cols["qty"])) if cell_number(get_cell(sheet, r, cols["qty"])) is not None else "",
+            "unit": cell_text(get_cell(sheet, r, cols["unit"])) if "unit" in cols else "pcs",
+            "unit_price": price if price is not None else "",
+            "discount": cell_number(get_cell(sheet, r, cols["disc"])) or 0 if "disc" in cols else 0,
+        })
+    if total_row is None:
+        return None
+
+    # packing per unit by item No. (older sheets: packing row k belonged to item No. k+1)
+    packing, lot = {}, 0.0
+    pk_head = pk_col = None
+    for r in range(total_row + 1, max_row + 1):
+        if _norm(cell_text(get_cell(sheet, r, 2))) == "packing for":
+            pk_head = r
+            for c in range(0, 12):
+                h = _norm(cell_text(get_cell(sheet, r, c)))
+                if h.startswith("packing per unit") and "idr" not in h:
+                    pk_col = c
+                    break
+            break
+    if pk_head is not None and pk_col is not None:
+        k = 0
+        for r in range(pk_head + 1, max_row + 1):
+            label = _norm(cell_text(get_cell(sheet, r, 2)))
+            if label.startswith("packing - one lot"):
+                lot = cell_number(get_cell(sheet, r, 7)) or 0.0
+                break
+            if label == "total packing":
+                break
+            no = cell_number(get_cell(sheet, r, 0))
+            val = cell_number(get_cell(sheet, r, pk_col))
+            if val:
+                packing[no if no is not None else k + 1] = val
+            k += 1
+    for i, it in enumerate(items):
+        key = it["no"] if it["no"] is not None else i + 1
+        it["packing_per_unit"] = packing.get(key, 0)
+        it.pop("no")
+
+    return {
+        "enquiry_no": details.get("enquiry_no", ""), "customer": details.get("customer", ""),
+        "vendor_name": details.get("vendor_name", ""), "vendor_quote_no": details.get("vendor_quote_no", ""),
+        "currency": details.get("currency") or settings.get("currency") or "EUR",
+        "exchange_rate": settings.get("rate", 0), "margin1": settings.get("m1", 1),
+        "margin2": settings.get("m2", 1), "margin3": settings.get("m3", 1),
+        "duty_pct": settings.get("duty_pct", ""), "quote_total": settings.get("vq_total", ""),
+        "charges": settings.get("charges") or {}, "lot_packing": lot, "lines": items,
+    }
+
+
+def repair_standard_formulas(snapshot):
+    """Rebuild a standard sheet in the current layout when it has a formula error (#REF! after
+    rows were deleted, a formula typed over, ...) or was made by an older layout.
+    All typed inputs are kept: details, settings, items, packing, charges and duty %.
+    Returns (snapshot, changed). Sheets that are fine, or not ours, are returned unchanged."""
     sheet = first_sheet(snapshot)
     if not sheet or not read_settings(sheet):
         return snapshot, False
-
-    pct_row = duty_row = None
-    for r in range(0, HEADER_ROW + 2):
-        label = _norm(cell_text(get_cell(sheet, r, 5)))
-        if label.startswith("import duty %"):
-            pct_row = r
-        elif label.startswith("import duty (idr)"):
-            duty_row = r
-    if pct_row is None or duty_row is None:
+    if is_current_layout(sheet) and not formula_errors(snapshot):
         return snapshot, False
-
-    # find the item table, its TOTAL row, Total Packing and Total Charges rows
-    hdr = total_row = pk_total = ch_total = None
-    cost_col = None
-    max_row = max((int(k) for k in (sheet.get("cellData") or {}).keys()), default=0)
-    for r in range(0, max_row + 1):
-        c0 = _norm(cell_text(get_cell(sheet, r, 0)))
-        c2 = _norm(cell_text(get_cell(sheet, r, 2)))
-        if hdr is None and c0 == "no." and _norm(cell_text(get_cell(sheet, r, 2))) == "description":
-            hdr = r
-            for c in range(0, 30):
-                if _norm(cell_text(get_cell(sheet, r, c))).startswith("total cost"):
-                    cost_col = c
-                    break
-        elif hdr is not None and total_row is None and c0 == "total":
-            total_row = r
-        elif c2 == "total packing":
-            pk_total = r
-        elif c2 == "total charges":
-            ch_total = r
-    if None in (hdr, total_row, pk_total, ch_total, cost_col) or total_row <= hdr + 1:
+    data = read_sheet_inputs(sheet)
+    if not data:
         return snapshot, False
-
-    snap = copy.deepcopy(snapshot)
-    sheet = first_sheet(snap)
-    cells = sheet.setdefault("cellData", {})
-    col = get_column_letter(cost_col + 1)
-    pct_ref = f"$I${pct_row + 1}"
-    formula = (f'=IF({pct_ref}="",0,{pct_ref}/100*(SUM({col}{hdr + 2}:{col}{total_row})'
-               f'+$J${pk_total + 1}+$J${ch_total + 1}))')
-    changed = False
-
-    # Duty % cell: label, plain-number value, format
-    old_label = _norm(cell_text(get_cell(sheet, pct_row, 5)))
-    pct_cell = cells.setdefault(str(pct_row), {}).setdefault("8", {})
-    if old_label != _norm(DUTY_LABEL):
-        v = pct_cell.get("v")
-        if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 < v < 1:
-            pct_cell["v"] = round(v * 100, 6)          # 0.05 in the old % cell -> 5
-        cells[str(pct_row)].setdefault("5", {})["v"] = DUTY_LABEL
-        changed = True
-    if pct_cell.get("s") != "pctd":
-        pct_cell["s"] = "pctd"
-        changed = True
-    styles = snap.setdefault("styles", {})
-    if (styles.get("pctd") or {}).get("n", {}).get("pattern") != STYLES["pctd"]["n"]["pattern"]:
-        styles["pctd"] = dict(STYLES["pctd"])
-        changed = True
-
-    # Import Duty (IDR) cell: always the formula
-    duty_cell = cells.setdefault(str(duty_row), {}).setdefault("8", {})
-    if duty_cell.get("f") != formula:
-        duty_cell["f"] = formula
-        duty_cell.pop("si", None)
-        duty_cell["s"] = duty_cell.get("s") or "tot"
-        changed = True
-    note = cells.setdefault(str(duty_row), {}).setdefault("9", {})
-    if note.get("v") != "Import Duty = Duty % / 100 x (Total Cost + Total Packing + Total Charges)":
-        note["v"] = "Import Duty = Duty % / 100 x (Total Cost + Total Packing + Total Charges)"
-        note.setdefault("s", "note")
-        changed = True
-    return (snap, True) if changed else (snapshot, False)
+    lines = data.pop("lines")
+    rebuilt = build_standard_snapshot(lines=lines, blank_lines=max(10, len(lines)),
+                                      title=(snapshot or {}).get("name"), discount=0, **data)
+    return rebuilt, True
 
 
 def is_standard_layout(sheet):

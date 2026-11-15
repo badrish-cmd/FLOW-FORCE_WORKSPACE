@@ -165,6 +165,28 @@ class SheetServiceTests(TestCase):
         old["cellData"]["5"]["8"]["v"] = 0.05
         self.assertEqual(sheet_svc.read_settings(old)["duty_pct"], 5.0)
 
+    def test_rows_link_by_number_and_broken_sheet_is_rebuilt(self):
+        lines = [{"part": f"P{i}", "description": f"item {i}", "qty": i + 1, "unit": "pcs", "unit_price": 100 + i,
+                  "discount": 0.1, "packing_per_unit": 5 if i == 2 else 0} for i in range(4)]
+        kw = dict(enquiry_no="E", customer="C", vendor_name="V", vendor_quote_no="Q", currency="EUR",
+                  exchange_rate=20000, margin1=0.8, charges={"Freight (Air / Sea)": 1000000}, duty_pct=5)
+        snap = sheet_svc.build_standard_snapshot(lines=lines, **kw)
+        sh = sheet_svc.first_sheet(snap)
+        # packing is looked up by item No. - no cell-to-cell links between rows
+        self.assertIn("MATCH(A11,", sheet_svc.get_cell(sh, 10, 19)["f"])
+        self.assertTrue(sheet_svc.is_current_layout(sh))
+        self.assertFalse(sheet_svc.repair_standard_formulas(snap)[1])
+        # simulate rows deleted in an older sheet: #REF! everywhere -> rebuilt from the typed inputs
+        sh["cellData"]["6"]["8"] = {"f": "=#REF!", "v": "#REF!"}
+        fixed, changed = sheet_svc.repair_standard_formulas(snap)
+        self.assertTrue(changed)
+        self.assertEqual(sheet_svc.formula_errors(fixed), [])
+        ref = sheet_svc.build_standard_snapshot(lines=lines, **kw)
+        self.assertEqual(sheet_svc.extract_lines(fixed)[0], sheet_svc.extract_lines(ref)[0])
+        data = sheet_svc.read_sheet_inputs(sheet_svc.first_sheet(snap))
+        self.assertEqual([l["packing_per_unit"] for l in data["lines"]], [0, 0, 5.0, 0])
+        self.assertEqual((data["vendor_name"], data["vendor_quote_no"], data["duty_pct"]), ("V", "Q", 5.0))
+
     def test_currency_detection_helpers(self):
         self.assertEqual(sheet_svc.normalize_currency("Rs."), "INR")
         self.assertEqual(sheet_svc.normalize_currency("\u20b9"), "INR")
