@@ -139,7 +139,8 @@ def first_sheet(snapshot):
 #   Row 10       item table headers, items from row 11
 #   below items  TOTAL row, check row, PACKING block, CHARGES block (IDR)
 #
-# Import Duty (IDR) = Duty % x (total vendor invoice in IDR [Total Cost + Total Packing] + Total Charges)
+# Import Duty (IDR) = Duty % / 100 x (total vendor invoice in IDR [Total Cost + Total Packing] + Total Charges)
+#   (the Duty % cell holds a plain number: 5 = 5%)
 #
 # Per item row (x):
 #   H Price after Discount     = F*(1-G)
@@ -168,7 +169,7 @@ STYLES = {
     "inpi": {"bg": {"rgb": "#FEF9C3"}, "n": {"pattern": "#,##0"}},
     "inpf": {"bg": {"rgb": "#FEF9C3"}, "n": {"pattern": "0.00"}},
     "pct": {"bg": {"rgb": "#FEF9C3"}, "n": {"pattern": "0%"}},
-    "pctd": {"bg": {"rgb": "#FEF9C3"}, "n": {"pattern": "0.0%"}},
+    "pctd": {"bg": {"rgb": "#FEF9C3"}, "n": {"pattern": '0.00"%"'}},     # plain number shown as 5.00%
     "hdr": {"bl": 1, "bg": {"rgb": "#1E3A8A"}, "cl": {"rgb": "#FFFFFF"}, "tb": 3, "ht": 2, "vt": 2},
     "cur": {"n": {"pattern": "#,##0.00"}},
     "idr": {"n": {"pattern": "#,##0"}},
@@ -207,6 +208,7 @@ CHARGE_LABELS = [
     "Other Charges",
 ]
 LOT_PACKING_LABEL = "Packing - one lot amount (if vendor gives only a total)"
+DUTY_LABEL = "Import Duty % (type 5 for 5%, empty = no duty)"
 
 # Amounts in the quote currency are shown the way the vendor writes them:
 # INR in lakhs/crores (6,08,500.00), everything else 608,500.00.
@@ -257,7 +259,7 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
            unit_price / packing_per_unit are in the quote currency.
     lot_packing: one packing amount for the whole quote (quote currency), shared by Freight Ratio.
     charges: {label: IDR amount} for the CHARGES block (all typed by the user in IDR).
-    duty_pct: import duty as a fraction (0.05 = 5%); empty = no duty.
+    duty_pct: import duty in percent (5 = 5%); empty = no duty.
     """
     cur = normalize_currency(currency) or "EUR"
     lines = list(lines or [])
@@ -328,7 +330,7 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
     l_tot = sum(r["line"] for r in rows)
     pk_tot_cur = sum(r["pk"] * r["qty"] for r in rows) + lot_v
     pk_tot_idr = pk_tot_cur * rate_v
-    duty_v = _num(duty_in) * (sum(r["j"] for r in rows) + pk_tot_idr + ch_sum)
+    duty_v = _num(duty_in) / 100 * (sum(r["j"] for r in rows) + pk_tot_idr + ch_sum)
     for r in rows:
         q = r["qty"]
         r["ratio"] = r["line"] / l_tot if l_tot else 0
@@ -346,10 +348,10 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
         ("Margin 1", m1, "inpf", "After Margin 1 = Cost / Margin 1, then / Margin 2, then / Margin 3", None),
         ("Margin 2 (1 = not used)", m2, "inpf", "", None),
         ("Margin 3 (1 = not used)", m3, "inpf", "", None),
-        ("Import Duty % (empty = no duty)", duty_in, "pctd", "", None),
+        (DUTY_LABEL, duty_in, "pctd", "", None),
         ("Import Duty (IDR)", duty_v, "tot",
-         "Import Duty = Duty % x (Total Cost + Total Packing + Total Charges)",
-         f'=IF({P_DUTY_PCT}="",0,{P_DUTY_PCT}*(SUM(J{F1}:J{FL})+{R_PKTOT}+{R_CHARGES}))'),
+         "Import Duty = Duty % / 100 x (Total Cost + Total Packing + Total Charges)",
+         f'=IF({P_DUTY_PCT}="",0,{P_DUTY_PCT}/100*(SUM(J{F1}:J{FL})+{R_PKTOT}+{R_CHARGES}))'),
         (f"Vendor Quote Total ({cur}, for the check)", "" if quote_total in (None, "") else _num(quote_total), "inpc", "", None),
     ]):
         r = 1 + i
@@ -512,6 +514,11 @@ def read_settings(sheet):
             out["currency"] = normalize_currency(cell_text(get_cell(sheet, r, 2)))
     if "rate" not in out and "m1" not in out:
         return {}
+    if "duty_pct" in out:
+        # Older sheets stored the duty as a fraction in a % cell (0.05 = 5%); now the cell holds 5.
+        new_style = any("type 5" in _norm(cell_text(get_cell(sheet, r, 5))) for r in range(0, HEADER_ROW))
+        if not new_style and 0 < out["duty_pct"] < 1:
+            out["duty_pct"] = round(out["duty_pct"] * 100, 6)
     wanted = {_norm(lbl): lbl for lbl in CHARGE_LABELS}
     charges = {}
     for r, c, cell in iter_cells(sheet):

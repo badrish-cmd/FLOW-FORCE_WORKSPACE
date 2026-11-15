@@ -124,7 +124,7 @@ class SheetServiceTests(TestCase):
             lines=[{"part": "A", "description": "valve", "qty": 4, "unit_price": 608500},
                    {"part": "B", "description": "venturi", "qty": 1, "unit_price": 50000}],
             charges={"Freight (Air / Sea)": 60000000, "Port Demurrage Charges": 2500000},
-            lot_packing=1000, duty_pct=0.05)
+            lot_packing=1000, duty_pct=5)
         sh = sheet_svc.first_sheet(snap)
         total = sheet_svc.FIRST_LINE_ROW + 2
         self.assertAlmostEqual(sheet_svc.get_cell(sh, total, 14)["v"], 1.0)               # ratios add to 100%
@@ -136,7 +136,7 @@ class SheetServiceTests(TestCase):
         self.assertAlmostEqual(sheet_svc.get_cell(sh, 6, 8)["v"], duty, 2)
         self.assertAlmostEqual(sheet_svc.get_cell(sh, total, 17)["v"], duty, 2)
         self.assertEqual(sheet_svc.get_cell(sh, total, 9)["v"], (608500 * 4 + 50000) * 200)  # Total Cost column
-        self.assertEqual(sheet_svc.read_settings(sh)["duty_pct"], 0.05)
+        self.assertEqual(sheet_svc.read_settings(sh)["duty_pct"], 5.0)
         ratio_a = sheet_svc.get_cell(sh, 10, 14)["v"]
         self.assertAlmostEqual(ratio_a, (608500 * 4) / (608500 * 4 + 50000))
         self.assertEqual(sheet_svc.read_settings(sh)["charges"],
@@ -150,6 +150,20 @@ class SheetServiceTests(TestCase):
         lines, problems = sheet_svc.extract_lines(snap)
         self.assertEqual(lines, [])
         self.assertIn("exchange rate", problems[0])
+
+    def test_duty_cell_takes_plain_percent_and_reads_old_fraction(self):
+        kw = dict(enquiry_no="E", customer="C", vendor_name="V", vendor_quote_no="", currency="EUR",
+                  exchange_rate=20000, margin1=1, lines=[{"part": "A", "description": "x", "qty": 2, "unit_price": 100}],
+                  charges={"Freight (Air / Sea)": 1000000})
+        sh = sheet_svc.first_sheet(sheet_svc.build_standard_snapshot(duty_pct=5, **kw))
+        self.assertEqual(sheet_svc.get_cell(sh, 5, 8)["v"], 5.0)                       # cell shows 5.00%
+        self.assertIn("/100*", sheet_svc.get_cell(sh, 6, 8)["f"])
+        self.assertAlmostEqual(sheet_svc.get_cell(sh, 6, 8)["v"], 0.05 * (2 * 100 * 20000 + 1000000))
+        # a sheet from the previous version held 0.05 in a % cell -> read back as 5
+        old = sheet_svc.first_sheet(sheet_svc.build_standard_snapshot(**kw))
+        old["cellData"]["5"]["5"]["v"] = "Import Duty % (empty = no duty)"
+        old["cellData"]["5"]["8"]["v"] = 0.05
+        self.assertEqual(sheet_svc.read_settings(old)["duty_pct"], 5.0)
 
     def test_currency_detection_helpers(self):
         self.assertEqual(sheet_svc.normalize_currency("Rs."), "INR")
@@ -615,7 +629,7 @@ class AIQuoteExtractionTests(TestCase):
         sh = sheet_svc.first_sheet(snap)
         self.assertNotIn("duty_pct", sheet_svc.read_settings(sh))     # duty starts empty
         sh["cellData"]["2"]["8"]["v"] = 0.75
-        sh["cellData"]["5"]["8"]["v"] = 0.05                          # Import Duty % = 5%
+        sh["cellData"]["5"]["8"]["v"] = 5                             # Import Duty % = 5 (typed as 5)
         for r, c, cell in sheet_svc.iter_cells(sh):
             if c == 2 and cell.get("v") == "Freight (Air / Sea)":
                 sh["cellData"][str(r)]["9"]["v"] = 5000000
@@ -625,7 +639,7 @@ class AIQuoteExtractionTests(TestCase):
         settings = sheet_svc.read_settings(sheet_svc.first_sheet(rev.snapshot))
         self.assertEqual(settings["m1"], 0.75)
         self.assertEqual(settings["charges"], {"Freight (Air / Sea)": 5000000.0})
-        self.assertEqual(settings["duty_pct"], 0.05)
+        self.assertEqual(settings["duty_pct"], 5.0)
 
     def test_apply_ai_refuses_approved_revision(self):
         quote, rev = workflow.create_quote(

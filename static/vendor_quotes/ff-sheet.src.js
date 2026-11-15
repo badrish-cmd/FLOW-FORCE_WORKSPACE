@@ -55,9 +55,30 @@ function mount(container, snapshot, opts) {
     } catch (e) {}
     [0, 300, 1000, 2500].forEach((ms) => setTimeout(lock, ms));
   }
+  // Recalculate every formula once the sheet is open. Saved files carry the last results, and
+  // without this a value typed elsewhere (e.g. a duty %) could still show an old result.
+  // Changes made by this first recalculation do not count as user edits.
+  let ready = false;
+  const markReady = () => { ready = true; };
+  const recalc = () => {
+    try {
+      const f = univerAPI.getFormula();
+      let done = false;
+      const finish = () => { if (!done) { done = true; setTimeout(markReady, 300); } };
+      try { f.calculationEnd(() => finish()); } catch (e) {}
+      f.executeCalculation();
+      setTimeout(finish, 4000);              // fallback if no end event arrives
+    } catch (e) { markReady(); }
+  };
+  let started = false;
+  const startOnce = () => { if (!started) { started = true; recalc(); } };
+  try {
+    univerAPI.addEvent(univerAPI.Event.LifeCycleChanged, (ev) => { if (ev && ev.stage >= 2) startOnce(); });
+  } catch (e) {}
+  setTimeout(startOnce, 800);
   if (opts.onChange) {
     try {
-      univerAPI.addEvent(univerAPI.Event.SheetValueChanged, (ev) => opts.onChange(ev));
+      univerAPI.addEvent(univerAPI.Event.SheetValueChanged, (ev) => { if (ready) opts.onChange(ev); });
     } catch (e) {}
   }
   return {
