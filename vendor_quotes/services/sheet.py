@@ -139,8 +139,8 @@ def first_sheet(snapshot):
 #   Row 10       item table headers, items from row 11
 #   below items  TOTAL row, check row, PACKING block, CHARGES block (IDR)
 #
-# Import Duty (IDR) = Duty % / 100 x (total vendor invoice in IDR [Total Cost + Total Packing] + Total Charges)
-#   (the Duty % cell holds a plain number: 5 = 5%)
+# Import Duty (IDR) = Duty % x (Total Cost + Total Packing + Freight (Air / Sea))  - CIF value; clearance,
+#   demurrage, warehouse and local transport are NOT in the duty base. The Duty % cell takes 10 or 10%.
 #
 # Per item row (x):
 #   H Price after Discount     = F*(1-G)
@@ -208,7 +208,15 @@ CHARGE_LABELS = [
     "Other Charges",
 ]
 LOT_PACKING_LABEL = "Packing - one lot amount (if vendor gives only a total)"
-DUTY_LABEL = "Import Duty % (type 5 for 5%, empty = no duty)"
+DUTY_LABEL = "Import Duty % (type 10 or 10%, empty = no duty)"
+DUTY_NOTE = "Import Duty = Duty % x (Total Cost + Total Packing + Freight)"
+FREIGHT_LABEL = "Freight (Air / Sea)"     # the only charge that counts in the duty base (CIF)
+
+
+def duty_fraction(value):
+    """Duty % cell -> fraction. 10 and 10% (stored 0.1) both mean 10%."""
+    v = _num(value)
+    return v / 100 if v >= 1 else v
 
 # Amounts in the quote currency are shown the way the vendor writes them:
 # INR in lakhs/crores (6,08,500.00), everything else 608,500.00.
@@ -259,7 +267,8 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
            unit_price / packing_per_unit are in the quote currency.
     lot_packing: one packing amount for the whole quote (quote currency), shared by Freight Ratio.
     charges: {label: IDR amount} for the CHARGES block (all typed by the user in IDR).
-    duty_pct: import duty in percent (5 = 5%); empty = no duty.
+    duty_pct: import duty, 10 or 0.10 both = 10%; empty = no duty.
+              Import Duty = Duty % x (Total Cost + Total Packing + Freight) - other charges are not in the base.
     """
     cur = normalize_currency(currency) or "EUR"
     lines = list(lines or [])
@@ -284,6 +293,7 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
     F1, FL, T = X(first), X(last), X(total_row)
     PKL, PKT, CHT = X(pk_lot), X(pk_total), X(ch_total)
     R_CHARGES, R_LOT, R_PKTOT = f"$J${CHT}", f"$J${PKL}", f"$J${PKT}"
+    R_FREIGHT = f"$J${X(ch_first + CHARGE_LABELS.index(FREIGHT_LABEL))}"
     # Rows only refer to other rows through whole ranges (looked up by No.), never cell-to-cell,
     # so inserting or deleting item / packing rows can't break a formula (#REF!).
     PK1, PKN = X(pk_first), X(pk_lot - 1)
@@ -334,7 +344,8 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
     l_tot = sum(r["line"] for r in rows)
     pk_tot_cur = sum(r["pk"] * r["qty"] for r in rows) + lot_v
     pk_tot_idr = pk_tot_cur * rate_v
-    duty_v = _num(duty_in) / 100 * (sum(r["j"] for r in rows) + pk_tot_idr + ch_sum)
+    freight_v = _num(charges.get(FREIGHT_LABEL))
+    duty_v = duty_fraction(duty_in) * (sum(r["j"] for r in rows) + pk_tot_idr + freight_v)
     for r in rows:
         q = r["qty"]
         r["ratio"] = r["line"] / l_tot if l_tot else 0
@@ -353,9 +364,9 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
         ("Margin 2 (1 = not used)", m2, "inpf", "", None),
         ("Margin 3 (1 = not used)", m3, "inpf", "", None),
         (DUTY_LABEL, duty_in, "pctd", "", None),
-        ("Import Duty (IDR)", duty_v, "tot",
-         "Import Duty = Duty % / 100 x (Total Cost + Total Packing + Total Charges)",
-         f'=IF({P_DUTY_PCT}="",0,{P_DUTY_PCT}/100*(SUM(J{F1}:J{FL})+{R_PKTOT}+{R_CHARGES}))'),
+        ("Import Duty (IDR)", duty_v, "tot", DUTY_NOTE,
+         f'=IF({P_DUTY_PCT}="",0,IF({P_DUTY_PCT}>=1,{P_DUTY_PCT}/100,{P_DUTY_PCT})'
+         f'*(SUM(J{F1}:J{FL})+{R_PKTOT}+{R_FREIGHT}))'),
         (f"Vendor Quote Total ({cur}, for the check)", "" if quote_total in (None, "") else _num(quote_total), "inpc", "", None),
     ]):
         r = 1 + i
@@ -517,11 +528,9 @@ def read_settings(sheet):
             out["currency"] = normalize_currency(cell_text(get_cell(sheet, r, 2)))
     if "rate" not in out and "m1" not in out:
         return {}
-    if "duty_pct" in out:
-        # Older sheets stored the duty as a fraction in a % cell (0.05 = 5%); now the cell holds 5.
-        new_style = any("type 5" in _norm(cell_text(get_cell(sheet, r, 5))) for r in range(0, HEADER_ROW))
-        if not new_style and 0 < out["duty_pct"] < 1:
-            out["duty_pct"] = round(out["duty_pct"] * 100, 6)
+    if "duty_pct" in out and 0 < out["duty_pct"] < 1:
+        # typed as "10%" (stored 0.1) or an older % cell -> 10
+        out["duty_pct"] = round(out["duty_pct"] * 100, 6)
     wanted = {_norm(lbl): lbl for lbl in CHARGE_LABELS}
     charges = {}
     for r, c, cell in iter_cells(sheet):
@@ -557,7 +566,8 @@ def is_current_layout(sheet):
         return False
     for r in range(0, hdr):
         if _norm(cell_text(get_cell(sheet, r, 5))).startswith("import duty (idr)"):
-            return "/100*" in (get_cell(sheet, r, 8).get("f") or "")
+            f = (get_cell(sheet, r, 8).get("f") or "").replace(" ", "")
+            return ">=1," in f and "/100," in f
     return False
 
 

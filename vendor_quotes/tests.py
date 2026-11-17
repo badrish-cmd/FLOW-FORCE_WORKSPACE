@@ -132,7 +132,7 @@ class SheetServiceTests(TestCase):
         self.assertAlmostEqual(sheet_svc.get_cell(sh, total, 19)["v"], 200000.0, 2)       # lot packing (1000 INR)
         # duty = 5% x (vendor invoice in IDR [goods + packing] + total charges), recovered once
         invoice_idr = (608500 * 4 + 50000) * 200 + 1000 * 200
-        duty = 0.05 * (invoice_idr + 62500000)
+        duty = 0.05 * (invoice_idr + 60000000)        # freight only - demurrage is NOT in the base
         self.assertAlmostEqual(sheet_svc.get_cell(sh, 6, 8)["v"], duty, 2)
         self.assertAlmostEqual(sheet_svc.get_cell(sh, total, 17)["v"], duty, 2)
         self.assertEqual(sheet_svc.get_cell(sh, total, 9)["v"], (608500 * 4 + 50000) * 200)  # Total Cost column
@@ -157,7 +157,7 @@ class SheetServiceTests(TestCase):
                   charges={"Freight (Air / Sea)": 1000000})
         sh = sheet_svc.first_sheet(sheet_svc.build_standard_snapshot(duty_pct=5, **kw))
         self.assertEqual(sheet_svc.get_cell(sh, 5, 8)["v"], 5.0)                       # cell shows 5.00%
-        self.assertIn("/100*", sheet_svc.get_cell(sh, 6, 8)["f"])
+        self.assertIn("IF($I$6>=1,$I$6/100,$I$6)", sheet_svc.get_cell(sh, 6, 8)["f"])
         self.assertAlmostEqual(sheet_svc.get_cell(sh, 6, 8)["v"], 0.05 * (2 * 100 * 20000 + 1000000))
         # a sheet from the previous version held 0.05 in a % cell -> read back as 5
         old = sheet_svc.first_sheet(sheet_svc.build_standard_snapshot(**kw))
@@ -186,6 +186,29 @@ class SheetServiceTests(TestCase):
         data = sheet_svc.read_sheet_inputs(sheet_svc.first_sheet(snap))
         self.assertEqual([l["packing_per_unit"] for l in data["lines"]], [0, 0, 5.0, 0])
         self.assertEqual((data["vendor_name"], data["vendor_quote_no"], data["duty_pct"]), ("V", "Q", 5.0))
+
+    def test_import_duty_is_cost_packing_freight_only(self):
+        """User's case: USD 2,022 x 18,500 + packing USD 100 + freight 18,500,000 at 10% = 5,775,700.
+        Clearance is NOT in the base, and the duty cell takes 10 or 10% (0.1)."""
+        kw = dict(enquiry_no="E", customer="C", vendor_name="V", vendor_quote_no="Q", currency="USD",
+                  exchange_rate=18500, margin1=0.85,
+                  lines=[{"part": "X", "description": "item", "qty": 1, "unit_price": 2022}], lot_packing=100,
+                  charges={"Freight (Air / Sea)": 18500000, "Custom Clearance Processing": 3000000})
+        for typed in (10, 0.1):
+            sh = sheet_svc.first_sheet(sheet_svc.build_standard_snapshot(duty_pct=typed, **kw))
+            self.assertAlmostEqual(sheet_svc.get_cell(sh, 6, 8)["v"], 5775700.0, 2)
+            self.assertIn("$J$23)", sheet_svc.get_cell(sh, 6, 8)["f"])                    # J23 = Freight row
+            self.assertEqual(sheet_svc.get_cell(sh, 22, 2)["v"], "Freight (Air / Sea)")
+        # a sheet with the previous duty formula is rebuilt on open; "10%" stays 10%
+        snap = sheet_svc.build_standard_snapshot(duty_pct=10, **kw)
+        sh = sheet_svc.first_sheet(snap)
+        sh["cellData"]["6"]["8"]["f"] = '=IF($I$6="",0,$I$6/100*(SUM(J11:J11)+$J$19+$J$29))'
+        sh["cellData"]["5"]["8"]["v"] = 0.1
+        fixed, changed = sheet_svc.repair_standard_formulas(snap)
+        self.assertTrue(changed)
+        fs = sheet_svc.first_sheet(fixed)
+        self.assertEqual(sheet_svc.get_cell(fs, 5, 8)["v"], 10.0)
+        self.assertAlmostEqual(sheet_svc.get_cell(fs, 6, 8)["v"], 5775700.0, 2)
 
     def test_currency_detection_helpers(self):
         self.assertEqual(sheet_svc.normalize_currency("Rs."), "INR")
@@ -662,7 +685,7 @@ class AIQuoteExtractionTests(TestCase):
         self.assertEqual(self.client.get(reverse("vendor_quotes:quote_detail", args=[quote.id])).status_code, 200)
         rev.refresh_from_db()
         sh = sheet_svc.first_sheet(rev.snapshot)
-        self.assertIn("$I$6/100*", sheet_svc.get_cell(sh, 6, 8)["f"])
+        self.assertIn("IF($I$6>=1,$I$6/100,$I$6)", sheet_svc.get_cell(sh, 6, 8)["f"])
         self.assertEqual(sheet_svc.get_cell(sh, 5, 8)["v"], 5)
         self.assertEqual(sheet_svc.get_cell(sh, 5, 5)["v"], sheet_svc.DUTY_LABEL)
         # typing over Import Duty and saving: formula restored, page told to reload
@@ -672,7 +695,7 @@ class AIQuoteExtractionTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.json()["repaired"])
         rev.refresh_from_db()
-        self.assertIn("$I$6/100*", sheet_svc.get_cell(sheet_svc.first_sheet(rev.snapshot), 6, 8)["f"])
+        self.assertIn("IF($I$6>=1,$I$6/100,$I$6)", sheet_svc.get_cell(sheet_svc.first_sheet(rev.snapshot), 6, 8)["f"])
         # a correct sheet is not touched
         self.assertFalse(sheet_svc.repair_standard_formulas(rev.snapshot)[1])
 
