@@ -68,6 +68,11 @@ urlpatterns = [
     ),
 
     path(
+        "vendor-enquiries/",
+        include("vendor_enquiries.urls", namespace="vendor_enquiries")
+    ),
+
+    path(
         "vendor-quotes/",
         include("vendor_quotes.urls")
     ),

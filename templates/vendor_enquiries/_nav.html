@@ -1,0 +1,7 @@
+<div class="mb-4 flex flex-wrap items-center gap-2 text-sm">
+    <a href="{% url 'vendor_enquiries:list' %}" class="rounded-lg px-3 py-1.5 font-semibold {% if nav == 'list' %}bg-slate-800 text-white{% else %}bg-white text-slate-700 border border-slate-200 hover:bg-slate-50{% endif %}"><i class="fas fa-list mr-1"></i>Enquiries</a>
+    <a href="{% url 'vendor_enquiries:create' %}" class="rounded-lg px-3 py-1.5 font-semibold {% if nav == 'new' %}bg-slate-800 text-white{% else %}bg-blue-600 text-white hover:bg-blue-700{% endif %}"><i class="fas fa-plus mr-1"></i>New Enquiry</a>
+    {% if ve_is_admin %}
+    <a href="{% url 'vendor_enquiries:access' %}" class="rounded-lg px-3 py-1.5 font-semibold {% if nav == 'access' %}bg-slate-800 text-white{% else %}bg-white text-slate-700 border border-slate-200 hover:bg-slate-50{% endif %}"><i class="fas fa-user-shield mr-1"></i>Team Access</a>
+    {% endif %}
+</div>

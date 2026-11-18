@@ -1,0 +1,134 @@
+{% extends 'base.html' %}
+{% block title %}{{ enq.enquiry_no }} · {{ enq.vendor_name }} - Vendor Enquiry Tracker{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-6xl">
+    <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+            <a href="{% url 'vendor_enquiries:list' %}" class="text-sm text-slate-500 hover:text-blue-600"><i class="fas fa-arrow-left mr-1"></i>Vendor Enquiry Tracker</a>
+            <h1 class="mt-1 text-2xl font-bold text-gray-900">{{ enq.enquiry_no }} · {{ enq.vendor_name }}</h1>
+            <div class="mt-1 flex flex-wrap items-center gap-2">{% include 'vendor_enquiries/_status.html' with status=enq.status %}
+                {% if enq.vendor_quote_id %}<span class="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-semibold text-indigo-800"><i class="fas fa-calculator text-[10px]"></i>In price calculation{% if enq.sent_file %} ({{ enq.sent_file.label }}){% endif %}</span>{% endif %}
+            </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+            {% if can_send and enq.status == 'QUOTE_GOT' and latest %}
+                {% if enq.vendor_quote_id and enq.sent_file_id == latest.id %}
+                    {% if can_open_quote %}<a href="{% url 'vendor_quotes:quote_detail' enq.vendor_quote_id %}" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"><i class="fas fa-calculator mr-1"></i>Open Price Calculation</a>{% endif %}
+                {% else %}
+                <form method="post" action="{% url 'vendor_enquiries:send_to_pricing' enq.id %}" onsubmit="return confirm('{% if enq.vendor_quote_id %}Attach {{ latest.label }} to the Price Calculation?{% else %}Send this quote to Price Calculation?{% endif %}')">
+                    {% csrf_token %}
+                    <button class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"><i class="fas fa-share-square mr-1"></i>{% if enq.vendor_quote_id %}Send {{ latest.label }} to Price Calculation{% else %}Send to Price Calculation{% endif %}</button>
+                </form>
+                {% endif %}
+            {% endif %}
+            {% if can_edit %}
+            <a href="{% url 'vendor_enquiries:edit' enq.id %}" class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"><i class="fas fa-pen mr-1"></i>Edit</a>
+            <form method="post" action="{% url 'vendor_enquiries:delete' enq.id %}" onsubmit="return confirm('Delete {{ enq.enquiry_no|escapejs }} · {{ enq.vendor_name|escapejs }} and its uploaded quotes? This cannot be undone.')">
+                {% csrf_token %}
+                <button class="rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50"><i class="fas fa-trash mr-1"></i>Delete</button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if not enq.vendor_id %}
+    <div class="mb-4 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+        <i class="fas fa-exclamation-triangle mt-0.5"></i><div>Vendor "{{ enq.vendor_name }}" not found in Vendor Quotes, kindly create it.{% if can_send %} When you send to Price Calculation you can create it with name only.{% endif %}</div>
+    </div>
+    {% endif %}
+
+    <div class="grid gap-4 lg:grid-cols-3">
+        <div class="space-y-4 lg:col-span-2">
+            <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="mb-3 font-semibold text-slate-900"><i class="fas fa-info-circle mr-2 text-slate-400"></i>Enquiry details</h2>
+                <dl class="grid grid-cols-2 gap-x-6 gap-y-3 text-sm md:grid-cols-3">
+                    <div><dt class="text-xs text-slate-500">Enquiry No.</dt><dd class="font-semibold">{{ enq.enquiry_no }}</dd></div>
+                    <div><dt class="text-xs text-slate-500">Customer</dt><dd>{{ enq.customer_name|default:"—" }}</dd></div>
+                    <div><dt class="text-xs text-slate-500">Vendor</dt><dd>{{ enq.vendor_name }}</dd></div>
+                    <div><dt class="text-xs text-slate-500">Date sent</dt><dd>{{ enq.sent_on|date:"M j, Y" }}</dd></div>
+                    <div><dt class="text-xs text-slate-500">Vendor Quote No.</dt><dd>{{ enq.vendor_quote_no|default:"—" }}</dd></div>
+                    <div><dt class="text-xs text-slate-500">Added by</dt><dd>{{ enq.created_by.full_name|default:enq.created_by.email|default:"—" }}</dd></div>
+                </dl>
+                <div class="mt-4">
+                    <div class="text-xs text-slate-500">Initial Enquiry</div>
+                    <div class="mt-1 whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-sm text-slate-800">{{ enq.initial_enquiry|default:"—" }}</div>
+                </div>
+            </div>
+
+            <div id="remarks" class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="mb-3 font-semibold text-slate-900"><i class="fas fa-comments mr-2 text-purple-500"></i>Remarks</h2>
+                {% for r in remarks %}
+                <div id="remark-{{ r.id }}" class="mb-4 rounded-lg border border-purple-100 bg-purple-50 p-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-purple-900">
+                        <span class="font-semibold">{{ r.author.full_name|default:r.author.email|default:"—" }}</span>
+                        <span class="text-purple-700">{{ r.created_at|date:"M j, Y H:i" }}</span>
+                    </div>
+                    <div class="mt-1 whitespace-pre-wrap text-sm font-semibold uppercase text-slate-900">{{ r.text }}</div>
+                    {% for rp in r.replies.all %}
+                    <div class="ml-4 mt-2 rounded-lg border border-slate-200 bg-white p-2">
+                        <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span class="font-semibold text-slate-700"><i class="fas fa-reply mr-1"></i>{{ rp.author.full_name|default:rp.author.email|default:"—" }}</span><span>{{ rp.created_at|date:"M j, Y H:i" }}</span></div>
+                        <div class="mt-1 whitespace-pre-wrap text-sm text-slate-800">{{ rp.text }}</div>
+                    </div>
+                    {% endfor %}
+                    {% if can_reply %}
+                    <form method="post" action="{% url 'vendor_enquiries:remark_reply' enq.id r.id %}" class="ml-4 mt-2 flex gap-2">
+                        {% csrf_token %}
+                        <input name="text" required placeholder="Reply…" class="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm">
+                        <button class="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-900">Reply</button>
+                    </form>
+                    {% endif %}
+                </div>
+                {% empty %}
+                <p class="mb-3 text-sm text-slate-500">No remarks.</p>
+                {% endfor %}
+                {% if can_remark %}
+                <form method="post" action="{% url 'vendor_enquiries:remark_add' enq.id %}" class="mt-2 space-y-2">
+                    {% csrf_token %}
+                    <textarea name="text" rows="3" required placeholder="Query on this quote (emailed to automation@flow-force.com in capital letters)" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"></textarea>
+                    <div class="text-right"><button class="rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-700"><i class="fas fa-comment-medical mr-1"></i>Add remark</button></div>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="space-y-4">
+            <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="mb-3 font-semibold text-slate-900"><i class="fas fa-file-pdf mr-2 text-red-500"></i>Vendor quote</h2>
+                {% for f in files %}
+                <div class="mb-2 flex items-center justify-between gap-2 rounded-lg border {% if forloop.first %}border-emerald-200 bg-emerald-50{% else %}border-slate-200{% endif %} p-2 text-sm">
+                    <div class="min-w-0">
+                        <div class="font-semibold text-slate-800">{{ f.label }}{% if forloop.first %} <span class="text-xs font-normal text-emerald-700">(latest)</span>{% endif %}</div>
+                        <div class="truncate text-xs text-slate-500" title="{{ f.filename }}">{{ f.filename }}</div>
+                        <div class="text-xs text-slate-400">{{ f.uploaded_by.full_name|default:f.uploaded_by.email|default:"" }} · {{ f.uploaded_at|date:"M j, Y H:i" }}{% if f.vendor_quote_no %} · {{ f.vendor_quote_no }}{% endif %}</div>
+                    </div>
+                    <div class="flex shrink-0 gap-1">
+                        <a href="{% url 'vendor_enquiries:file' enq.id f.id %}" target="_blank" class="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-white" title="View"><i class="fas fa-eye"></i></a>
+                        <a href="{% url 'vendor_enquiries:file' enq.id f.id %}?download=1" class="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-white" title="Download"><i class="fas fa-download"></i></a>
+                    </div>
+                </div>
+                {% empty %}
+                <p class="text-sm text-slate-500">No quote uploaded yet.{% if can_edit %} When the vendor replies, <a class="font-semibold text-blue-600" href="{% url 'vendor_enquiries:edit' enq.id %}">upload the quote</a>.{% endif %}</p>
+                {% endfor %}
+                {% if can_edit and files %}
+                <form method="post" action="{% url 'vendor_enquiries:revise' enq.id %}" enctype="multipart/form-data" class="mt-3 space-y-2 border-t border-slate-100 pt-3">
+                    {% csrf_token %}
+                    <div class="text-sm font-semibold text-slate-700">Upload revision</div>
+                    <input type="text" name="vendor_quote_no" value="{{ enq.vendor_quote_no }}" placeholder="Vendor Quote No. (if changed)" class="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm">
+                    <input type="file" name="quote_file" required accept=".pdf,.xlsx,.xls,.png,.jpg,.jpeg" class="block w-full text-sm">
+                    <button class="w-full rounded-lg bg-slate-800 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-900"><i class="fas fa-upload mr-1"></i>Upload as Revision {{ files|length }}</button>
+                </form>
+                {% endif %}
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="mb-3 font-semibold text-slate-900"><i class="fas fa-history mr-2 text-slate-400"></i>History</h2>
+                <ul class="space-y-2 text-xs">
+                    {% for l in logs %}
+                    <li><span class="font-semibold text-slate-700">{{ l.user.full_name|default:l.user.email|default:"System" }}</span> <span class="text-slate-600">{{ l.message }}</span><div class="text-slate-400">{{ l.created_at|date:"M j, Y H:i" }}</div></li>
+                    {% empty %}<li class="text-slate-500">—</li>{% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

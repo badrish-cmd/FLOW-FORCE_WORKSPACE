@@ -1,0 +1,68 @@
+{% extends 'base.html' %}
+{% block title %}{% if enq %}Edit enquiry{% else %}New enquiry{% endif %} - Vendor Enquiry Tracker{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-3xl">
+    <div class="mb-4">
+        <h1 class="text-2xl font-bold text-gray-900">{% if enq %}Edit {{ enq.enquiry_no }} · {{ enq.vendor_name }}{% else %}New vendor enquiry{% endif %}</h1>
+        <p class="text-sm text-slate-500">Add the enquiry before you mail the vendor. One row per vendor.</p>
+    </div>
+    {% with nav='new' %}{% include 'vendor_enquiries/_nav.html' %}{% endwith %}
+
+    <form method="post" enctype="multipart/form-data" class="space-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+        {% csrf_token %}
+        {% if form.non_field_errors %}<div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{% for e in form.non_field_errors %}{{ e }}{% endfor %}</div>{% endif %}
+        <div class="grid gap-4 md:grid-cols-2">
+            {% for f in form %}{% if f.name in "enquiry_no,customer_name" %}
+            <div><label class="mb-1 block text-sm font-semibold text-slate-700" for="{{ f.id_for_label }}">{{ f.label }}</label>{{ f }}{% for e in f.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}</div>
+            {% endif %}{% endfor %}
+        </div>
+        <div>
+            <label class="mb-1 block text-sm font-semibold text-slate-700" for="{{ form.vendor_name.id_for_label }}">Vendor</label>
+            {{ form.vendor_name }}
+            <datalist id="vendor-options">{% for n in vendor_names %}<option value="{{ n }}">{% endfor %}</datalist>
+            <p id="vendor-warning" class="mt-1 hidden text-xs font-semibold text-amber-700"><i class="fas fa-exclamation-triangle mr-1"></i>Vendor not found in Vendor Quotes, kindly create it.</p>
+            {% for e in form.vendor_name.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+        </div>
+        <div>
+            <label class="mb-1 block text-sm font-semibold text-slate-700" for="{{ form.initial_enquiry.id_for_label }}">Initial Enquiry</label>
+            {{ form.initial_enquiry }}
+        </div>
+        <div class="grid gap-4 md:grid-cols-3">
+            {% for f in form %}{% if f.name in "sent_on,status,vendor_quote_no" %}
+            <div><label class="mb-1 block text-sm font-semibold text-slate-700" for="{{ f.id_for_label }}">{{ f.label }}</label>{{ f }}{% for e in f.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}</div>
+            {% endif %}{% endfor %}
+        </div>
+        {% if not has_file %}
+        <div id="upload-box" class="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4">
+            <label class="mb-1 block text-sm font-semibold text-slate-700" for="{{ form.quote_file.id_for_label }}">{{ form.quote_file.label }}</label>
+            {{ form.quote_file }}
+            <p class="mt-1 text-xs text-slate-500">Needed for <b>Quote Got</b>. Uploading the quote sets the status to Quote Got and emails GM sir.</p>
+            {% for e in form.quote_file.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+        </div>
+        {% else %}
+        <p class="text-xs text-slate-500"><i class="fas fa-info-circle mr-1"></i>The quote is already uploaded. To upload a corrected quote from the vendor, use <b>Upload revision</b> on the enquiry page.</p>
+        {% endif %}
+        <div class="flex items-center justify-end gap-2 pt-2">
+            <a href="{% if enq %}{% url 'vendor_enquiries:detail' enq.id %}{% else %}{% url 'vendor_enquiries:list' %}{% endif %}" class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</a>
+            <button class="rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700"><i class="fas fa-save mr-1"></i>Save</button>
+        </div>
+    </form>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+(function () {
+    var names = Array.prototype.map.call(document.querySelectorAll('#vendor-options option'), function (o) { return o.value.trim().toLowerCase(); });
+    var input = document.getElementById('{{ form.vendor_name.id_for_label }}');
+    var warn = document.getElementById('vendor-warning');
+    function check() {
+        var v = (input.value || '').trim().toLowerCase();
+        warn.classList.toggle('hidden', !v || names.indexOf(v) !== -1);
+    }
+    input.addEventListener('input', check); input.addEventListener('change', check); check();
+    var status = document.getElementById('{{ form.status.id_for_label }}');
+    var file = document.getElementById('{{ form.quote_file.id_for_label }}');
+    if (file) file.addEventListener('change', function () { if (file.files.length) status.value = 'QUOTE_GOT'; });
+})();
+</script>
+{% endblock %}

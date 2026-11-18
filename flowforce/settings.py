@@ -67,6 +67,7 @@ INSTALLED_APPS = [
     'tables',
     'tasks',
     'vendor_quotes',
+    'vendor_enquiries',
     'tickets',
 ]
 
@@ -117,6 +118,7 @@ TEMPLATES = [
                 'tasks.context_processors.global_context',
                 'drawing_library.context_processors.drawing_library_context',
                 'vendor_quotes.context_processors.vendor_quotes',
+                'vendor_enquiries.context_processors.vendor_enquiries',
                 'tickets.context_processors.tickets_context',
             ],
         },
@@ -295,6 +297,10 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 524288000  # 500 MB
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 10000
 
 SITE_URL = os.getenv('SITE_URL', 'https://flowforceworkspace.cloud')
+
+# Vendor Enquiry Tracker emails (comma separated)
+VENDOR_ENQUIRY_UPLOAD_EMAILS = [e.strip() for e in os.getenv('VENDOR_ENQUIRY_UPLOAD_EMAILS', 'umapathi@flow-force.com').split(',') if e.strip()]
+VENDOR_ENQUIRY_REMARK_EMAILS = [e.strip() for e in os.getenv('VENDOR_ENQUIRY_REMARK_EMAILS', 'automation@flow-force.com').split(',') if e.strip()]
 
 # --------------------------------------------------
 # VENDOR QUOTES -> ZOHO BOOKS

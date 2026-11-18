@@ -107,6 +107,14 @@
                                 </a>
                             </li>
                             {% endif %}
+                            {% if can_use_vendor_enquiries %}
+                            <li>
+                                <a href="{% url 'vendor_enquiries:list' %}" class="nav-link {% if request.resolver_match.app_name == 'vendor_enquiries' %}active{% endif %}">
+                                    <i class="fas fa-envelope-open-text"></i>
+                                    <span>Vendor Enquiry Tracker</span>
+                                </a>
+                            </li>
+                            {% endif %}
                             {% if can_use_vendor_quotes %}
                             <li>
                                 <a href="{% url 'vendor_quotes:quote_list' %}" class="nav-link {% if request.resolver_match.app_name == 'vendor_quotes' %}active{% endif %}">
