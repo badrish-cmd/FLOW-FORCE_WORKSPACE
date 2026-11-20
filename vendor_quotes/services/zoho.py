@@ -29,6 +29,8 @@ SCOPES = ",".join([
     "ZohoBooks.estimates.READ",
     "ZohoBooks.estimates.UPDATE",
     "ZohoBooks.contacts.READ",
+    "ZohoCRM.modules.deals.READ",
+    "ZohoCRM.users.READ",
 ])
 
 
@@ -156,6 +158,27 @@ def api(method, path, params=None, payload=None):
     if data.get("code") not in (0, None):
         raise ZohoError(data.get("message") or f"Zoho error code {data.get('code')}")
     return data
+
+
+def crm_deal_owner(enquiry_no):
+    """Deal owner name of the FFI Zoho CRM deal whose Enquiry reference No. is enquiry_no.
+    Returns {"owner": name, "deal_id": id, "deal_name": ...} or None when no deal matches."""
+    conn = _token()
+    enq = (enquiry_no or "").strip()
+    if not enq:
+        return None
+    esc = enq.replace("(", "\\(").replace(")", "\\)").replace(",", "\\,")
+    params = {"criteria": f"(Enquiry_reference_No:equals:{esc})", "fields": "Owner,Deal_Name,Enquiry_reference_No"}
+    url = f"{conn.api_domain.rstrip('/')}/crm/v8/Deals/search?{urllib.parse.urlencode(params)}"
+    data = _http("GET", url, None, {"Authorization": f"Zoho-oauthtoken {conn.access_token}"})
+    deals = data.get("data") or []
+    norm = lambda x: (x or "").strip().upper()
+    exact = [d for d in deals if norm(d.get("Enquiry_reference_No")) == norm(enq)] or deals
+    if not exact:
+        return None
+    d = exact[0]
+    return {"owner": ((d.get("Owner") or {}).get("name") or "").strip(), "deal_id": str(d.get("id") or ""),
+            "deal_name": d.get("Deal_Name") or ""}
 
 
 def search_customers(text):

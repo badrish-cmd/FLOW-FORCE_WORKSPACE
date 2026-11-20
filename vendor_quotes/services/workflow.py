@@ -79,8 +79,9 @@ def _site():
     return getattr(settings, "SITE_URL", "https://flowforceworkspace.cloud").rstrip("/")
 
 
-def notify(users, title, message, quote=None, kind="SYSTEM"):
-    """Workspace bell + email (sent from DEFAULT_FROM_EMAIL via the existing EmailLog queue)."""
+def notify(users, title, message, quote=None, kind="SYSTEM", extra_emails=()):
+    """Workspace bell + email (sent from DEFAULT_FROM_EMAIL via the existing EmailLog queue).
+    extra_emails: plain addresses that also get the email (skipped if already one of the users)."""
     from tasks.models import EmailLog, Notification
     from tasks.tasks import send_email_log_task
     if quote:
@@ -98,6 +99,21 @@ def notify(users, title, message, quote=None, kind="SYSTEM"):
         log = EmailLog.objects.create(recipient_email=u.email, subject=f"[Flow-Force] {title}", body=html,
                                       email_type="VENDOR_QUOTE_MAIL", status="PENDING", max_retries=3)
         transaction.on_commit(lambda log_id=log.id: send_email_log_task.delay(log_id))
+    sent = {(u.email or "").strip().lower() for u in users if u and u.is_active}
+    for email in dict.fromkeys((e or "").strip().lower() for e in extra_emails):
+        if not email or email in sent:
+            continue
+        html = render_to_string("vendor_quotes/email_notice.html", {
+            "name": "Team", "title": title, "message": message, "quote": quote, "url": _site() + link,
+        })
+        log = EmailLog.objects.create(recipient_email=email, subject=f"[Flow-Force] {title}", body=html,
+                                      email_type="VENDOR_QUOTE_MAIL", status="PENDING", max_retries=3)
+        transaction.on_commit(lambda log_id=log.id: send_email_log_task.delay(log_id))
+
+
+def approved_extra_emails():
+    return list(getattr(settings, "VENDOR_QUOTE_APPROVED_EXTRA_EMAILS",
+                        ["sourcing@flow-force.com", "automation@flow-force.com"]))
 
 
 def check_ai_budget_alerts(quote=None):
@@ -331,7 +347,12 @@ def approve(rev, user, comment=""):
     q = rev.quote
     notify([q.created_by, rev.created_by], f"Quote approved: {q.enquiry.number}",
            f"{user.full_name or user.email} approved {q.vendor.name} {rev.label}. The Excel price table and the Zoho draft are being created.",
-           q)
+           q, extra_emails=approved_extra_emails())
+    try:
+        from sales_followup.services import sync_quote
+        transaction.on_commit(lambda: sync_quote(q.id))
+    except ImportError:
+        pass
     from ..tasks import run_approval_outputs
     transaction.on_commit(lambda: run_approval_outputs.delay(rev.id))
     return rev

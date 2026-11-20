@@ -68,6 +68,7 @@ INSTALLED_APPS = [
     'tasks',
     'vendor_quotes',
     'vendor_enquiries',
+    'sales_followup',
     'tickets',
 ]
 
@@ -119,6 +120,7 @@ TEMPLATES = [
                 'drawing_library.context_processors.drawing_library_context',
                 'vendor_quotes.context_processors.vendor_quotes',
                 'vendor_enquiries.context_processors.vendor_enquiries',
+                'sales_followup.context_processors.sales_followup',
                 'tickets.context_processors.tickets_context',
             ],
         },
@@ -301,6 +303,7 @@ SITE_URL = os.getenv('SITE_URL', 'https://flowforceworkspace.cloud')
 # Vendor Enquiry Tracker emails (comma separated)
 VENDOR_ENQUIRY_UPLOAD_EMAILS = [e.strip() for e in os.getenv('VENDOR_ENQUIRY_UPLOAD_EMAILS', 'umapathi@flow-force.com').split(',') if e.strip()]
 VENDOR_ENQUIRY_REMARK_EMAILS = [e.strip() for e in os.getenv('VENDOR_ENQUIRY_REMARK_EMAILS', 'automation@flow-force.com').split(',') if e.strip()]
+VENDOR_QUOTE_APPROVED_EXTRA_EMAILS = [e.strip() for e in os.getenv('VENDOR_QUOTE_APPROVED_EXTRA_EMAILS', 'sourcing@flow-force.com,automation@flow-force.com').split(',') if e.strip()]
 
 # --------------------------------------------------
 # VENDOR QUOTES -> ZOHO BOOKS

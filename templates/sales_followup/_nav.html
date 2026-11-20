@@ -1,0 +1,5 @@
+<div class="mb-4 flex flex-wrap items-center gap-2 text-sm">
+    <a href="{% url 'sales_followup:list' %}" class="rounded-lg px-3 py-1.5 font-semibold {% if nav == 'list' %}bg-slate-800 text-white{% else %}border border-slate-200 bg-white text-slate-700 hover:bg-slate-50{% endif %}"><i class="fas fa-list mr-1"></i>Approved quotes</a>
+    {% if sf_is_manager %}<a href="{% url 'sales_followup:monitor' %}" class="rounded-lg px-3 py-1.5 font-semibold {% if nav == 'monitor' %}bg-slate-800 text-white{% else %}border border-slate-200 bg-white text-slate-700 hover:bg-slate-50{% endif %}"><i class="fas fa-chart-bar mr-1"></i>Monitoring</a>{% endif %}
+    {% if sf_is_admin %}<a href="{% url 'sales_followup:access' %}" class="rounded-lg px-3 py-1.5 font-semibold {% if nav == 'access' %}bg-slate-800 text-white{% else %}border border-slate-200 bg-white text-slate-700 hover:bg-slate-50{% endif %}"><i class="fas fa-user-shield mr-1"></i>Team Access</a>{% endif %}
+</div>

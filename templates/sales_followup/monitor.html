@@ -1,0 +1,61 @@
+{% extends 'base.html' %}
+{% block title %}Monitoring - Sales Follow-up{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-7xl">
+    <h1 class="text-2xl font-bold text-gray-900">Sales Follow-up · Monitoring</h1>
+    <p class="mb-4 text-sm text-slate-500">How the sales team is responding and how follow-ups are being recorded.</p>
+    {% with nav='monitor' %}{% include 'sales_followup/_nav.html' %}{% endwith %}
+    <div class="mb-5 grid grid-cols-2 gap-3 md:grid-cols-7">
+        <a href="{% url 'sales_followup:list' %}?view=open" class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div class="text-[11px] font-semibold uppercase text-slate-500">Open</div><div class="text-2xl font-bold">{{ totals.open }}</div></a>
+        <a href="{% url 'sales_followup:list' %}?view=due" class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div class="text-[11px] font-semibold uppercase text-slate-500">Overdue</div><div class="text-2xl font-bold text-red-600">{{ totals.overdue }}</div></a>
+        <a href="{% url 'sales_followup:list' %}?view=due" class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div class="text-[11px] font-semibold uppercase text-slate-500">Due today</div><div class="text-2xl font-bold text-orange-600">{{ totals.due_today }}</div></a>
+        <a href="{% url 'sales_followup:list' %}?view=never" class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div class="text-[11px] font-semibold uppercase text-slate-500">No follow-up yet</div><div class="text-2xl font-bold text-amber-600">{{ totals.never }}</div></a>
+        <a href="{% url 'sales_followup:list' %}?view=WON" class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div class="text-[11px] font-semibold uppercase text-slate-500">PO received / Won</div><div class="text-2xl font-bold text-emerald-600">{{ totals.won }}</div></a>
+        <a href="{% url 'sales_followup:list' %}?view=LOST" class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div class="text-[11px] font-semibold uppercase text-slate-500">Lost</div><div class="text-2xl font-bold text-slate-500">{{ totals.lost }}</div></a>
+        <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div class="text-[11px] font-semibold uppercase text-slate-500">Follow-ups this week</div><div class="text-2xl font-bold text-blue-700">{{ totals.week_entries }}</div></div>
+    </div>
+
+    <div class="mb-5 overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div class="border-b border-slate-100 px-4 py-3 font-semibold text-slate-900"><i class="fas fa-user-tie mr-2 text-slate-400"></i>By deal owner</div>
+        <table class="min-w-full divide-y divide-slate-100 text-sm">
+            <thead class="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500"><tr><th class="px-4 py-2">Deal owner</th><th class="px-4 py-2 text-right">Quotes</th><th class="px-4 py-2 text-right">Open</th><th class="px-4 py-2 text-right">Overdue</th><th class="px-4 py-2 text-right">Due today</th><th class="px-4 py-2 text-right">No follow-up yet</th><th class="px-4 py-2 text-right">Reviewing</th><th class="px-4 py-2 text-right">Won</th><th class="px-4 py-2 text-right">Lost</th><th class="px-4 py-2">Last follow-up</th></tr></thead>
+            <tbody class="divide-y divide-slate-100">
+                {% for o in by_owner %}
+                <tr class="hover:bg-slate-50">
+                    <td class="px-4 py-2 font-semibold"><a class="text-blue-700 hover:underline" href="{% url 'sales_followup:list' %}?view=open&owner={{ o.deal_owner|urlencode }}">{{ o.deal_owner|default:"(not found)" }}</a></td>
+                    <td class="px-4 py-2 text-right">{{ o.total }}</td><td class="px-4 py-2 text-right">{{ o.open }}</td>
+                    <td class="px-4 py-2 text-right {% if o.overdue %}font-bold text-red-600{% endif %}">{{ o.overdue }}</td>
+                    <td class="px-4 py-2 text-right {% if o.due_today %}font-semibold text-orange-600{% endif %}">{{ o.due_today }}</td>
+                    <td class="px-4 py-2 text-right {% if o.never %}text-amber-600{% endif %}">{{ o.never }}</td>
+                    <td class="px-4 py-2 text-right">{{ o.reviewing }}</td><td class="px-4 py-2 text-right text-emerald-700">{{ o.won }}</td><td class="px-4 py-2 text-right">{{ o.lost }}</td>
+                    <td class="px-4 py-2 text-xs text-slate-500">{{ o.last|date:"M j, Y"|default:"—" }}</td>
+                </tr>
+                {% empty %}<tr><td colspan="10" class="px-4 py-6 text-center text-slate-500">No approved quotes yet.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="grid gap-5 lg:grid-cols-2">
+        <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div class="border-b border-slate-100 px-4 py-3 font-semibold text-slate-900"><i class="fas fa-user-check mr-2 text-slate-400"></i>Follow-ups recorded by</div>
+            <table class="min-w-full divide-y divide-slate-100 text-sm">
+                <thead class="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500"><tr><th class="px-4 py-2">Person</th><th class="px-4 py-2 text-right">Today</th><th class="px-4 py-2 text-right">This week</th><th class="px-4 py-2 text-right">This month</th><th class="px-4 py-2 text-right">Total</th><th class="px-4 py-2">Last entry</th></tr></thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for u in by_user %}
+                    <tr><td class="px-4 py-2 font-semibold">{{ u.created_by__full_name|default:u.created_by__email|default:"—" }}</td><td class="px-4 py-2 text-right">{{ u.today }}</td><td class="px-4 py-2 text-right">{{ u.week }}</td><td class="px-4 py-2 text-right">{{ u.month }}</td><td class="px-4 py-2 text-right">{{ u.total }}</td><td class="px-4 py-2 text-xs text-slate-500">{{ u.last|date:"M j, Y H:i" }}</td></tr>
+                    {% empty %}<tr><td colspan="6" class="px-4 py-6 text-center text-slate-500">No follow-ups recorded yet.</td></tr>{% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div class="mb-2 font-semibold text-slate-900"><i class="fas fa-stream mr-2 text-slate-400"></i>Latest follow-ups</div>
+            <ul class="divide-y divide-slate-100 text-sm">
+                {% for e in recent %}
+                <li class="py-2"><a href="{% url 'sales_followup:detail' e.followup_id %}" class="font-semibold text-blue-700 hover:underline">{{ e.followup.zoho_number|default:e.followup.enquiry_no }}</a> <span class="text-xs text-slate-500">{{ e.date|date:"M j" }} · {{ e.get_channel_display }} → {{ e.contacted }} · {{ e.created_by.full_name|default:e.created_by.email }}</span>
+                    {% if e.update_text %}<div class="truncate text-xs text-slate-600">{{ e.update_text }}</div>{% endif %}</li>
+                {% empty %}<li class="py-2 text-slate-500">—</li>{% endfor %}
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}

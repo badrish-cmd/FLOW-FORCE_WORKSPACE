@@ -68,6 +68,11 @@ urlpatterns = [
     ),
 
     path(
+        "sales-followup/",
+        include("sales_followup.urls", namespace="sales_followup")
+    ),
+
+    path(
         "vendor-enquiries/",
         include("vendor_enquiries.urls", namespace="vendor_enquiries")
     ),

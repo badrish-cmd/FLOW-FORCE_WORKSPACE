@@ -1,0 +1,9 @@
+<div class="grid gap-3 md:grid-cols-3">
+    <div><label class="mb-1 block text-xs font-semibold text-slate-600">Date</label><input type="date" name="date" value="{{ e_date|date:'Y-m-d' }}" required class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"></div>
+    <div class="md:col-span-2"><label class="mb-1 block text-xs font-semibold text-slate-600">Followed up with</label><input name="contacted" list="contact-options" value="{{ e_contacted }}" required placeholder="Salesperson / sales@flow-force.com" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"></div>
+    <div><label class="mb-1 block text-xs font-semibold text-slate-600">How</label><select name="channel" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">{% for k, l in channels %}<option value="{{ k }}" {% if k == e_channel %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+    <div><label class="mb-1 block text-xs font-semibold text-slate-600">Status now</label><select name="status" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">{% for k, l in entry_statuses %}<option value="{{ k }}" {% if k == e_status %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+    <div><label class="mb-1 block text-xs font-semibold text-slate-600">Next follow-up</label><input type="date" name="next_date" value="{{ e_next|date:'Y-m-d' }}" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"><p class="mt-0.5 text-[11px] text-slate-400">Empty = next day</p></div>
+    <div class="md:col-span-3"><label class="mb-1 block text-xs font-semibold text-slate-600">Update received</label><textarea name="update_text" rows="3" placeholder="What the sales team said the customer replied" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">{{ e_update }}</textarea></div>
+</div>
+<datalist id="contact-options">{% for c in contacts %}<option value="{{ c }}">{% endfor %}</datalist>

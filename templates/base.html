@@ -115,6 +115,14 @@
                                 </a>
                             </li>
                             {% endif %}
+                            {% if can_use_sales_followup %}
+                            <li>
+                                <a href="{% url 'sales_followup:list' %}" class="nav-link {% if request.resolver_match.app_name == 'sales_followup' %}active{% endif %}">
+                                    <i class="fas fa-handshake"></i>
+                                    <span>Sales Follow-up</span>
+                                </a>
+                            </li>
+                            {% endif %}
                             {% if can_use_vendor_quotes %}
                             <li>
                                 <a href="{% url 'vendor_quotes:quote_list' %}" class="nav-link {% if request.resolver_match.app_name == 'vendor_quotes' %}active{% endif %}">
