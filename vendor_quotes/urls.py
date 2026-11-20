@@ -11,6 +11,7 @@ urlpatterns = [
     path("enquiries/<int:pk>/delete/", views.enquiry_delete, name="enquiry_delete"),
     path("quotes/<int:pk>/", views.quote_detail, name="quote_detail"),
     path("quotes/<int:pk>/delete/", views.quote_delete, name="quote_delete"),
+    path("quotes/<int:pk>/edit/", views.quote_edit, name="quote_edit"),
     path("quotes/<int:pk>/file/", views.quote_file, name="quote_file"),
     path("quotes/<int:pk>/ai-read/", views.quote_ai_read, name="quote_ai_read"),
     path("quotes/<int:pk>/ai-status/", views.quote_ai_status, name="quote_ai_status"),

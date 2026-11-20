@@ -80,6 +80,9 @@
             {% if can_discard %}
             <button type="button" @click="openModal('discard_revision')" class="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50" title="Discard this revision"><i class="fas fa-trash mr-1.5"></i>Discard revision</button>
             {% endif %}
+            {% if can_edit_details %}
+            <a href="{% url 'vendor_quotes:quote_edit' quote.id %}" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50" title="Correct enquiry no., customer, vendor, quote no. or the uploaded file"><i class="fas fa-pen mr-1.5"></i>Edit details</a>
+            {% endif %}
             {% if can_delete %}
             <button type="button" @click="openModal('delete_quote')" class="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50" title="Delete this quote"><i class="fas fa-trash mr-1.5"></i>Delete quote</button>
             {% elif has_approved_or_void %}

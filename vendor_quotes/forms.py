@@ -75,3 +75,23 @@ class MasterUploadForm(forms.Form):
         if not f.name.lower().endswith((".xlsx", ".xlsm")):
             raise forms.ValidationError("Please upload an .xlsx workbook.")
         return f
+
+
+class QuoteDetailsForm(forms.Form):
+    """Correct a wrongly uploaded vendor quote."""
+    enquiry_number = forms.CharField(max_length=100, label="Enquiry no.",
+                                     widget=forms.TextInput(attrs={"class": INPUT, "list": "enquiry-options"}))
+    customer_name = forms.CharField(max_length=255, label="Customer", widget=forms.TextInput(attrs={"class": INPUT}))
+    vendor = forms.ModelChoiceField(queryset=Vendor.objects.all().order_by("name"), widget=forms.Select(attrs={"class": INPUT}))
+    vendor_quote_no = forms.CharField(max_length=100, required=False, label="Vendor quote no.",
+                                      widget=forms.TextInput(attrs={"class": INPUT}))
+    quote_file = forms.FileField(required=False, label="Replace the vendor quote file (optional)",
+                                 widget=forms.ClearableFileInput(attrs={"class": "block w-full text-sm", "accept": ".pdf,.xlsx,.xls,.png,.jpg,.jpeg"}))
+
+    def clean_quote_file(self):
+        f = self.cleaned_data.get("quote_file")
+        if f:
+            import os
+            if os.path.splitext(f.name)[1].lower() not in (".pdf", ".xlsx", ".xls", ".png", ".jpg", ".jpeg"):
+                raise forms.ValidationError("Upload a PDF, Excel or image file.")
+        return f

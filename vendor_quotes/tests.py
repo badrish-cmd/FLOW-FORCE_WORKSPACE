@@ -1843,3 +1843,92 @@ class ZohoDraftQuotationFieldsTests(TestCase):
             self.rev.line_details,
             {"1": {"quote_description": "Supply of Rotary Valve unit - A", "commodity_code": "84818090"}}
         )
+
+
+@override_settings(CELERY_TASK_ALWAYS_EAGER=True, EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+                   ZOHO_CLIENT_ID="", ZOHO_CLIENT_SECRET="")
+class QuoteEditFromListTests(TestCase):
+    def setUp(self):
+        dept = Department.objects.create(name="VQ Edit", slug="vq-edit")
+        mk = lambda e, role, n: EmployeeUser.objects.create_user(email=e, password="x", role=role, department=dept,
+                                                                 full_name=n, status="APPROVED")
+        self.gm = mk("gm@example.com", "SUPER_ADMIN", "Umapathi")
+        self.admin = mk("ib@example.com", "ADMIN", "Md Ibrahim")
+        self.other_admin = mk("ad2@example.com", "ADMIN", "Other Admin")
+        self.emp = mk("emp@example.com", "EMPLOYEE", "Emp")
+        self.v1 = Vendor.objects.create(name="DMN Westinghouse", code="DMN", currency="EUR", default_exchange_rate=18000)
+        self.v2 = Vendor.objects.create(name="Rotolok", code="ROT", currency="GBP", default_exchange_rate=21000)
+        self.quote, self.rev = workflow.create_quote(
+            enquiry_number="ENQ/2026/11/2811", customer_name="PT. Takasago", vendor=self.v1,
+            vendor_quote_no="41260997", quote_file=SimpleUploadedFile("q.pdf", b"%PDF old"), user=self.admin)
+
+    def post_edit(self, user, **extra):
+        self.client.force_login(user)
+        data = {"enquiry_number": "ENQ/2026/11/2811", "customer_name": "PT. Takasago", "vendor": self.v1.id,
+                "vendor_quote_no": "41260997", "next": "list"}
+        data.update(extra)
+        return self.client.post(reverse("vendor_quotes:quote_edit", args=[self.quote.id]), data)
+
+    def test_list_shows_edit_and_delete_buttons(self):
+        self.client.force_login(self.admin)
+        r = self.client.get(reverse("vendor_quotes:quote_list"))
+        self.assertContains(r, reverse("vendor_quotes:quote_edit", args=[self.quote.id]))
+        self.assertContains(r, reverse("vendor_quotes:quote_delete", args=[self.quote.id]))
+        # another admin who didn't upload it (not an approver) gets no buttons
+        self.client.force_login(self.other_admin)
+        r = self.client.get(reverse("vendor_quotes:quote_list"))
+        self.assertNotContains(r, reverse("vendor_quotes:quote_edit", args=[self.quote.id]))
+
+    def test_edit_corrects_details_and_sheet_header(self):
+        r = self.post_edit(self.admin, enquiry_number="enq/2026/11/2899", customer_name="PT. Correct Customer",
+                           vendor=self.v2.id, vendor_quote_no="RV-1",
+                           quote_file=SimpleUploadedFile("new.pdf", b"%PDF new"))
+        self.assertRedirects(r, reverse("vendor_quotes:quote_list"), fetch_redirect_response=False)
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.enquiry.number, "ENQ/2026/11/2899")
+        self.assertEqual(self.quote.enquiry.customer_name, "PT. Correct Customer")
+        self.assertEqual(self.quote.vendor, self.v2)
+        self.assertEqual(self.quote.vendor_quote_no, "RV-1")
+        with self.quote.quote_file.open("rb") as fh:
+            self.assertEqual(fh.read(), b"%PDF new")
+        self.assertEqual(self.quote.ai_status, VendorQuote.AI_NOT_STARTED)
+        self.assertFalse(Enquiry.objects.filter(number="ENQ/2026/11/2811").exists())   # empty old enquiry removed
+        self.rev.refresh_from_db()
+        sh = sheet_svc.first_sheet(self.rev.snapshot)
+        vals = {sheet_svc.cell_text(sheet_svc.get_cell(sh, r, 1)): sheet_svc.cell_text(sheet_svc.get_cell(sh, r, 2))
+                for r in range(1, 6)}
+        self.assertEqual(vals["Enquiry No."], "ENQ/2026/11/2899")
+        self.assertEqual(vals["Customer"], "PT. Correct Customer")
+        self.assertEqual(vals["Vendor"], "Rotolok")
+        self.assertEqual(vals["Vendor Quote No."], "RV-1")
+        self.assertTrue(self.quote.events.filter(action="details_edited").exists())
+
+    def test_employee_and_other_admin_cannot_edit(self):
+        r = self.post_edit(self.emp, vendor_quote_no="X")
+        self.assertEqual(r.status_code, 403)
+        self.post_edit(self.other_admin, vendor_quote_no="X")
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.vendor_quote_no, "41260997")
+
+    def test_approved_quote_locked(self):
+        QuoteRevision.objects.filter(pk=self.rev.pk).update(status=QuoteRevision.STATUS_APPROVED)
+        self.post_edit(self.gm, vendor_quote_no="X")
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.vendor_quote_no, "41260997")
+        self.client.force_login(self.gm)
+        r = self.client.get(reverse("vendor_quotes:quote_list"))
+        self.assertNotContains(r, reverse("vendor_quotes:quote_edit", args=[self.quote.id]))
+        self.assertContains(r, "fa-lock")
+        self.client.post(reverse("vendor_quotes:quote_delete", args=[self.quote.id]), {"next": "list"})
+        self.assertTrue(VendorQuote.objects.filter(pk=self.quote.pk).exists())
+
+    def test_delete_from_list_returns_to_list(self):
+        self.client.force_login(self.admin)
+        r = self.client.post(reverse("vendor_quotes:quote_delete", args=[self.quote.id]), {"next": "list"})
+        self.assertRedirects(r, reverse("vendor_quotes:quote_list"), fetch_redirect_response=False)
+        self.assertFalse(VendorQuote.objects.filter(pk=self.quote.pk).exists())
+
+    def test_edit_page_and_detail_render(self):
+        self.client.force_login(self.admin)
+        self.assertContains(self.client.get(reverse("vendor_quotes:quote_edit", args=[self.quote.id])), "Edit upload details")
+        self.assertContains(self.client.get(reverse("vendor_quotes:quote_detail", args=[self.quote.id])), "Edit details")

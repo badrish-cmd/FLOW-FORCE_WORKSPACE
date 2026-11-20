@@ -726,6 +726,110 @@ def delete_quote(quote, user):
     return enquiry_deleted
 
 
+def _locked_reason(quote, revs=None):
+    revs = revs if revs is not None else list(quote.revisions.all())
+    if any(r.status in (QuoteRevision.STATUS_APPROVED, QuoteRevision.STATUS_VOID) for r in revs):
+        return "Approved quotes can't be edited or deleted - use Revise or Void on the quote page."
+    return ""
+
+
+def can_edit_quote_details(quote, user, revs=None):
+    """Same rules as delete: nothing approved/void yet; creator (with access) or an approver;
+    while waiting for the GM only approvers."""
+    if not user.is_authenticated or not can_edit(user):
+        return False
+    revs = revs if revs is not None else list(quote.revisions.all())
+    if _locked_reason(quote, revs):
+        return False
+    if any(r.status == QuoteRevision.STATUS_IN_REVIEW for r in revs):
+        return can_approve(user)
+    return can_approve(user) or quote.created_by_id == user.id
+
+
+def _set_sheet_details(snapshot, details):
+    """Write Enquiry No./Customer/Vendor/Vendor Quote No. into the detail cells of a standard sheet."""
+    from .sheet import cell_text, get_cell
+    sheet = first_sheet(snapshot or {})
+    if not sheet:
+        return False
+    cells = sheet.setdefault("cellData", {})
+    changed = False
+    for r in range(1, 8):
+        label = cell_text(get_cell(sheet, r, 1)).lower()
+        if label in details:
+            row = cells.setdefault(str(r), {})
+            cell = dict(row.get("2") or row.get(2) or {})
+            if cell.get("v") != details[label]:
+                cell.pop("p", None)
+                cell["v"] = details[label]
+                row.pop(2, None)
+                row["2"] = cell
+                changed = True
+    return changed
+
+
+@transaction.atomic
+def update_quote_details(quote, user, *, enquiry_number, customer_name, vendor, vendor_quote_no, new_file=None):
+    """Correct a wrongly uploaded quote: enquiry no., customer, vendor, vendor quote no., the PDF."""
+    if not can_edit_quote_details(quote, user):
+        raise WorkflowError(_locked_reason(quote) or "You don't have permission to edit this quote.")
+    quote = VendorQuote.objects.select_for_update().select_related("enquiry", "vendor").get(pk=quote.pk)
+    enquiry_number = (enquiry_number or "").strip().upper()
+    customer_name = (customer_name or "").strip()
+    if not enquiry_number:
+        raise WorkflowError("Enquiry no. is required.")
+    changes = []
+    old_enquiry = quote.enquiry
+    if enquiry_number != old_enquiry.number:
+        enquiry, _ = Enquiry.objects.get_or_create(
+            number=enquiry_number, defaults={"customer_name": customer_name, "created_by": user})
+        changes.append(f"Enquiry {old_enquiry.number} -> {enquiry.number}")
+        quote.enquiry = enquiry
+    else:
+        enquiry = old_enquiry
+    if customer_name and enquiry.customer_name != customer_name:
+        changes.append(f"Customer {enquiry.customer_name or '-'} -> {customer_name}")
+        enquiry.customer_name = customer_name
+        enquiry.save(update_fields=["customer_name", "updated_at"])
+    if vendor.id != quote.vendor_id:
+        changes.append(f"Vendor {quote.vendor.name} -> {vendor.name}")
+        quote.vendor = vendor
+    vendor_quote_no = (vendor_quote_no or "").strip()
+    if vendor_quote_no != quote.vendor_quote_no:
+        changes.append(f"Vendor quote no. {quote.vendor_quote_no or '-'} -> {vendor_quote_no or '-'}")
+        quote.vendor_quote_no = vendor_quote_no
+    if new_file:
+        old_name = quote.quote_file.name if quote.quote_file else ""
+        if quote.quote_file:
+            quote.quote_file.delete(save=False)
+        quote.quote_file = new_file
+        quote.ai_status = VendorQuote.AI_NOT_STARTED
+        quote.ai_error = ""
+        changes.append(f"Vendor quote file replaced ({os.path.basename(old_name) or 'none'} -> {os.path.basename(new_file.name)})"
+                       " - click Read with AI again")
+    if not changes:
+        return quote, []
+    quote.save()
+
+    details = {"enquiry no.": enquiry.number, "customer": enquiry.customer_name,
+               "vendor": quote.vendor.name, "vendor quote no.": quote.vendor_quote_no}
+    for rev in quote.revisions.filter(status__in=[QuoteRevision.STATUS_DRAFT, QuoteRevision.STATUS_SENT_BACK,
+                                                  QuoteRevision.STATUS_IN_REVIEW]):
+        snap = rev.snapshot or {}
+        if _set_sheet_details(snap, details):
+            rev.snapshot = snap
+            rev.save(update_fields=["snapshot", "updated_at"])
+
+    if old_enquiry.pk != enquiry.pk and not old_enquiry.quotes.exists():
+        log_workspace_activity(user, "DELETE", f"Deleted enquiry {old_enquiry.number} - no quotes left after an edit")
+        old_enquiry.delete()
+
+    msg = "Upload details corrected: " + "; ".join(changes)
+    event(quote, "details_edited", msg, user)
+    log_workspace_activity(user, "UPDATE", f"{quote.enquiry.number} {quote.vendor.name}: {msg}")
+    return quote, changes
+
+
 def can_discard_revision(rev, user):
     """
     Only the LATEST revision, only when number > 0 and status is DRAFT or SENT_BACK.

@@ -17,7 +17,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from .forms import MasterUploadForm, QuoteCreateForm, VendorForm
+from .forms import MasterUploadForm, QuoteCreateForm, QuoteDetailsForm, VendorForm
 from .models import (AIRequestLog, Enquiry, MasterSheet, QuoteRevision, Vendor, VendorMasterFile, VendorQuote,
                      ZohoConnection)
 from .services import workflow, zoho
@@ -69,7 +69,8 @@ def quote_list(request):
         cur = revs[0] if revs else None
         if status and (not cur or cur.status != status):
             continue
-        rows.append({"quote": quote, "rev": cur})
+        rows.append({"quote": quote, "rev": cur, "can_change": workflow.can_edit_quote_details(quote, request.user, revs),
+                     "locked": bool(workflow._locked_reason(quote, revs))})
     waiting = [r for r in rows if r["rev"] and r["rev"].status == QuoteRevision.STATUS_IN_REVIEW]
     page = Paginator(rows, 25).get_page(request.GET.get("page"))
     counts = dict(QuoteRevision.objects.values_list("status").annotate(n=Count("id")))
@@ -225,7 +226,7 @@ def quote_detail(request, pk):
         zoho_url=zoho.estimate_url(rev.zoho_estimate_id) if rev.zoho_estimate_id else "",
         zoho_connected=ZohoConnection.get().is_connected,
         ai_lines_count=ai_lines_count, ai_warnings=ai_warnings, ai_quote_total=ai_quote_total,
-        can_delete=can_delete, has_approved_or_void=has_approved_or_void,
+        can_delete=can_delete, can_edit_details=workflow.can_edit_quote_details(quote, request.user), has_approved_or_void=has_approved_or_void,
         can_discard=can_discard, can_void=can_void, can_revise=can_revise,
         next_revision_number=next_revision_number,
         quote_ai_count=quote_ai_count, quote_ai_tokens=quote_ai_tokens,
@@ -596,6 +597,9 @@ def quote_delete(request, pk):
     try:
         enquiry_id = quote.enquiry_id
         enquiry_deleted = workflow.delete_quote(quote, request.user)
+        if request.POST.get("next") == "list":
+            messages.success(request, f"Deleted {quote.enquiry.number} · {quote.vendor.name}.")
+            return redirect("vendor_quotes:quote_list")
         if enquiry_deleted:
             messages.success(request, "Vendor quote and empty enquiry deleted.")
             return redirect("vendor_quotes:quote_list")
@@ -604,6 +608,35 @@ def quote_delete(request, pk):
     except workflow.WorkflowError as e:
         messages.error(request, str(e))
         return redirect("vendor_quotes:quote_detail", pk=pk)
+
+
+@login_required
+def quote_edit(request, pk):
+    if (resp := _guard(request)):
+        return resp
+    quote = get_object_or_404(VendorQuote.objects.select_related("enquiry", "vendor"), pk=pk)
+    if not workflow.can_edit_quote_details(quote, request.user):
+        messages.error(request, workflow._locked_reason(quote) or "You don't have permission to edit this quote.")
+        return redirect("vendor_quotes:quote_detail", pk=pk)
+    initial = {"enquiry_number": quote.enquiry.number, "customer_name": quote.enquiry.customer_name,
+               "vendor": quote.vendor, "vendor_quote_no": quote.vendor_quote_no}
+    form = QuoteDetailsForm(request.POST or None, request.FILES or None, initial=initial)
+    if request.method == "POST" and form.is_valid():
+        d = form.cleaned_data
+        try:
+            quote, changes = workflow.update_quote_details(
+                quote, request.user, enquiry_number=d["enquiry_number"], customer_name=d["customer_name"],
+                vendor=d["vendor"], vendor_quote_no=d["vendor_quote_no"], new_file=d.get("quote_file"))
+        except workflow.WorkflowError as e:
+            form.add_error(None, str(e))
+        else:
+            messages.success(request, ("Saved: " + "; ".join(changes)) if changes else "Nothing changed.")
+            if request.POST.get("next") == "list":
+                return redirect("vendor_quotes:quote_list")
+            return redirect("vendor_quotes:quote_detail", pk=quote.pk)
+    return render(request, "vendor_quotes/quote_edit.html", _ctx(
+        request, form=form, quote=quote, next=request.GET.get("next") or request.POST.get("next", ""),
+        enquiries=Enquiry.objects.order_by("-created_at").values_list("number", "customer_name")[:300]))
 
 
 @login_required

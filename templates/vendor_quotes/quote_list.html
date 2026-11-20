@@ -53,7 +53,7 @@
             <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
                     <th class="px-4 py-3">Enquiry</th><th class="px-4 py-3">Customer</th><th class="px-4 py-3">Vendor</th>
-                    <th class="px-4 py-3">Version</th><th class="px-4 py-3">Status</th><th class="px-4 py-3">Zoho quotation</th><th class="px-4 py-3">Updated</th>
+                    <th class="px-4 py-3">Version</th><th class="px-4 py-3">Status</th><th class="px-4 py-3">Zoho quotation</th><th class="px-4 py-3">Updated</th><th class="px-4 py-3 text-right">Actions</th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
@@ -66,9 +66,20 @@
                     <td class="px-4 py-3">{% include 'vendor_quotes/_status.html' with status=row.rev.status %}</td>
                     <td class="px-4 py-3 text-slate-700">{{ row.rev.zoho_estimate_number|default:"—" }}</td>
                     <td class="px-4 py-3 text-xs text-slate-500">{{ row.rev.updated_at|date:"M j, Y H:i" }}</td>
+                    <td class="whitespace-nowrap px-4 py-3 text-right" onclick="event.stopPropagation()">
+                        {% if row.can_change %}
+                        <a href="{% url 'vendor_quotes:quote_edit' row.quote.id %}?next=list" class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100" title="Edit upload details"><i class="fas fa-pen text-xs"></i></a>
+                        <form method="post" action="{% url 'vendor_quotes:quote_delete' row.quote.id %}" class="inline" onsubmit="return confirm('Delete {{ row.quote.enquiry.number|escapejs }} · {{ row.quote.vendor.name|escapejs }} and its uploaded file and price sheet? This cannot be undone.')">
+                            {% csrf_token %}<input type="hidden" name="next" value="list">
+                            <button class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 text-red-600 hover:bg-red-50" title="Delete quote"><i class="fas fa-trash text-xs"></i></button>
+                        </form>
+                        {% elif row.locked %}
+                        <span class="inline-flex h-8 w-8 items-center justify-center text-slate-300" title="Approved quotes can't be edited or deleted - open it and use Revise or Void"><i class="fas fa-lock text-xs"></i></span>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="7" class="px-4 py-12 text-center text-slate-500">
+                <tr><td colspan="8" class="px-4 py-12 text-center text-slate-500">
                     <i class="fas fa-file-invoice-dollar mb-2 block text-3xl text-slate-300"></i>
                     No vendor quotes yet. <a href="{% url 'vendor_quotes:quote_create' %}" class="font-semibold text-blue-600">Add the first one</a>.
                 </td></tr>
