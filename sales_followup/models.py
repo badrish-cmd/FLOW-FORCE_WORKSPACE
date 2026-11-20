@@ -55,12 +55,6 @@ class SalesFollowup(models.Model):
     zoho_number = models.CharField(max_length=60, blank=True)
     approved_at = models.DateTimeField(null=True, blank=True)
 
-    deal_owner = models.CharField(max_length=150, blank=True)
-    deal_owner_manual = models.BooleanField(default=False, help_text="Typed by hand - CRM refresh won't overwrite it")
-    crm_deal_id = models.CharField(max_length=40, blank=True)
-    crm_deal_name = models.CharField(max_length=255, blank=True)
-    crm_checked_at = models.DateTimeField(null=True, blank=True)
-    crm_error = models.CharField(max_length=255, blank=True)
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_WAITING, db_index=True)
     next_followup_date = models.DateField(null=True, blank=True, db_index=True)

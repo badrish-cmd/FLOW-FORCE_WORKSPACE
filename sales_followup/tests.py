@@ -10,7 +10,7 @@ from auth_app.models import EmployeeUser
 from employee_management.models import Department
 from tasks.models import EmailLog
 from vendor_quotes.models import QuoteRevision, Vendor
-from vendor_quotes.services import workflow, zoho
+from vendor_quotes.services import workflow
 
 from . import services
 from .models import FollowupEntry, SalesFollowup
@@ -148,37 +148,11 @@ class SalesFollowupTests(TestCase):
         with self.assertRaises(services.FollowupError):
             services.add_entry(fu, {"contacted": " ", "status": "FOLLOWED_UP"}, self.chaithra)
 
-    # ---------------------------------------------------------------- CRM
-    def test_deal_owner_from_crm_and_manual(self):
-        fu = self.fu()
-        with mock.patch.object(zoho, "crm_deal_owner", return_value={"owner": "Marketing", "deal_id": "47", "deal_name": "Filter"}) as m:
-            self.assertTrue(services.refresh_owner(fu))
-            m.assert_called_with("ENQ/2026/10/2717")
-        fu.refresh_from_db()
-        self.assertEqual(fu.deal_owner, "Marketing")
-        self.login(self.chaithra)
-        self.client.post(reverse("sales_followup:set_owner", args=[fu.id]), {"deal_owner": "Esthie"})
-        fu.refresh_from_db()
-        self.assertEqual(fu.deal_owner, "Esthie")
-        self.assertTrue(fu.deal_owner_manual)
-        with mock.patch.object(zoho, "crm_deal_owner") as m:
-            services.refresh_owner(fu)
-            m.assert_not_called()        # typed name isn't overwritten by the background refresh
-
-    def test_crm_not_connected_message(self):
-        fu = self.fu()
-        with mock.patch.object(zoho, "crm_deal_owner", side_effect=zoho.ZohoError("OAUTH_SCOPE_MISMATCH")):
-            self.assertFalse(services.refresh_owner(fu))
-        fu.refresh_from_db()
-        self.assertIn("Connect Zoho again", fu.crm_error)
-
     def test_monitor_counts(self):
         fu = self.fu()
-        SalesFollowup.objects.filter(pk=fu.pk).update(deal_owner="Marketing")
         services.add_entry(fu, {"contacted": "x", "status": "FOLLOWED_UP"}, self.chaithra)
         self.login(self.mgr)
         r = self.client.get(reverse("sales_followup:monitor"))
-        self.assertContains(r, "Marketing")
         self.assertContains(r, "Chaithra")
         self.assertEqual(r.context["totals"]["week_entries"], 1)
 

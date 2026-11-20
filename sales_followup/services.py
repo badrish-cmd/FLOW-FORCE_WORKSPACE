@@ -1,4 +1,4 @@
-"""Access, syncing approved quotes, CRM deal owners and follow-up entries."""
+"""Access, syncing approved quotes and follow-up entries."""
 import logging
 from datetime import timedelta
 
@@ -108,14 +108,7 @@ def sync_quote(quote_id):
     quote = VendorQuote.objects.select_related("enquiry", "vendor").filter(pk=quote_id).first()
     if not quote:
         return None
-    fu = _apply(quote, list(quote.revisions.order_by("-number")))
-    if fu and not fu.deal_owner and not fu.crm_checked_at:
-        try:
-            from .tasks import refresh_deal_owners
-            refresh_deal_owners.delay([fu.id])
-        except Exception as e:  # no broker in some environments - the list page retries later
-            logger.info("deal owner refresh not queued: %s", e)
-    return fu
+    return _apply(quote, list(quote.revisions.order_by("-number")))
 
 
 def sync_all():
@@ -145,44 +138,6 @@ def sync_all():
         _apply(q, rs)
         changed += 1
     return changed
-
-
-# ---------------------------------------------------------------- CRM deal owner
-
-def refresh_owner(fu, force=False):
-    """Look up the CRM deal owner by enquiry no. Returns True when found."""
-    from vendor_quotes.services import zoho
-    if fu.deal_owner_manual and not force:
-        return bool(fu.deal_owner)
-    try:
-        deal = zoho.crm_deal_owner(fu.enquiry_no)
-    except zoho.ZohoError as e:
-        msg = str(e)
-        if "scope" in msg.lower() or "oauth" in msg.lower() or "invalid" in msg.lower():
-            msg = "Zoho CRM not allowed yet - an admin needs to click Connect Zoho again (Vendor Quotes > Zoho Books)."
-        SalesFollowup.objects.filter(pk=fu.pk).update(crm_checked_at=timezone.now(), crm_error=msg[:255])
-        return False
-    fields = {"crm_checked_at": timezone.now(), "crm_error": ""}
-    if deal:
-        fields.update(deal_owner=deal["owner"], crm_deal_id=deal["deal_id"], crm_deal_name=deal["deal_name"][:255],
-                      deal_owner_manual=False)
-    else:
-        fields["crm_error"] = "No CRM deal found with this enquiry no."
-    SalesFollowup.objects.filter(pk=fu.pk).update(**fields)
-    return bool(deal)
-
-
-def needs_owner_qs():
-    stale = timezone.now() - timedelta(hours=12)
-    from django.db.models import Q
-    return SalesFollowup.objects.filter(deal_owner_manual=False).filter(
-        Q(deal_owner="") & (Q(crm_checked_at__isnull=True) | Q(crm_checked_at__lt=stale)))
-
-
-def set_owner(fu, name, user):
-    name = (name or "").strip()
-    SalesFollowup.objects.filter(pk=fu.pk).update(deal_owner=name, deal_owner_manual=bool(name))
-    log(fu, f"Deal owner set to {name or '-'} by hand", user)
 
 
 # ---------------------------------------------------------------- entries

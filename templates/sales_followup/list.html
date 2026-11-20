@@ -7,15 +7,12 @@
             <h1 class="text-2xl font-bold text-gray-900">Sales Follow-up</h1>
             <p class="text-sm text-slate-500">Approved quotes — record each follow-up with the sales team and the update from the customer.</p>
         </div>
-        {% if sf_is_manager %}
-        <form method="post" action="{% url 'sales_followup:refresh_crm' %}">{% csrf_token %}<button class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"><i class="fas fa-sync mr-1"></i>Load deal owners from CRM</button></form>
-        {% endif %}
     </div>
     {% with nav='list' %}{% include 'sales_followup/_nav.html' %}{% endwith %}
 
     <div class="mb-4 grid grid-cols-2 gap-3 md:grid-cols-6">
         {% for key, label, n, color in cards %}
-        <a href="?view={{ key }}{% if q %}&q={{ q|urlencode }}{% endif %}{% if owner %}&owner={{ owner|urlencode }}{% endif %}" class="rounded-xl border bg-white p-3 shadow-sm hover:border-slate-400 {% if view == key %}border-slate-800{% else %}border-slate-200{% endif %}">
+        <a href="?view={{ key }}{% if q %}&q={{ q|urlencode }}{% endif %}" class="rounded-xl border bg-white p-3 shadow-sm hover:border-slate-400 {% if view == key %}border-slate-800{% else %}border-slate-200{% endif %}">
             <div class="text-[11px] font-semibold uppercase text-slate-500">{{ label }}</div>
             <div class="text-2xl font-bold {{ color }}">{{ n }}</div>
         </a>
@@ -26,26 +23,21 @@
         <input type="hidden" name="view" value="{{ view }}">
         <div class="relative min-w-[260px] flex-1">
             <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
-            <input type="text" name="q" value="{{ q }}" placeholder="Search ENQ no., quote no., customer, deal owner" class="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm">
+            <input type="text" name="q" value="{{ q }}" placeholder="Search ENQ no., quote no., customer" class="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm">
         </div>
-        <select name="owner" class="rounded-lg border border-slate-300 px-3 py-2 text-sm" onchange="this.form.submit()">
-            <option value="">All deal owners</option>
-            {% for o in owners %}<option value="{{ o }}" {% if owner == o %}selected{% endif %}>{{ o }}</option>{% endfor %}
-        </select>
         <button class="rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white">Search</button>
     </form>
 
     <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
         <table class="min-w-full divide-y divide-slate-200 text-sm">
             <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                <tr><th class="px-4 py-3">Quotation</th><th class="px-4 py-3">Enquiry / Customer</th><th class="px-4 py-3">Deal owner</th><th class="px-4 py-3">Status</th><th class="px-4 py-3">Approved</th><th class="px-4 py-3">Last follow-up</th><th class="px-4 py-3">Next follow-up</th></tr>
+                <tr><th class="px-4 py-3">Quotation</th><th class="px-4 py-3">Enquiry / Customer</th><th class="px-4 py-3">Status</th><th class="px-4 py-3">Approved</th><th class="px-4 py-3">Last follow-up</th><th class="px-4 py-3">Next follow-up</th></tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
                 {% for f in page %}
                 <tr class="cursor-pointer hover:bg-slate-50" onclick="location.href='{% url 'sales_followup:detail' f.id %}'">
                     <td class="px-4 py-3"><div class="font-semibold text-slate-900">{{ f.zoho_number|default:"(Zoho no. pending)" }}</div><div class="text-xs text-slate-400">{{ f.revision_label }}</div></td>
                     <td class="px-4 py-3"><div class="font-semibold text-slate-800">{{ f.enquiry_no }}</div><div class="text-xs text-slate-500">{{ f.customer_name }}</div></td>
-                    <td class="px-4 py-3 text-slate-700">{{ f.deal_owner|default:"—" }}</td>
                     <td class="px-4 py-3">{% include 'sales_followup/_status.html' with status=f.status %}</td>
                     <td class="px-4 py-3 text-xs text-slate-500">{{ f.approved_at|date:"M j, Y" }}</td>
                     <td class="px-4 py-3 text-xs text-slate-500">{% if f.last_followup_date %}{{ f.last_followup_date|date:"M j, Y" }} <span class="text-slate-400">({{ f.followup_count }})</span>{% else %}<span class="text-amber-600">None yet</span>{% endif %}</td>
@@ -58,7 +50,7 @@
                     </td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="7" class="px-4 py-12 text-center text-slate-500"><i class="fas fa-clipboard-check mb-2 block text-3xl text-slate-300"></i>Nothing here.</td></tr>
+                <tr><td colspan="6" class="px-4 py-12 text-center text-slate-500"><i class="fas fa-clipboard-check mb-2 block text-3xl text-slate-300"></i>Nothing here.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -67,8 +59,8 @@
     <div class="mt-4 flex items-center justify-between text-sm text-slate-600">
         <span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
         <div class="flex gap-2">
-            {% if page.has_previous %}<a class="rounded-lg border px-3 py-1.5" href="?page={{ page.previous_page_number }}&view={{ view }}&q={{ q|urlencode }}&owner={{ owner|urlencode }}">Previous</a>{% endif %}
-            {% if page.has_next %}<a class="rounded-lg border px-3 py-1.5" href="?page={{ page.next_page_number }}&view={{ view }}&q={{ q|urlencode }}&owner={{ owner|urlencode }}">Next</a>{% endif %}
+            {% if page.has_previous %}<a class="rounded-lg border px-3 py-1.5" href="?page={{ page.previous_page_number }}&view={{ view }}&q={{ q|urlencode }}">Previous</a>{% endif %}
+            {% if page.has_next %}<a class="rounded-lg border px-3 py-1.5" href="?page={{ page.next_page_number }}&view={{ view }}&q={{ q|urlencode }}">Next</a>{% endif %}
         </div>
     </div>
     {% endif %}

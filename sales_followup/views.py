@@ -32,19 +32,10 @@ def _ctx(request, **extra):
     return extra
 
 
-def _queue_owner_refresh():
-    if services.needs_owner_qs().exists():
-        try:
-            from .tasks import refresh_deal_owners
-            refresh_deal_owners.delay()
-        except Exception as e:
-            logger.info("deal owner refresh not queued: %s", e)
-
 
 def _contacts():
-    owners = SalesFollowup.objects.exclude(deal_owner="").values_list("deal_owner", flat=True).distinct()
     seen = FollowupEntry.objects.values_list("contacted", flat=True).distinct()[:200]
-    return sorted(set(owners) | set(seen) | set(SALES_EMAILS), key=str.lower)
+    return sorted(set(seen) | set(SALES_EMAILS), key=str.lower)
 
 
 def _parse_date(s):
@@ -68,17 +59,13 @@ def followup_list(request):
         services.sync_all()
     except Exception as e:
         logger.exception("sales follow-up sync failed: %s", e)
-    _queue_owner_refresh()
     today = timezone.localdate()
     q = request.GET.get("q", "").strip()
     view = request.GET.get("view", "open")
-    owner = request.GET.get("owner", "")
     base = SalesFollowup.objects.all()
     if q:
         base = base.filter(Q(enquiry_no__icontains=q) | Q(customer_name__icontains=q) | Q(zoho_number__icontains=q)
-                           | Q(deal_owner__icontains=q) | Q(vendor_name__icontains=q))
-    if owner:
-        base = base.filter(deal_owner=owner)
+                           | Q(vendor_name__icontains=q))
     open_q = ~Q(status__in=SalesFollowup.CLOSED)
     due_q = open_q & Q(next_followup_date__lte=today)
     cards = [
@@ -101,9 +88,7 @@ def followup_list(request):
     qs = qs.annotate(closed=Case(When(status__in=SalesFollowup.CLOSED, then=Value(1)), default=Value(0),
                                  output_field=IntegerField())).order_by("closed", "next_followup_date", "-approved_at")
     page = Paginator(qs, 50).get_page(request.GET.get("page"))
-    owners = SalesFollowup.objects.exclude(deal_owner="").values_list("deal_owner", flat=True).distinct().order_by("deal_owner")
-    return render(request, "sales_followup/list.html", _ctx(
-        request, page=page, q=q, view=view, owner=owner, owners=owners, cards=cards))
+    return render(request, "sales_followup/list.html", _ctx(request, page=page, q=q, view=view, cards=cards))
 
 
 @login_required
@@ -126,41 +111,6 @@ def followup_detail(request, pk):
         default_next=timezone.localdate() + timedelta(days=1),
         logs=fu.logs.select_related("user")[:30]))
 
-
-@login_required
-@require_POST
-def set_owner(request, pk):
-    if not services.can_use(request.user):
-        return _forbid()
-    fu = get_object_or_404(SalesFollowup, pk=pk)
-    services.set_owner(fu, request.POST.get("deal_owner", ""), request.user)
-    messages.success(request, "Deal owner saved.")
-    return redirect("sales_followup:detail", fu.pk)
-
-
-@login_required
-@require_POST
-def refresh_one(request, pk):
-    if not services.can_use(request.user):
-        return _forbid()
-    fu = get_object_or_404(SalesFollowup, pk=pk)
-    if services.refresh_owner(fu, force=True):
-        messages.success(request, "Deal owner loaded from Zoho CRM.")
-    else:
-        fu.refresh_from_db()
-        messages.error(request, fu.crm_error or "No deal owner found in Zoho CRM.")
-    return redirect("sales_followup:detail", fu.pk)
-
-
-@login_required
-@require_POST
-def refresh_crm(request):
-    if not services.is_manager(request.user):
-        return _forbid("Only managers can refresh all deal owners.")
-    from .tasks import refresh_deal_owners
-    n = refresh_deal_owners.run(ids=list(services.needs_owner_qs().values_list("id", flat=True)[:60]))
-    messages.success(request, f"Checked Zoho CRM - {n} deal owner(s) found.")
-    return redirect("sales_followup:list")
 
 
 @login_required
@@ -206,18 +156,6 @@ def monitor(request):
     week_start = today - timedelta(days=today.weekday())
     month_start = today.replace(day=1)
     open_q = ~Q(status__in=SalesFollowup.CLOSED)
-    by_owner = (SalesFollowup.objects.exclude(status=SalesFollowup.STATUS_CANCELLED)
-                .values("deal_owner")
-                .annotate(total=Count("id"),
-                          open=Count("id", filter=open_q),
-                          overdue=Count("id", filter=open_q & Q(next_followup_date__lt=today)),
-                          due_today=Count("id", filter=open_q & Q(next_followup_date=today)),
-                          never=Count("id", filter=open_q & Q(followup_count=0)),
-                          reviewing=Count("id", filter=Q(status=SalesFollowup.STATUS_REVIEWING)),
-                          won=Count("id", filter=Q(status=SalesFollowup.STATUS_WON)),
-                          lost=Count("id", filter=Q(status=SalesFollowup.STATUS_LOST)),
-                          last=Max("last_followup_date"))
-                .order_by("-overdue", "-open"))
     by_user = (FollowupEntry.objects.values("created_by__full_name", "created_by__email")
                .annotate(today=Count("id", filter=Q(date=today)),
                          week=Count("id", filter=Q(date__gte=week_start)),
@@ -235,7 +173,7 @@ def monitor(request):
     }
     recent = FollowupEntry.objects.select_related("followup", "created_by")[:25]
     return render(request, "sales_followup/monitor.html", _ctx(
-        request, by_owner=by_owner, by_user=by_user, totals=totals, recent=recent))
+        request, by_user=by_user, totals=totals, recent=recent))
 
 
 @login_required

@@ -10,9 +10,9 @@ class EntryInline(admin.TabularInline):
 
 @admin.register(SalesFollowup)
 class SalesFollowupAdmin(admin.ModelAdmin):
-    list_display = ("enquiry_no", "zoho_number", "customer_name", "deal_owner", "status", "next_followup_date")
+    list_display = ("enquiry_no", "zoho_number", "customer_name", "status", "next_followup_date")
     list_filter = ("status",)
-    search_fields = ("enquiry_no", "zoho_number", "customer_name", "deal_owner")
+    search_fields = ("enquiry_no", "zoho_number", "customer_name")
     inlines = [EntryInline]
 
 

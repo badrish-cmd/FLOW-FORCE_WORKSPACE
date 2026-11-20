@@ -3,7 +3,7 @@
 {% block content %}
 <div class="mx-auto max-w-7xl">
     <h1 class="text-2xl font-bold text-gray-900">Sales Follow-up · Monitoring</h1>
-    <p class="mb-4 text-sm text-slate-500">How the sales team is responding and how follow-ups are being recorded.</p>
+    <p class="mb-4 text-sm text-slate-500">How follow-ups on approved quotes are being recorded.</p>
     {% with nav='monitor' %}{% include 'sales_followup/_nav.html' %}{% endwith %}
     <div class="mb-5 grid grid-cols-2 gap-3 md:grid-cols-7">
         <a href="{% url 'sales_followup:list' %}?view=open" class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div class="text-[11px] font-semibold uppercase text-slate-500">Open</div><div class="text-2xl font-bold">{{ totals.open }}</div></a>
@@ -13,26 +13,6 @@
         <a href="{% url 'sales_followup:list' %}?view=WON" class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div class="text-[11px] font-semibold uppercase text-slate-500">PO received / Won</div><div class="text-2xl font-bold text-emerald-600">{{ totals.won }}</div></a>
         <a href="{% url 'sales_followup:list' %}?view=LOST" class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div class="text-[11px] font-semibold uppercase text-slate-500">Lost</div><div class="text-2xl font-bold text-slate-500">{{ totals.lost }}</div></a>
         <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div class="text-[11px] font-semibold uppercase text-slate-500">Follow-ups this week</div><div class="text-2xl font-bold text-blue-700">{{ totals.week_entries }}</div></div>
-    </div>
-
-    <div class="mb-5 overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div class="border-b border-slate-100 px-4 py-3 font-semibold text-slate-900"><i class="fas fa-user-tie mr-2 text-slate-400"></i>By deal owner</div>
-        <table class="min-w-full divide-y divide-slate-100 text-sm">
-            <thead class="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500"><tr><th class="px-4 py-2">Deal owner</th><th class="px-4 py-2 text-right">Quotes</th><th class="px-4 py-2 text-right">Open</th><th class="px-4 py-2 text-right">Overdue</th><th class="px-4 py-2 text-right">Due today</th><th class="px-4 py-2 text-right">No follow-up yet</th><th class="px-4 py-2 text-right">Reviewing</th><th class="px-4 py-2 text-right">Won</th><th class="px-4 py-2 text-right">Lost</th><th class="px-4 py-2">Last follow-up</th></tr></thead>
-            <tbody class="divide-y divide-slate-100">
-                {% for o in by_owner %}
-                <tr class="hover:bg-slate-50">
-                    <td class="px-4 py-2 font-semibold"><a class="text-blue-700 hover:underline" href="{% url 'sales_followup:list' %}?view=open&owner={{ o.deal_owner|urlencode }}">{{ o.deal_owner|default:"(not found)" }}</a></td>
-                    <td class="px-4 py-2 text-right">{{ o.total }}</td><td class="px-4 py-2 text-right">{{ o.open }}</td>
-                    <td class="px-4 py-2 text-right {% if o.overdue %}font-bold text-red-600{% endif %}">{{ o.overdue }}</td>
-                    <td class="px-4 py-2 text-right {% if o.due_today %}font-semibold text-orange-600{% endif %}">{{ o.due_today }}</td>
-                    <td class="px-4 py-2 text-right {% if o.never %}text-amber-600{% endif %}">{{ o.never }}</td>
-                    <td class="px-4 py-2 text-right">{{ o.reviewing }}</td><td class="px-4 py-2 text-right text-emerald-700">{{ o.won }}</td><td class="px-4 py-2 text-right">{{ o.lost }}</td>
-                    <td class="px-4 py-2 text-xs text-slate-500">{{ o.last|date:"M j, Y"|default:"—" }}</td>
-                </tr>
-                {% empty %}<tr><td colspan="10" class="px-4 py-6 text-center text-slate-500">No approved quotes yet.</td></tr>{% endfor %}
-            </tbody>
-        </table>
     </div>
 
     <div class="grid gap-5 lg:grid-cols-2">
