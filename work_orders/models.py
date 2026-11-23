@@ -147,8 +147,10 @@ class WorkOrder(models.Model):
     parent = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL, related_name="revisions")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT, db_index=True)
 
-    # From LIST PID
+    # From LIST PID (internal work orders have pid "INT" and a typed reference)
     pid = models.CharField(max_length=40, db_index=True)
+    is_internal = models.BooleanField(default=False)
+    reference = models.CharField(max_length=255, blank=True, help_text="Internal work order: what / where it is for")
     pid_table = models.ForeignKey("tables.Table", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
     pid_row_ids = models.JSONField(default=list, blank=True)
     customer_name = models.CharField(max_length=255, blank=True)
@@ -192,7 +194,11 @@ class WorkOrder(models.Model):
 
     @property
     def display_number(self):
-        return self.number or f"DRAFT-{self.pk or 'new'} ({self.pid} {self.team.code if self.team_id else ''})".strip()
+        return self.number or f"DRAFT-{self.pk or 'new'} ({self.pid_label} {self.team.code if self.team_id else ''})".strip()
+
+    @property
+    def pid_label(self):
+        return f"Internal - {self.reference}" if self.is_internal else f"PID {self.pid}"
 
     @property
     def is_editable(self):

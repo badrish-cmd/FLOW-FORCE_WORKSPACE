@@ -8,7 +8,7 @@
             <h1 class="text-2xl font-bold text-gray-900">{% if wo.number %}{{ wo.number }}{% else %}Draft work order{% if wo.revision %} · Revision {{ wo.revision }} of {{ wo.parent.number }}{% endif %}{% endif %}</h1>
             <div class="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-600">
                 {% include 'work_orders/_status.html' with status=wo.status %}
-                <span>PID / JOB No. <b>{{ wo.pid }}</b> · {{ wo.customer_name }}</span>
+                {% if wo.is_internal %}<span><span class="rounded bg-slate-800 px-1.5 text-[10px] font-semibold text-white">INTERNAL</span> <b>{{ wo.reference }}</b></span>{% else %}<span>PID / JOB No. <b>{{ wo.pid }}</b> · {{ wo.customer_name }}</span>{% endif %}
                 <span class="rounded bg-slate-100 px-2 py-0.5 text-xs font-semibold">{{ wo.team.name }} ({{ wo.team.code }})</span>
                 {% if wo.is_overdue %}<span class="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">Overdue</span>{% endif %}
             </div>

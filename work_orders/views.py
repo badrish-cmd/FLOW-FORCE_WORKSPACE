@@ -68,7 +68,7 @@ def wo_list(request):
     if not services.sees_all(request.user):
         mine = "1"
     if q:
-        base = base.filter(Q(number__icontains=q) | Q(pid__icontains=q) | Q(customer_name__icontains=q)
+        base = base.filter(Q(number__icontains=q) | Q(pid__icontains=q) | Q(customer_name__icontains=q) | Q(reference__icontains=q)
                            | Q(customer_po__icontains=q) | Q(job_no__icontains=q) | Q(title__icontains=q))
     if team:
         base = base.filter(team__code=team)
@@ -107,7 +107,7 @@ def _form_ctx(request, wo, prefill=None):
 
 def _prefill_from_wo(wo):
     return {
-        "pid": wo.pid, "team_id": wo.team_id, "customer_name": wo.customer_name, "invoice_address": wo.invoice_address,
+        "pid": wo.pid, "internal": wo.is_internal, "reference": wo.reference, "team_id": wo.team_id, "customer_name": wo.customer_name, "invoice_address": wo.invoice_address,
         "delivery_address": wo.delivery_address, "order_date": wo.order_date, "required_by": wo.required_by,
         "customer_po": wo.customer_po, "quotation_no": wo.quotation_no, "sales_order_no": wo.sales_order_no,
         "job_no": wo.job_no, "delivery_method": wo.delivery_method, "title": wo.title, "instructions": wo.instructions,
@@ -142,11 +142,20 @@ def _save(request, wo, template_prefill):
         return None
     wo.team = team
     if not wo.pk:
-        wo.pid = request.POST.get("pid", "").strip()
-        head = pid_svc.load_pid(wo.pid)
-        if head:
-            wo.pid_table_id = head["table_id"]
-            wo.pid_row_ids = head["row_ids"]
+        if request.POST.get("internal") == "1":
+            wo.is_internal = True
+            wo.pid = "INT"
+        else:
+            wo.pid = request.POST.get("pid", "").strip()
+            head = pid_svc.load_pid(wo.pid)
+            if head:
+                wo.pid_table_id = head["table_id"]
+                wo.pid_row_ids = head["row_ids"]
+    if wo.is_internal:
+        wo.reference = request.POST.get("reference", "").strip()[:255]
+        if not wo.reference:
+            messages.error(request, "Type the internal reference (what / where the work order is for).")
+            return None
     try:
         wo = services.save_draft(wo, data, request.user, lines=lines, stages=stages, sections=sections,
                                  assignee_ids=assignees, files=request.FILES.getlist("files"))
@@ -179,22 +188,35 @@ def wo_create(request):
         if wo:
             return redirect("work_orders:detail", wo.pk)
         data, lines, sections, stages, assignees = _read_post(request)
-        prefill = dict(data, pid=request.POST.get("pid", ""), lines=lines, sections=sections,
+        prefill = dict(data, pid=request.POST.get("pid", ""), internal=request.POST.get("internal") == "1",
+                       reference=request.POST.get("reference", ""), lines=lines, sections=sections,
                        stages=[int(s) for s in stages if s.isdigit()], assignee_ids=[int(a) for a in assignees if a.isdigit()],
                        team_id=int(request.POST.get("team_id")) if (request.POST.get("team_id") or "").isdigit() else None)
         return render(request, "work_orders/form.html", _form_ctx(request, None, prefill))
     pid = request.GET.get("pid", "").strip()
     head = None
-    if pid:
+    not_found = ""
+    if request.GET.get("internal") == "1":
+        team = Team.objects.filter(code=request.GET.get("team", "")).first() or Team.objects.filter(is_active=True).first()
+        head = {"pid": "INT", "internal": True, "reference": request.GET.get("ref", "").strip(),
+                "customer_name": "PT. Flow Force Indonesia", "team_id": team.id if team else None,
+                "sections": [s for s in (team.default_sections if team else []) if s not in ("customer_po", "quotation_no", "sales_order")],
+                "stages": team.default_stages if team else [], "ppn_percent": 11,
+                "lines": [{"description": "", "qty": None, "unit": ""}]}
+    elif pid:
         head = pid_svc.load_pid(pid)
         if not head:
+            not_found = pid
             messages.error(request, f"PID {pid} not found in LIST PID - PT FLOW FORCE INDONESIA.")
         else:
             team = Team.objects.filter(code=request.GET.get("team", "")).first() or Team.objects.filter(is_active=True).first()
             head.update({"team_id": team.id if team else None,
                          "sections": team.default_sections if team else [], "stages": team.default_stages if team else [],
                          "terms": "", "ppn_percent": 11, "job_no": "", "delivery_method": ""})
-    return render(request, "work_orders/form.html", _form_ctx(request, None, head))
+    ctx = _form_ctx(request, None, head)
+    ctx["not_found"] = not_found
+    ctx["teams_get"] = request.GET.get("team", "")
+    return render(request, "work_orders/form.html", ctx)
 
 
 @login_required

@@ -90,7 +90,8 @@ def _page(canvas, doc, wo):
     canvas.line(18 * mm, 14 * mm, w - 18 * mm, 14 * mm)
     canvas.setFont("Helvetica", 7)
     canvas.setFillColor(GREY)
-    canvas.drawString(18 * mm, 10 * mm, f"{wo.number or 'DRAFT - not approved'}  ·  PID / JOB No {wo.pid}")
+    canvas.drawString(18 * mm, 10 * mm, f"{wo.number or 'DRAFT - not approved'}  ·  "
+                      + (f"Internal: {wo.reference}" if wo.is_internal else f"PID / JOB No {wo.pid}"))
     canvas.drawRightString(w - 18 * mm, 10 * mm, f"{doc.page}")
     canvas.restoreState()
 
@@ -139,7 +140,10 @@ def render_pdf(wo):
         kv.append(("Quotation / Enquiry No :", wo.quotation_no))
     if has("sales_order") and wo.sales_order_no:
         kv.append(("Sales Order # :", wo.sales_order_no))
-    kv.append(("PID / JOB No :", wo.pid))
+    if wo.is_internal:
+        kv.append(("Internal Ref :", wo.reference))
+    else:
+        kv.append(("PID / JOB No :", wo.pid))
     if has("delivery_method"):
         kv.append(("Delivery Method :", wo.delivery_method))
     if has("team"):

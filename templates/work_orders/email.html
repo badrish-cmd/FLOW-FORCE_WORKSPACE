@@ -6,7 +6,7 @@
     <p>{{ message }}</p>
     <table style="font-size:14px;margin:12px 0;border-collapse:collapse">
       {% if wo.number %}<tr><td style="color:#64748b;padding:2px 12px 2px 0">Work Order</td><td><b>{{ wo.number }}</b></td></tr>{% endif %}
-      <tr><td style="color:#64748b;padding:2px 12px 2px 0">PID / JOB No.</td><td>{{ wo.pid }}</td></tr>
+      {% if wo.is_internal %}<tr><td style="color:#64748b;padding:2px 12px 2px 0">Internal ref</td><td>{{ wo.reference }}</td></tr>{% else %}<tr><td style="color:#64748b;padding:2px 12px 2px 0">PID / JOB No.</td><td>{{ wo.pid }}</td></tr>{% endif %}
       <tr><td style="color:#64748b;padding:2px 12px 2px 0">Customer</td><td>{{ wo.customer_name|default:"-" }}</td></tr>
       <tr><td style="color:#64748b;padding:2px 12px 2px 0">Team</td><td>{{ wo.team.name }}</td></tr>
       {% if wo.required_by %}<tr><td style="color:#64748b;padding:2px 12px 2px 0">Required by</td><td><b>{{ wo.required_by|date:"d M Y" }}</b></td></tr>{% endif %}

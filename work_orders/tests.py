@@ -290,3 +290,35 @@ class WorkOrderTests(TestCase):
                 self.assertEqual(self.client.get(url).status_code, 200, (u.email, url))
         self.login(self.gm)
         self.assertContains(self.client.get(reverse("work_orders:detail", args=[wo.id])), "Approve & issue")
+
+
+    def test_internal_work_order_without_pid(self):
+        self.login(self.creator)
+        r = self.client.get(reverse("work_orders:create") + "?pid=Factory cikarang")
+        self.assertContains(r, "not found")
+        self.assertContains(r, "internal work order")
+        r = self.client.get(reverse("work_orders:create") + "?internal=1&ref=Factory Cikarang&team=WH")
+        self.assertContains(r, "INTERNAL")
+        self.assertContains(r, "Factory Cikarang")
+        r = self.client.post(reverse("work_orders:create"), {
+            "internal": "1", "pid": "INT", "reference": "", "team_id": self.wh.id, "line_desc": ["Shelf"],
+            "line_qty": ["2"], "line_unit": ["pcs"], "line_rate": [""], "line_disc": [""], "line_row": [""],
+            "assignees": [self.eng1.id], "action": "save"})
+        self.assertFalse(WorkOrder.objects.exists())        # reference is required
+        self.client.post(reverse("work_orders:create"), {
+            "internal": "1", "pid": "INT", "reference": "Factory Cikarang - racks", "team_id": self.wh.id,
+            "customer_name": "PT. Flow Force Indonesia", "line_desc": ["Shelf"], "line_qty": ["2"], "line_unit": ["pcs"],
+            "line_rate": [""], "line_disc": [""], "line_row": [""], "sections": ["items", "team", "signatures"],
+            "assignees": [self.eng1.id], "action": "submit"})
+        wo = WorkOrder.objects.get()
+        self.assertTrue(wo.is_internal)
+        self.assertEqual(wo.pid, "INT")
+        self.assertEqual(wo.reference, "Factory Cikarang - racks")
+        with self.captureOnCommitCallbacks(execute=True):
+            services.approve(wo, self.gm)
+        wo.refresh_from_db()
+        yy = date.today().year % 100
+        self.assertEqual(wo.number, f"WO-{yy:02d}-INT-WH-01")
+        self.assertTrue(wo.pdf.name.endswith(".pdf"))
+        self.login(self.gm)
+        self.assertContains(self.client.get(reverse("work_orders:list")), "Factory Cikarang - racks")

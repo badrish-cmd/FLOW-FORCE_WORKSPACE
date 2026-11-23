@@ -301,9 +301,9 @@ def submit(wo, user):
     wo.submitted_at = timezone.now()
     wo.save(update_fields=["status", "submitted_at", "updated_at"])
     event(wo, "submitted", "Sent to GM for approval", user)
-    msg = f"{user.full_name or user.email} sent a work order for PID {wo.pid} ({wo.team.name}) for your approval."
+    msg = f"{user.full_name or user.email} sent a work order for {wo.pid_label} ({wo.team.name}) for your approval."
     notify(approvers(), "Work order waiting for approval", msg, wo)
-    _simple_mail(approvers(), f"Work order for approval: PID {wo.pid} - {wo.team.name}", "Work order waiting for approval", msg, wo)
+    _simple_mail(approvers(), f"Work order for approval: {wo.pid_label} - {wo.team.name}", "Work order waiting for approval", msg, wo)
     return wo
 
 

@@ -36,7 +36,7 @@ def issue_work_order(wo_id):
             logger.warning("attachment %s: %s", a.file.name, e)
     title = f"Work Order {wo.number}"
     message = (f"{wo.approved_by.full_name if wo.approved_by else 'GM'} approved this work order for you "
-               f"(PID {wo.pid}, {wo.team.name}). The work order PDF and the files are attached.")
+               f"({wo.pid_label}, {wo.team.name}). The work order PDF and the files are attached.")
     assignees = list(wo.assignees.filter(is_active=True))
     services.notify(assignees, f"New work order: {wo.number}", message, wo)
     for u in assignees:
@@ -45,7 +45,8 @@ def issue_work_order(wo_id):
         html = render_to_string("work_orders/email.html", {"name": u.full_name or u.email, "title": title,
                                                            "message": message, "wo": wo, "url": url,
                                                            "files": [n for n, _ in files], "linked": linked})
-        subject = f"[Flow-Force] Work Order {wo.number} - PID {wo.pid} - {wo.customer_name}"[:255]
+        subject = (f"[Flow-Force] Work Order {wo.number} - Internal - {wo.reference}" if wo.is_internal
+                   else f"[Flow-Force] Work Order {wo.number} - PID {wo.pid} - {wo.customer_name}")[:255]
         log = EmailLog.objects.create(recipient_email=u.email, subject=subject, body=html,
                                       email_type="WORK_ORDER_MAIL", status="PENDING", max_retries=1)
         try:
