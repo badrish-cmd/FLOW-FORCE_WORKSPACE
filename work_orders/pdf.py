@@ -249,16 +249,14 @@ def render_pdf(wo):
                                     ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
             story.append(it)
 
-    if has("terms") and wo.terms.strip():
-        story += [P("Terms & Conditions", "h"), P(wo.terms, "small")]
-
     if has("signatures"):
         def sig(label, name="", when=""):
             return [P(label, "small"), Spacer(1, 16 * mm), P(name or "&nbsp;", "b") if name else P(""),
                     P(when, "small")]
         names = ", ".join(u.full_name or u.email for u in wo.assignees.all())
-        st = Table([[sig("Prepared by", wo.created_by.full_name if wo.created_by else ""),
-                     sig("Approved by", wo.approved_by.full_name if wo.approved_by else "", _d(wo.approved_at)),
+        from django.conf import settings
+        st = Table([[sig("Prepared by", getattr(settings, "WORK_ORDER_PREPARED_BY", "Badrish.K.R")),
+                     sig("Approved by", getattr(settings, "WORK_ORDER_APPROVED_BY", "Umapathi"), _d(wo.approved_at)),
                      sig("Received by", names)]], colWidths=[W / 3] * 3)
         st.setStyle(TableStyle([("BOX", (0, 0), (0, 0), 0.5, LINE), ("BOX", (1, 0), (1, 0), 0.5, LINE),
                                 ("BOX", (2, 0), (2, 0), 0.5, LINE), ("VALIGN", (0, 0), (-1, -1), "TOP"),

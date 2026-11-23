@@ -49,7 +49,6 @@ SECTIONS = [
     ("instructions", "Scope & instructions"),
     ("notes", "Notes"),
     ("images", "Images"),
-    ("terms", "Terms & Conditions"),
     ("signatures", "Signatures"),
 ]
 SECTION_KEYS = [k for k, _ in SECTIONS]

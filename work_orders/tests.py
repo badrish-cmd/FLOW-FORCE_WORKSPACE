@@ -272,7 +272,7 @@ class WorkOrderTests(TestCase):
         from .models import SECTION_KEYS
         from .pdf import render_pdf
         self.post_new(sections=SECTION_KEYS, line_rate=["100000", "2500.5"], line_disc=["", "10"],
-                      terms="Payment 30 days", notes="Handle with care", files=[png("x.png")], stages=["2", "5", "10"])
+                      notes="Handle with care", files=[png("x.png")], stages=["2", "5", "10"])
         wo = WorkOrder.objects.get()
         data = render_pdf(wo)
         self.assertTrue(data.startswith(b"%PDF"))
