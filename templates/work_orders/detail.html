@@ -1,0 +1,150 @@
+{% extends 'base.html' %}
+{% block title %}{{ wo.display_number }} - Work Orders{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-6xl">
+    <a href="{% url 'work_orders:list' %}" class="text-sm text-slate-500 hover:text-blue-600"><i class="fas fa-arrow-left mr-1"></i>Work Orders</a>
+    <div class="mb-4 mt-1 flex flex-wrap items-start justify-between gap-3">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">{% if wo.number %}{{ wo.number }}{% else %}Draft work order{% if wo.revision %} · Revision {{ wo.revision }} of {{ wo.parent.number }}{% endif %}{% endif %}</h1>
+            <div class="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-600">
+                {% include 'work_orders/_status.html' with status=wo.status %}
+                <span>PID <b>{{ wo.pid }}</b> · {{ wo.customer_name }}</span>
+                <span class="rounded bg-slate-100 px-2 py-0.5 text-xs font-semibold">{{ wo.team.name }} ({{ wo.team.code }})</span>
+                {% if wo.is_overdue %}<span class="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">Overdue</span>{% endif %}
+            </div>
+            {% if wo.title %}<div class="mt-1 text-sm text-slate-700">{{ wo.title }}</div>{% endif %}
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+            <a href="{% url 'work_orders:pdf' wo.id %}" target="_blank" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"><i class="fas fa-file-pdf mr-1 text-red-500"></i>{% if wo.number %}PDF{% else %}Preview PDF{% endif %}</a>
+            {% if can_edit %}<a href="{% url 'work_orders:edit' wo.id %}" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"><i class="fas fa-pen mr-1"></i>Edit</a>{% endif %}
+            {% if can_submit %}<form method="post" action="{% url 'work_orders:submit' wo.id %}">{% csrf_token %}<button class="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"><i class="fas fa-paper-plane mr-1"></i>Send to GM</button></form>{% endif %}
+            {% if can_delete %}<form method="post" action="{% url 'work_orders:delete' wo.id %}" onsubmit="return confirm('Delete this draft work order and its files?')">{% csrf_token %}<button class="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50"><i class="fas fa-trash mr-1"></i>Delete draft</button></form>{% endif %}
+            {% if can_work and wo.status == 'ISSUED' %}<form method="post" action="{% url 'work_orders:status' wo.id %}">{% csrf_token %}<input type="hidden" name="status" value="IN_PROGRESS"><button class="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white"><i class="fas fa-play mr-1"></i>Start</button></form>{% endif %}
+            {% if can_work %}<form method="post" action="{% url 'work_orders:status' wo.id %}">{% csrf_token %}<input type="hidden" name="status" value="DONE"><button class="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white"><i class="fas fa-check mr-1"></i>Mark done</button></form>{% endif %}
+            {% if can_close %}<form method="post" action="{% url 'work_orders:status' wo.id %}" onsubmit="return confirm('Close this work order?')">{% csrf_token %}<input type="hidden" name="status" value="CLOSED"><button class="rounded-lg border border-slate-800 bg-white px-3 py-2 text-sm font-semibold text-slate-800">Close</button></form>{% endif %}
+            {% if can_revise %}<form method="post" action="{% url 'work_orders:revise' wo.id %}" onsubmit="return confirm('Start a revision (R{{ wo.revision|add:1 }})? It goes to GM again.')">{% csrf_token %}<button class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"><i class="fas fa-code-branch mr-1"></i>Revise</button></form>{% endif %}
+            {% if can_cancel %}<form method="post" action="{% url 'work_orders:status' wo.id %}" onsubmit="return confirm('Cancel this work order?')">{% csrf_token %}<input type="hidden" name="status" value="CANCELLED"><button class="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-600">Cancel</button></form>{% endif %}
+        </div>
+    </div>
+
+    {% if wo.status == 'SENT_BACK' and wo.gm_comment %}<div class="mb-4 rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm text-orange-900"><b>Sent back by GM:</b> {{ wo.gm_comment }}</div>{% endif %}
+
+    {% if can_decide %}
+    <div class="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4">
+        <div class="mb-2 font-semibold text-amber-900"><i class="fas fa-gavel mr-1"></i>Waiting for your approval</div>
+        <form method="post" class="flex flex-wrap items-start gap-2">{% csrf_token %}
+            <textarea name="comment" rows="2" placeholder="Comment (needed to send back)" class="min-w-[260px] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"></textarea>
+            <button formaction="{% url 'work_orders:approve' wo.id %}" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white"><i class="fas fa-check mr-1"></i>Approve & issue</button>
+            <button formaction="{% url 'work_orders:send_back' wo.id %}" class="rounded-lg border border-orange-400 bg-white px-4 py-2 text-sm font-semibold text-orange-700">Send back</button>
+        </form>
+    </div>
+    {% endif %}
+
+    <div class="grid gap-4 lg:grid-cols-3">
+        <div class="space-y-4 lg:col-span-2">
+            <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <dl class="grid grid-cols-2 gap-x-6 gap-y-3 text-sm md:grid-cols-3">
+                    <div><dt class="text-xs text-slate-500">Customer PO No.</dt><dd>{{ wo.customer_po|default:"—" }}</dd></div>
+                    <div><dt class="text-xs text-slate-500">Quotation / Enquiry No.</dt><dd>{{ wo.quotation_no|default:"—" }}</dd></div>
+                    <div><dt class="text-xs text-slate-500">Sales Order / JOB No.</dt><dd>{{ wo.sales_order_no|default:"—" }} / {{ wo.job_no|default:"—" }}</dd></div>
+                    <div><dt class="text-xs text-slate-500">Order date</dt><dd>{{ wo.order_date|date:"M j, Y"|default:"—" }}</dd></div>
+                    <div><dt class="text-xs text-slate-500">Required by</dt><dd class="{% if wo.is_overdue %}font-semibold text-red-600{% endif %}">{{ wo.required_by|date:"M j, Y"|default:"—" }}</dd></div>
+                    <div><dt class="text-xs text-slate-500">Delivery method</dt><dd>{{ wo.delivery_method|default:"—" }}</dd></div>
+                    <div class="col-span-2 md:col-span-3"><dt class="text-xs text-slate-500">Sent to</dt><dd>{% for u in wo.assignees.all %}<span class="mr-1 inline-block rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-800">{{ u.full_name|default:u.email }}</span>{% empty %}<span class="text-red-600">Nobody yet</span>{% endfor %}</dd></div>
+                    <div class="md:col-span-1 col-span-2"><dt class="text-xs text-slate-500">Invoice address</dt><dd class="whitespace-pre-wrap text-xs">{{ wo.invoice_address|default:"—" }}</dd></div>
+                    <div class="md:col-span-2 col-span-2"><dt class="text-xs text-slate-500">Delivery address</dt><dd class="whitespace-pre-wrap text-xs">{{ wo.delivery_address|default:"—" }}</dd></div>
+                </dl>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="mb-2 font-semibold text-slate-900">Item lines</h2>
+                <table class="min-w-full text-sm"><thead class="bg-slate-700 text-left text-xs text-white"><tr><th class="px-2 py-1.5">#</th><th class="px-2 py-1.5">Item & Description</th><th class="px-2 py-1.5 text-right">Qty</th><th class="px-2 py-1.5">Unit</th>{% if 'prices' in wo.sections %}<th class="px-2 py-1.5 text-right">Rate</th><th class="px-2 py-1.5 text-right">Amount</th>{% endif %}</tr></thead>
+                <tbody class="divide-y divide-slate-100">{% for l in lines %}<tr><td class="px-2 py-1.5 text-slate-400">{{ forloop.counter }}</td><td class="whitespace-pre-wrap px-2 py-1.5">{{ l.description }}</td><td class="px-2 py-1.5 text-right">{{ l.qty|default_if_none:""|floatformat:"-3" }}</td><td class="px-2 py-1.5">{{ l.unit }}</td>{% if 'prices' in wo.sections %}<td class="px-2 py-1.5 text-right">{{ l.rate|default_if_none:""|floatformat:2 }}</td><td class="px-2 py-1.5 text-right">{{ l.amount|default_if_none:""|floatformat:2 }}</td>{% endif %}</tr>{% empty %}<tr><td colspan="6" class="px-2 py-3 text-slate-500">No item lines.</td></tr>{% endfor %}</tbody></table>
+            </div>
+
+            {% if checklist %}
+            <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="mb-2 font-semibold text-slate-900">Stage checklist</h2>
+                {% regroup checklist by stage as groups %}
+                {% for g in groups %}
+                <div class="mb-3">
+                    <div class="mb-1 text-sm font-semibold text-slate-800">{{ g.grouper }}. {% for k, v in stage_names.items %}{% if k == g.grouper %}{{ v }}{% endif %}{% endfor %}</div>
+                    {% for it in g.list %}
+                    <div class="flex items-center gap-2 py-0.5 text-sm">
+                        {% if can_work %}
+                        <form method="post" action="{% url 'work_orders:tick' wo.id it.id %}">{% csrf_token %}<input type="hidden" name="done" value="{% if it.done %}0{% else %}1{% endif %}"><button class="flex h-5 w-5 items-center justify-center rounded border {% if it.done %}border-emerald-600 bg-emerald-600 text-white{% else %}border-slate-400 bg-white{% endif %}">{% if it.done %}<i class="fas fa-check text-[10px]"></i>{% endif %}</button></form>
+                        {% else %}
+                        <span class="flex h-5 w-5 items-center justify-center rounded border {% if it.done %}border-emerald-600 bg-emerald-600 text-white{% else %}border-slate-300{% endif %}">{% if it.done %}<i class="fas fa-check text-[10px]"></i>{% endif %}</span>
+                        {% endif %}
+                        <span class="{% if it.done %}text-slate-500 line-through{% endif %}">{{ it.text }}</span>
+                        {% if it.done %}<span class="text-xs text-slate-400">{{ it.done_by.full_name }} · {{ it.done_at|date:"M j H:i" }}</span>{% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if wo.instructions or wo.notes %}
+            <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                {% if wo.instructions %}<h2 class="mb-1 font-semibold text-slate-900">Scope & instructions</h2><div class="mb-3 whitespace-pre-wrap text-sm">{{ wo.instructions }}</div>{% endif %}
+                {% if wo.notes %}<h2 class="mb-1 font-semibold text-slate-900">Notes</h2><div class="whitespace-pre-wrap text-sm">{{ wo.notes }}</div>{% endif %}
+            </div>
+            {% endif %}
+
+            <div id="files" class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="mb-2 font-semibold text-slate-900">Images & files</h2>
+                <div class="grid gap-3 sm:grid-cols-2">
+                {% for a in attachments %}
+                    <div class="rounded-lg border border-slate-200 p-2 text-sm">
+                        {% if a.is_image %}<a href="{% url 'work_orders:file' wo.id a.id %}" target="_blank"><img src="{% url 'work_orders:file' wo.id a.id %}" class="mb-1 h-36 w-full rounded object-contain bg-slate-50" alt=""></a>{% endif %}
+                        <div class="flex items-center justify-between gap-2"><a href="{% url 'work_orders:file' wo.id a.id %}?download=1" class="truncate font-semibold text-blue-700" title="{{ a.filename }}">{{ a.filename }}</a>{% if a.by_assignee %}<span class="shrink-0 rounded bg-indigo-50 px-1.5 text-[10px] text-indigo-700">from team</span>{% endif %}</div>
+                        {% if can_edit %}
+                        <form method="post" action="{% url 'work_orders:file_update' wo.id a.id %}" class="mt-1 space-y-1">{% csrf_token %}
+                            <input name="caption" value="{{ a.caption }}" placeholder="Caption" class="w-full rounded border border-slate-300 px-2 py-1 text-xs">
+                            <div class="flex items-center justify-between text-xs">{% if a.is_image %}<label class="flex items-center gap-1"><input type="checkbox" name="include_in_pdf" value="1" {% if a.include_in_pdf %}checked{% endif %}> In PDF</label>{% else %}<span class="text-slate-400">Emailed with the WO</span>{% endif %}
+                                <span class="flex gap-1"><button class="rounded bg-slate-800 px-2 py-0.5 text-white">Save</button><button name="delete" value="1" class="rounded border border-red-200 px-2 py-0.5 text-red-600" onclick="return confirm('Remove this file?')">Remove</button></span></div>
+                        </form>
+                        {% else %}
+                        {% if a.caption %}<div class="text-xs text-slate-500">{{ a.caption }}</div>{% endif %}
+                        {% if a.is_image and a.include_in_pdf %}<div class="text-[10px] text-slate-400">In PDF</div>{% endif %}
+                        {% endif %}
+                    </div>
+                {% empty %}<p class="text-sm text-slate-500">No files.</p>{% endfor %}
+                </div>
+            </div>
+
+            {% if wo.status in 'ISSUED IN_PROGRESS DONE CLOSED' %}
+            <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="mb-2 font-semibold text-slate-900">Progress from the team</h2>
+                {% for n in notes_list %}<div class="mb-2 rounded-lg bg-slate-50 p-2 text-sm"><div class="text-xs text-slate-500"><b class="text-slate-700">{% if n.author %}{{ n.author.full_name|default:n.author.email }}{% else %}—{% endif %}</b> · {{ n.created_at|date:"M j, Y H:i" }}</div><div class="whitespace-pre-wrap">{{ n.text }}</div></div>{% empty %}<p class="mb-2 text-sm text-slate-500">No progress notes yet.</p>{% endfor %}
+                {% if can_work %}
+                <form method="post" action="{% url 'work_orders:progress' wo.id %}" enctype="multipart/form-data" class="mt-2 space-y-2">{% csrf_token %}
+                    <textarea name="text" rows="2" placeholder="Progress note" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"></textarea>
+                    <div class="flex items-center justify-between gap-2"><input type="file" name="files" multiple class="text-sm"><button class="rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white">Add</button></div>
+                </form>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="space-y-4">
+            <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm text-sm">
+                <h2 class="mb-2 font-semibold text-slate-900">Work order</h2>
+                <dl class="space-y-2">
+                    <div><dt class="text-xs text-slate-500">Number</dt><dd class="font-semibold">{{ wo.number|default:"Given when GM approves" }}</dd></div>
+                    <div><dt class="text-xs text-slate-500">Created by</dt><dd>{{ wo.created_by.full_name|default:"—" }} · {{ wo.created_at|date:"M j, Y" }}</dd></div>
+                    {% if wo.approved_by %}<div><dt class="text-xs text-slate-500">Approved by</dt><dd>{{ wo.approved_by.full_name }} · {{ wo.approved_at|date:"M j, Y H:i" }}</dd></div>{% endif %}
+                    {% if wo.parent %}<div><dt class="text-xs text-slate-500">Revision of</dt><dd><a class="text-blue-700" href="{% url 'work_orders:detail' wo.parent.id %}">{{ wo.parent.number }}</a></dd></div>{% endif %}
+                    {% for r in revisions %}<div><dt class="text-xs text-slate-500">Revision</dt><dd><a class="text-blue-700" href="{% url 'work_orders:detail' r.id %}">{{ r.display_number }}</a> {% include 'work_orders/_status.html' with status=r.status %}</dd></div>{% endfor %}
+                    <div><dt class="text-xs text-slate-500">PDF shows</dt><dd class="text-xs text-slate-600">{{ section_labels|join:", "|default:"—" }}</dd></div>
+                </dl>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="mb-2 font-semibold text-slate-900">History</h2>
+                <ul class="space-y-2 text-xs">{% for e in events %}<li><b class="text-slate-700">{% if e.user %}{{ e.user.full_name|default:e.user.email }}{% else %}System{% endif %}</b> <span class="text-slate-600">{{ e.message }}</span><div class="text-slate-400">{{ e.created_at|date:"M j, Y H:i" }}</div></li>{% empty %}<li class="text-slate-500">—</li>{% endfor %}</ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

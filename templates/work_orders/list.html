@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+{% block title %}Work Orders - Flow-Force Workspace{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-7xl">
+    <div class="mb-4">
+        <h1 class="text-2xl font-bold text-gray-900">Work Orders</h1>
+        <p class="text-sm text-slate-500">Work orders issued to our teams for each PID (LIST PID - PT Flow Force Indonesia). Draft → GM approval → issued → done.</p>
+    </div>
+    {% if mine and wo_sees_all %}{% with nav='mine' %}{% include 'work_orders/_nav.html' %}{% endwith %}{% else %}{% with nav='list' %}{% include 'work_orders/_nav.html' %}{% endwith %}{% endif %}
+
+    <div class="mb-4 grid grid-cols-2 gap-3 md:grid-cols-7">
+        {% for key, label, n in cards %}
+        <a href="?status={{ key }}{% if q %}&q={{ q|urlencode }}{% endif %}{% if team %}&team={{ team }}{% endif %}{% if mine %}&mine=1{% endif %}" class="rounded-xl border bg-white p-3 shadow-sm hover:border-slate-400 {% if status == key %}border-slate-800{% else %}border-slate-200{% endif %}">
+            <div class="text-[11px] font-semibold uppercase text-slate-500">{{ label }}</div>
+            <div class="text-2xl font-bold {% if key == 'overdue' %}text-red-600{% elif key == 'IN_REVIEW' %}text-amber-600{% else %}text-slate-900{% endif %}">{{ n }}</div>
+        </a>
+        {% endfor %}
+    </div>
+
+    <form method="get" class="mb-4 flex flex-wrap items-center gap-2">
+        <input type="hidden" name="status" value="{{ status }}">{% if mine %}<input type="hidden" name="mine" value="1">{% endif %}
+        <div class="relative min-w-[260px] flex-1">
+            <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+            <input type="text" name="q" value="{{ q }}" placeholder="Search WO no., PID, customer, customer PO, JOB no." class="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm">
+        </div>
+        <select name="team" class="rounded-lg border border-slate-300 px-3 py-2 text-sm" onchange="this.form.submit()">
+            <option value="">All teams</option>
+            {% for t in teams %}<option value="{{ t.code }}" {% if team == t.code %}selected{% endif %}>{{ t.name }}</option>{% endfor %}
+        </select>
+        <button class="rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white">Search</button>
+    </form>
+
+    <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+        <table class="min-w-full divide-y divide-slate-200 text-sm">
+            <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <tr><th class="px-4 py-3">Work order</th><th class="px-4 py-3">PID / Customer</th><th class="px-4 py-3">Team</th><th class="px-4 py-3">Assigned to</th><th class="px-4 py-3">Status</th><th class="px-4 py-3">Required by</th><th class="px-4 py-3">Updated</th></tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+                {% for w in page %}
+                <tr class="cursor-pointer hover:bg-slate-50" onclick="location.href='{% url 'work_orders:detail' w.id %}'">
+                    <td class="px-4 py-3"><div class="font-semibold text-slate-900">{% if w.number %}{{ w.number }}{% else %}<span class="text-slate-400">Draft</span>{% endif %}</div><div class="max-w-[260px] truncate text-xs text-slate-500">{{ w.title }}</div></td>
+                    <td class="px-4 py-3"><div class="font-semibold text-slate-800">PID {{ w.pid }}</div><div class="text-xs text-slate-500">{{ w.customer_name }}</div></td>
+                    <td class="px-4 py-3"><span class="rounded bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">{{ w.team.code }}</span> <span class="text-xs text-slate-500">{{ w.team.name }}</span></td>
+                    <td class="px-4 py-3 text-xs text-slate-600">{% for u in w.assignees.all %}{{ u.full_name|default:u.email }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</td>
+                    <td class="px-4 py-3">{% include 'work_orders/_status.html' with status=w.status %}</td>
+                    <td class="px-4 py-3 text-xs">{% if w.is_overdue %}<span class="rounded-full bg-red-100 px-2 py-0.5 font-semibold text-red-700">Overdue · {{ w.required_by|date:"M j" }}</span>{% else %}<span class="text-slate-600">{{ w.required_by|date:"M j, Y"|default:"—" }}</span>{% endif %}</td>
+                    <td class="px-4 py-3 text-xs text-slate-500">{{ w.updated_at|date:"M j, Y H:i" }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="7" class="px-4 py-12 text-center text-slate-500"><i class="fas fa-clipboard-list mb-2 block text-3xl text-slate-300"></i>No work orders{% if q or status or team %} match your search{% endif %}.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if page.has_other_pages %}
+    <div class="mt-4 flex items-center justify-between text-sm text-slate-600">
+        <span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+        <div class="flex gap-2">
+            {% if page.has_previous %}<a class="rounded-lg border px-3 py-1.5" href="?page={{ page.previous_page_number }}&status={{ status }}&q={{ q|urlencode }}&team={{ team }}{% if mine %}&mine=1{% endif %}">Previous</a>{% endif %}
+            {% if page.has_next %}<a class="rounded-lg border px-3 py-1.5" href="?page={{ page.next_page_number }}&status={{ status }}&q={{ q|urlencode }}&team={{ team }}{% if mine %}&mine=1{% endif %}">Next</a>{% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

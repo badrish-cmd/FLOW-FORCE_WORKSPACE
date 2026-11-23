@@ -69,6 +69,7 @@ INSTALLED_APPS = [
     'vendor_quotes',
     'vendor_enquiries',
     'sales_followup',
+    'work_orders',
     'tickets',
 ]
 
@@ -121,6 +122,7 @@ TEMPLATES = [
                 'vendor_quotes.context_processors.vendor_quotes',
                 'vendor_enquiries.context_processors.vendor_enquiries',
                 'sales_followup.context_processors.sales_followup',
+                'work_orders.context_processors.work_orders',
                 'tickets.context_processors.tickets_context',
             ],
         },

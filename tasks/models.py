@@ -312,6 +312,7 @@ class EmailLog(models.Model):
         ("OVERDUE_ESCALATION_MAIL", "Overdue Escalation Mail"),
         ("VENDOR_QUOTE_MAIL", "Vendor Quote Mail"),
         ("TICKET_MAIL", "Ticket Mail"),
+        ("WORK_ORDER_MAIL", "Work Order Mail"),
     ]
 
     STATUS_CHOICES = [

@@ -115,6 +115,14 @@
                                 </a>
                             </li>
                             {% endif %}
+                            {% if can_use_work_orders %}
+                            <li>
+                                <a href="{% url 'work_orders:list' %}" class="nav-link {% if request.resolver_match.app_name == 'work_orders' %}active{% endif %}">
+                                    <i class="fas fa-clipboard-list"></i>
+                                    <span>Work Orders</span>
+                                </a>
+                            </li>
+                            {% endif %}
                             {% if can_use_sales_followup %}
                             <li>
                                 <a href="{% url 'sales_followup:list' %}" class="nav-link {% if request.resolver_match.app_name == 'sales_followup' %}active{% endif %}">
