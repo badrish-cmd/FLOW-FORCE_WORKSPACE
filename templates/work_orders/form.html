@@ -25,7 +25,7 @@
 
         <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <h2 class="font-semibold text-slate-900">PID {{ p.pid }} · {{ p.customer_name }}</h2>
+                <h2 class="font-semibold text-slate-900">PID / JOB No. {{ p.pid }} · {{ p.customer_name }}</h2>
                 {% if p.kind %}<span class="rounded bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{{ p.kind }}</span>{% endif %}
             </div>
             <div class="grid gap-3 md:grid-cols-4">
@@ -36,7 +36,6 @@
                 <div><label class="lbl">Customer PO No.</label><input name="customer_po" value="{{ p.customer_po }}" class="inp"></div>
                 <div><label class="lbl">Quotation / Enquiry No.</label><input name="quotation_no" value="{{ p.quotation_no }}" class="inp"></div>
                 <div><label class="lbl">Sales Order No.</label><input name="sales_order_no" value="{{ p.sales_order_no }}" class="inp"></div>
-                <div><label class="lbl">JOB No.</label><input name="job_no" value="{{ p.job_no|default:'' }}" class="inp"></div>
                 <div><label class="lbl">Order date</label><input type="date" name="order_date" value="{{ p.order_date|date:'Y-m-d' }}" class="inp"></div>
                 <div><label class="lbl">Required by</label><input type="date" name="required_by" value="{{ p.required_by|date:'Y-m-d' }}" class="inp"></div>
                 <div><label class="lbl">Delivery method</label><input name="delivery_method" value="{{ p.delivery_method|default:'' }}" list="dm" class="inp"><datalist id="dm"><option value="by Air Courier"><option value="by Sea"><option value="by Truck"><option value="Hand carry"><option value="Customer pick-up"></datalist></div>

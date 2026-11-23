@@ -40,7 +40,7 @@ SECTIONS = [
     ("required_by", "Required by"),
     ("customer_po", "Customer PO No."),
     ("quotation_no", "Quotation / Enquiry No."),
-    ("sales_order", "Sales Order / JOB No."),
+    ("sales_order", "Sales Order No."),
     ("delivery_method", "Delivery method"),
     ("team", "Team & assigned to"),
     ("items", "Item table"),
@@ -49,7 +49,7 @@ SECTIONS = [
     ("instructions", "Scope & instructions"),
     ("notes", "Notes"),
     ("images", "Images"),
-    ("signatures", "Signatures"),
+    ("signatures", "Prepared / Approved / Received by"),
 ]
 SECTION_KEYS = [k for k, _ in SECTIONS]
 

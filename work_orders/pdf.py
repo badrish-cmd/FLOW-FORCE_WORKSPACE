@@ -90,7 +90,7 @@ def _page(canvas, doc, wo):
     canvas.line(18 * mm, 14 * mm, w - 18 * mm, 14 * mm)
     canvas.setFont("Helvetica", 7)
     canvas.setFillColor(GREY)
-    canvas.drawString(18 * mm, 10 * mm, f"{wo.number or 'DRAFT - not approved'}  ·  PID {wo.pid}")
+    canvas.drawString(18 * mm, 10 * mm, f"{wo.number or 'DRAFT - not approved'}  ·  PID / JOB No {wo.pid}")
     canvas.drawRightString(w - 18 * mm, 10 * mm, f"{doc.page}")
     canvas.restoreState()
 
@@ -137,11 +137,9 @@ def render_pdf(wo):
         kv.append(("Customer PO No # :", wo.customer_po))
     if has("quotation_no"):
         kv.append(("Quotation / Enquiry No :", wo.quotation_no))
-    if has("sales_order"):
-        if wo.sales_order_no:
-            kv.append(("Sales Order # :", wo.sales_order_no))
-        kv.append(("JOB No :", wo.job_no))
-    kv.append(("PID :", wo.pid))
+    if has("sales_order") and wo.sales_order_no:
+        kv.append(("Sales Order # :", wo.sales_order_no))
+    kv.append(("PID / JOB No :", wo.pid))
     if has("delivery_method"):
         kv.append(("Delivery Method :", wo.delivery_method))
     if has("team"):
@@ -149,7 +147,8 @@ def render_pdf(wo):
         kv.append(("Assigned To :", ", ".join(u.full_name or u.email for u in wo.assignees.all())))
     if wo.approved_at:
         kv.append(("Approved :", f"{_d(wo.approved_at)} · {wo.approved_by.full_name if wo.approved_by else ''}"))
-    kvt = Table([[P(k, "label"), P(v, "r")] for k, v in kv], colWidths=[W * 0.24, W * 0.21])
+    kv = [(k, v) for k, v in kv if str(v or "").strip()]
+    kvt = Table([[P(k, "label"), P(v, "r")] for k, v in kv] or [[P(""), P("")]], colWidths=[W * 0.24, W * 0.21])
     kvt.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 2), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
                              ("TOPPADDING", (0, 0), (-1, -1), 1.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
                              ("VALIGN", (0, 0), (-1, -1), "TOP")]))
@@ -250,18 +249,18 @@ def render_pdf(wo):
             story.append(it)
 
     if has("signatures"):
-        def sig(label, name="", when=""):
-            return [P(label, "small"), Spacer(1, 16 * mm), P(name or "&nbsp;", "b") if name else P(""),
-                    P(when, "small")]
-        names = ", ".join(u.full_name or u.email for u in wo.assignees.all())
         from django.conf import settings
-        st = Table([[sig("Prepared by", getattr(settings, "WORK_ORDER_PREPARED_BY", "Badrish.K.R")),
-                     sig("Approved by", getattr(settings, "WORK_ORDER_APPROVED_BY", "Umapathi"), _d(wo.approved_at)),
-                     sig("Received by", names)]], colWidths=[W / 3] * 3)
-        st.setStyle(TableStyle([("BOX", (0, 0), (0, 0), 0.5, LINE), ("BOX", (1, 0), (1, 0), 0.5, LINE),
-                                ("BOX", (2, 0), (2, 0), 0.5, LINE), ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                                ("LEFTPADDING", (0, 0), (-1, -1), 6)]))
-        story += [Spacer(1, 8 * mm), KeepTogether([st])]
+        names = ", ".join(u.full_name or u.email for u in wo.assignees.all())
+        approved = getattr(settings, "WORK_ORDER_APPROVED_BY", "Umapathi")
+        if wo.approved_at:
+            approved += f" ({_d(wo.approved_at)})"
+        row = [[P("Prepared by", "small"), P("Approved by", "small"), P("Received by", "small")],
+               [P(getattr(settings, "WORK_ORDER_PREPARED_BY", "Badrish.K.R"), "b"), P(approved, "b"), P(names or "-", "b")]]
+        st = Table(row, colWidths=[W / 3] * 3)
+        st.setStyle(TableStyle([("LINEABOVE", (0, 0), (-1, 0), 0.5, LINE), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                                ("LEFTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, 0), 5),
+                                ("TOPPADDING", (0, 1), (-1, 1), 1)]))
+        story += [Spacer(1, 6 * mm), KeepTogether([st])]
 
     doc.build(story, onFirstPage=lambda c, d: _page(c, d, wo), onLaterPages=lambda c, d: _page(c, d, wo))
     return buf.getvalue()

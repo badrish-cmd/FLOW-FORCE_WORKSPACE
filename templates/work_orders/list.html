@@ -21,7 +21,7 @@
         <input type="hidden" name="status" value="{{ status }}">{% if mine %}<input type="hidden" name="mine" value="1">{% endif %}
         <div class="relative min-w-[260px] flex-1">
             <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
-            <input type="text" name="q" value="{{ q }}" placeholder="Search WO no., PID, customer, customer PO, JOB no." class="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm">
+            <input type="text" name="q" value="{{ q }}" placeholder="Search WO no., PID / JOB no., customer, customer PO" class="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm">
         </div>
         <select name="team" class="rounded-lg border border-slate-300 px-3 py-2 text-sm" onchange="this.form.submit()">
             <option value="">All teams</option>

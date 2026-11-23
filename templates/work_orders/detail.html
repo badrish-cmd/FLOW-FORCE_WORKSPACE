@@ -8,7 +8,7 @@
             <h1 class="text-2xl font-bold text-gray-900">{% if wo.number %}{{ wo.number }}{% else %}Draft work order{% if wo.revision %} · Revision {{ wo.revision }} of {{ wo.parent.number }}{% endif %}{% endif %}</h1>
             <div class="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-600">
                 {% include 'work_orders/_status.html' with status=wo.status %}
-                <span>PID <b>{{ wo.pid }}</b> · {{ wo.customer_name }}</span>
+                <span>PID / JOB No. <b>{{ wo.pid }}</b> · {{ wo.customer_name }}</span>
                 <span class="rounded bg-slate-100 px-2 py-0.5 text-xs font-semibold">{{ wo.team.name }} ({{ wo.team.code }})</span>
                 {% if wo.is_overdue %}<span class="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">Overdue</span>{% endif %}
             </div>
@@ -46,7 +46,7 @@
                 <dl class="grid grid-cols-2 gap-x-6 gap-y-3 text-sm md:grid-cols-3">
                     <div><dt class="text-xs text-slate-500">Customer PO No.</dt><dd>{{ wo.customer_po|default:"—" }}</dd></div>
                     <div><dt class="text-xs text-slate-500">Quotation / Enquiry No.</dt><dd>{{ wo.quotation_no|default:"—" }}</dd></div>
-                    <div><dt class="text-xs text-slate-500">Sales Order / JOB No.</dt><dd>{{ wo.sales_order_no|default:"—" }} / {{ wo.job_no|default:"—" }}</dd></div>
+                    <div><dt class="text-xs text-slate-500">Sales Order No.</dt><dd>{{ wo.sales_order_no|default:"—" }}</dd></div>
                     <div><dt class="text-xs text-slate-500">Order date</dt><dd>{{ wo.order_date|date:"M j, Y"|default:"—" }}</dd></div>
                     <div><dt class="text-xs text-slate-500">Required by</dt><dd class="{% if wo.is_overdue %}font-semibold text-red-600{% endif %}">{{ wo.required_by|date:"M j, Y"|default:"—" }}</dd></div>
                     <div><dt class="text-xs text-slate-500">Delivery method</dt><dd>{{ wo.delivery_method|default:"—" }}</dd></div>

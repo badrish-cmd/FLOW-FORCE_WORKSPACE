@@ -6,10 +6,9 @@
     <p>{{ message }}</p>
     <table style="font-size:14px;margin:12px 0;border-collapse:collapse">
       {% if wo.number %}<tr><td style="color:#64748b;padding:2px 12px 2px 0">Work Order</td><td><b>{{ wo.number }}</b></td></tr>{% endif %}
-      <tr><td style="color:#64748b;padding:2px 12px 2px 0">PID</td><td>{{ wo.pid }}</td></tr>
+      <tr><td style="color:#64748b;padding:2px 12px 2px 0">PID / JOB No.</td><td>{{ wo.pid }}</td></tr>
       <tr><td style="color:#64748b;padding:2px 12px 2px 0">Customer</td><td>{{ wo.customer_name|default:"-" }}</td></tr>
       <tr><td style="color:#64748b;padding:2px 12px 2px 0">Team</td><td>{{ wo.team.name }}</td></tr>
-      {% if wo.job_no %}<tr><td style="color:#64748b;padding:2px 12px 2px 0">JOB No.</td><td>{{ wo.job_no }}</td></tr>{% endif %}
       {% if wo.required_by %}<tr><td style="color:#64748b;padding:2px 12px 2px 0">Required by</td><td><b>{{ wo.required_by|date:"d M Y" }}</b></td></tr>{% endif %}
     </table>
     {% if wo.instructions %}<p style="color:#64748b;font-size:13px;margin:12px 0 4px">Instructions</p><div style="white-space:pre-wrap;background:#f8fafc;padding:10px;border-radius:6px;font-size:13px">{{ wo.instructions }}</div>{% endif %}
