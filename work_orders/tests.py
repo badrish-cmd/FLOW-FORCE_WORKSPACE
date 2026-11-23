@@ -322,3 +322,37 @@ class WorkOrderTests(TestCase):
         self.assertTrue(wo.pdf.name.endswith(".pdf"))
         self.login(self.gm)
         self.assertContains(self.client.get(reverse("work_orders:list")), "Factory Cikarang - racks")
+
+    def test_checklist_editable_and_pdf_options(self):
+        from .pdf import render_pdf
+        wo = self._submitted()
+        self.login(self.creator)
+        # waiting for approval: creator can't change it
+        r = self.client.post(reverse("work_orders:checklist_add", args=[wo.id]), {"stage": "2", "text": "x"}, follow=True)
+        self.assertContains(r, "can&#x27;t change the checklist")
+        with self.captureOnCommitCallbacks(execute=True):
+            services.approve(wo, self.gm)
+        self.login(self.eng1)
+        self.client.post(reverse("work_orders:checklist_add", args=[wo.id]),
+                         {"stage": "2", "text": "Weld drawing for door slot", "assigned_to": self.eng2.id})
+        item = wo.checklist.get(text="Weld drawing for door slot")
+        self.assertEqual(item.assigned_to, self.eng2)
+        first = wo.checklist.filter(stage=2).first()
+        self.client.post(reverse("work_orders:checklist_edit", args=[wo.id, first.id]),
+                         {"text": "Drawings prepared (SS container)", "assigned_to": self.eng1.id})
+        first.refresh_from_db()
+        self.assertEqual((first.text, first.assigned_to), ("Drawings prepared (SS container)", self.eng1))
+        bom = wo.checklist.get(text="BOM prepared")
+        self.client.post(reverse("work_orders:checklist_edit", args=[wo.id, bom.id]), {"delete": "1"})
+        self.assertFalse(wo.checklist.filter(text="BOM prepared").exists())
+        self.client.post(reverse("work_orders:checklist_add", args=[wo.id]), {"stage": "5", "text": "Pack container"})
+        wo.refresh_from_db()
+        self.assertIn(5, wo.stages)
+        self.login(self.other)
+        self.assertEqual(self.client.post(reverse("work_orders:checklist_add", args=[wo.id]), {"stage": "2", "text": "x"}).status_code, 404)
+        # PDF: without qty/unit, in draft no "Approved by"
+        wo.sections = ["items", "stages", "signatures"]
+        wo.save()
+        self.assertTrue(render_pdf(wo).startswith(b"%PDF"))
+        wo.approved_at = None
+        self.assertTrue(render_pdf(wo).startswith(b"%PDF"))

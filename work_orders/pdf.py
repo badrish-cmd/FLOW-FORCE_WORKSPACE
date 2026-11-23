@@ -165,22 +165,30 @@ def render_pdf(wo):
     lines = list(wo.lines.all())
     if has("items") and lines:
         prices = has("prices")
+        qty_unit = has("qty_unit") and any(ln.qty is not None or (ln.unit or "").strip() for ln in lines)
+        head_cells, widths = [P("#", "th")], [8 * mm]
+        extra = []
+        if qty_unit:
+            extra += [("Qty", "thr", 18 * mm), ("Unit", "th", 16 * mm)]
         if prices:
-            cols = [8 * mm, W - 8 * mm - 18 * mm - 14 * mm - 26 * mm - 22 * mm - 28 * mm, 18 * mm, 14 * mm, 26 * mm, 22 * mm, 28 * mm]
-            data = [[P("#", "th"), P("Item & Description", "th"), P("Qty", "thr"), P("Unit", "th"), P("Rate", "thr"),
-                     P("Discount", "thr"), P("Amount", "thr")]]
-        else:
-            cols = [8 * mm, W - 8 * mm - 22 * mm - 22 * mm, 22 * mm, 22 * mm]
-            data = [[P("#", "th"), P("Item & Description", "th"), P("Qty", "thr"), P("Unit", "th")]]
+            extra += [("Rate", "thr", 26 * mm), ("Discount", "thr", 22 * mm), ("Amount", "thr", 28 * mm)]
+        head_cells.append(P("Item & Description", "th"))
+        widths.append(W - 8 * mm - sum(w for _, _, w in extra))
+        for label, st, w in extra:
+            head_cells.append(P(label, st))
+            widths.append(w)
+        data = [head_cells]
         sub = Decimal(0)
         for i, ln in enumerate(lines, 1):
-            row = [P(i), P(ln.description), P(_qty(ln.qty), "r"), P(ln.unit)]
+            row = [P(i), P(ln.description)]
+            if qty_unit:
+                row += [P(_qty(ln.qty), "r"), P(ln.unit)]
             if prices:
                 amt = ln.amount
                 sub += amt or 0
                 row += [P(_money(ln.rate), "r"), P(_money(ln.discount) if ln.discount else "", "r"), P(_money(amt), "r")]
             data.append(row)
-        t = Table(data, colWidths=cols, repeatRows=1)
+        t = Table(data, colWidths=widths, repeatRows=1)
         t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), DARK), ("VALIGN", (0, 0), (-1, -1), "TOP"),
                                ("LINEBELOW", (0, 1), (-1, -1), 0.4, LINE), ("TOPPADDING", (0, 0), (-1, -1), 4),
                                ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
@@ -197,20 +205,26 @@ def render_pdf(wo):
         story.append(Spacer(1, 4 * mm))
 
     # ---- stage checklist
-    items = list(wo.checklist.all())
+    items = list(wo.checklist.select_related("assigned_to", "done_by"))
     if has("stages") and items:
+        from .models import STAGE_NAMES
         story.append(P("Stage Checklist", "h"))
-        rows, cur = [], None
+        rows, cur, styles = [], None, []
         for it in items:
             if it.stage != cur:
                 cur = it.stage
-                from .models import STAGE_NAMES
-                rows.append(["", P(f"{it.stage}. {STAGE_NAMES.get(it.stage, '')}", "b"), ""])
-            done = f"{it.done_by.full_name if it.done_by else ''} {_d(it.done_at)}".strip() if it.done else ""
-            rows.append([Box(it.done), P(it.text), P(done, "small")])
-        ct = Table(rows, colWidths=[7 * mm, W - 7 * mm - 45 * mm, 45 * mm])
+                rows.append([P(f"{it.stage}. {STAGE_NAMES.get(it.stage, '')}", "b"), ""])
+                styles.append(("SPAN", (0, len(rows) - 1), (1, len(rows) - 1)))
+            text = escape(it.text)
+            if it.assigned_to:
+                text += f' <font color="#6b7280">&#8212; Assigned to: {escape(it.assigned_to.full_name or it.assigned_to.email)}</font>'
+            if it.done:
+                who = it.done_by.full_name if it.done_by else ""
+                text += f' <font size="7" color="#6b7280">(done {escape(who)} {_d(it.done_at)})</font>'
+            rows.append([Box(it.done), Paragraph(text, S["n"])])
+        ct = Table(rows, colWidths=[7 * mm, W - 7 * mm])
         ct.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("TOPPADDING", (0, 0), (-1, -1), 2),
-                                ("BOTTOMPADDING", (0, 0), (-1, -1), 2), ("LEFTPADDING", (0, 0), (0, -1), 1)]))
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 2), ("LEFTPADDING", (0, 0), (0, -1), 1)] + styles))
         story.append(ct)
 
     if has("instructions") and wo.instructions.strip():
@@ -254,13 +268,14 @@ def render_pdf(wo):
 
     if has("signatures"):
         from django.conf import settings
-        names = ", ".join(u.full_name or u.email for u in wo.assignees.all())
-        approved = getattr(settings, "WORK_ORDER_APPROVED_BY", "Umapathi")
+        cells = [("Prepared by", getattr(settings, "WORK_ORDER_PREPARED_BY", "Badrish.K.R"))]
         if wo.approved_at:
-            approved += f" ({_d(wo.approved_at)})"
-        row = [[P("Prepared by", "small"), P("Approved by", "small"), P("Received by", "small")],
-               [P(getattr(settings, "WORK_ORDER_PREPARED_BY", "Badrish.K.R"), "b"), P(approved, "b"), P(names or "-", "b")]]
-        st = Table(row, colWidths=[W / 3] * 3)
+            cells.append(("Approved by", f"{getattr(settings, 'WORK_ORDER_APPROVED_BY', 'Umapathi')} ({_d(wo.approved_at)})"))
+        names = ", ".join(u.full_name or u.email for u in wo.assignees.all())
+        if names:
+            cells.append(("Received by", names))
+        row = [[P(k, "small") for k, _ in cells], [P(v, "b") for _, v in cells]]
+        st = Table(row, colWidths=[W / len(cells)] * len(cells))
         st.setStyle(TableStyle([("LINEABOVE", (0, 0), (-1, 0), 0.5, LINE), ("VALIGN", (0, 0), (-1, -1), "TOP"),
                                 ("LEFTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, 0), 5),
                                 ("TOPPADDING", (0, 1), (-1, 1), 1)]))

@@ -471,3 +471,69 @@ def add_progress(wo, user, text, files):
         Note.objects.create(work_order=wo, author=user, text=text)
     _add_files(wo, files, user, in_pdf=False, by_assignee=True)
     event(wo, "progress", "Progress note / photos added", user)
+
+
+# ---------------------------------------------------------------- checklist editing
+
+def can_edit_checklist(user, wo):
+    """Creator while drafting; the team (and creator/admin/GM) while the work order is issued / in progress."""
+    return can_edit(user, wo) or can_work(user, wo)
+
+
+def _assignee(wo, user_id):
+    if not str(user_id or "").isdigit():
+        return None
+    u = User.objects.filter(pk=int(user_id), is_active=True).first()
+    return u
+
+
+@transaction.atomic
+def add_check_item(wo, user, stage, text, assigned_to_id=None):
+    if not can_edit_checklist(user, wo):
+        raise WorkOrderError("You can't change the checklist of this work order.")
+    text = (text or "").strip()
+    if not text:
+        raise WorkOrderError("Type the checklist item.")
+    stage = int(stage) if str(stage).isdigit() and 1 <= int(stage) <= 10 else None
+    if not stage:
+        raise WorkOrderError("Pick the stage.")
+    if stage not in (wo.stages or []):
+        wo.stages = sorted(set(wo.stages or []) | {stage})
+        wo.save(update_fields=["stages", "updated_at"])
+    last = wo.checklist.filter(stage=stage).order_by("-position").first()
+    item = ChecklistItem.objects.create(work_order=wo, stage=stage, text=text[:255],
+                                        position=(last.position + 1) if last else 0,
+                                        assigned_to=_assignee(wo, assigned_to_id))
+    event(wo, "checklist", f"Checklist item added: Stage {stage} - {item.text}", user)
+    return item
+
+
+@transaction.atomic
+def edit_check_item(wo, user, item_id, text, assigned_to_id=None):
+    if not can_edit_checklist(user, wo):
+        raise WorkOrderError("You can't change the checklist of this work order.")
+    item = wo.checklist.get(pk=item_id)
+    text = (text or "").strip()
+    if not text:
+        raise WorkOrderError("The checklist item can't be empty.")
+    changes = []
+    if text[:255] != item.text:
+        changes.append(f'"{item.text}" -> "{text[:255]}"')
+        item.text = text[:255]
+    new_a = _assignee(wo, assigned_to_id)
+    if (new_a.id if new_a else None) != item.assigned_to_id:
+        changes.append(f"assigned to {new_a.full_name if new_a else 'nobody'}")
+        item.assigned_to = new_a
+    item.save()
+    if changes:
+        event(wo, "checklist", f"Checklist item changed: " + ", ".join(changes), user)
+    return item
+
+
+@transaction.atomic
+def delete_check_item(wo, user, item_id):
+    if not can_edit_checklist(user, wo):
+        raise WorkOrderError("You can't change the checklist of this work order.")
+    item = wo.checklist.get(pk=item_id)
+    event(wo, "checklist", f"Checklist item removed: Stage {item.stage} - {item.text}", user)
+    item.delete()

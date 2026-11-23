@@ -44,6 +44,7 @@ SECTIONS = [
     ("delivery_method", "Delivery method"),
     ("team", "Team & assigned to"),
     ("items", "Item table"),
+    ("qty_unit", "Qty & Unit columns"),
     ("prices", "Prices (rate, discount, amount, totals)"),
     ("stages", "Stage checklist"),
     ("instructions", "Scope & instructions"),
@@ -54,14 +55,14 @@ SECTIONS = [
 SECTION_KEYS = [k for k, _ in SECTIONS]
 
 TEAM_DEFAULTS = {
-    "ENG": ["required_by", "customer_po", "quotation_no", "sales_order", "team", "items", "stages", "instructions",
+    "ENG": ["required_by", "customer_po", "quotation_no", "sales_order", "team", "items", "qty_unit", "stages", "instructions",
             "notes", "images", "signatures"],
     "WH": ["delivery_address", "required_by", "customer_po", "sales_order", "delivery_method", "team", "items",
-           "instructions", "notes", "images", "signatures"],
-    "PRC": ["required_by", "customer_po", "quotation_no", "sales_order", "team", "items", "stages", "instructions",
+           "qty_unit", "instructions", "notes", "images", "signatures"],
+    "PRC": ["required_by", "customer_po", "quotation_no", "sales_order", "team", "items", "qty_unit", "stages", "instructions",
             "notes", "signatures"],
     "ADM": ["invoice_address", "delivery_address", "order_date", "required_by", "customer_po", "quotation_no",
-            "sales_order", "delivery_method", "team", "items", "instructions", "notes", "signatures"],
+            "sales_order", "delivery_method", "team", "items", "qty_unit", "instructions", "notes", "signatures"],
 }
 TEAM_DEFAULT_STAGES = {"ENG": [2], "WH": [5], "PRC": [3], "ADM": [1, 10]}
 
@@ -241,6 +242,8 @@ class ChecklistItem(models.Model):
     stage = models.PositiveIntegerField()
     text = models.CharField(max_length=255)
     position = models.PositiveIntegerField(default=0)
+    assigned_to = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                    related_name="+")
     done = models.BooleanField(default=False)
     done_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
     done_at = models.DateTimeField(null=True, blank=True)

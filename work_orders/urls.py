@@ -19,6 +19,8 @@ urlpatterns = [
     path("<int:pk>/status/", views.wo_status, name="status"),
     path("<int:pk>/checklist/<int:item_id>/", views.wo_tick, name="tick"),
     path("<int:pk>/progress/", views.wo_progress, name="progress"),
+    path("<int:pk>/checklist/add/", views.checklist_add, name="checklist_add"),
+    path("<int:pk>/checklist/<int:item_id>/edit/", views.checklist_edit, name="checklist_edit"),
     path("<int:pk>/files/<int:att_id>/", views.attachment_file, name="file"),
     path("<int:pk>/files/<int:att_id>/update/", views.attachment_update, name="file_update"),
 ]

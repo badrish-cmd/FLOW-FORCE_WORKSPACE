@@ -236,12 +236,14 @@ def wo_detail(request, pk):
     wo = _get(request, pk)
     u = request.user
     return render(request, "work_orders/detail.html", _ctx(
-        request, wo=wo, lines=wo.lines.all(), checklist=wo.checklist.select_related("done_by"),
+        request, wo=wo, lines=wo.lines.all(), checklist=wo.checklist.select_related("done_by", "assigned_to"),
         attachments=wo.attachments.select_related("uploaded_by"), notes_list=wo.progress_notes.select_related("author"),
         events=wo.events.select_related("user")[:60], revisions=wo.revisions.all(),
         can_edit=services.can_edit(u, wo), can_delete=services.can_delete(u, wo),
         can_submit=services.can_edit(u, wo), can_decide=wo.status == WorkOrder.STATUS_IN_REVIEW and services.can_approve(u),
         can_work=services.can_work(u, wo), can_close=services.can_close(u, wo),
+        can_checklist=services.can_edit_checklist(u, wo),
+        pick_people=list(wo.assignees.all()) or list(services.employees()),
         can_cancel=wo.status in WorkOrder.ACTIVE + (WorkOrder.STATUS_DONE,) and (services.can_approve(u) or services.is_admin(u)),
         can_revise=wo.status in WorkOrder.ACTIVE + (WorkOrder.STATUS_DONE,) and (services.can_approve(u) or services.can_create(u)),
         stage_names=dict(STAGES), section_labels=[l for k, l in SECTIONS if k in (wo.sections or [])]))
@@ -316,6 +318,29 @@ def wo_status(request, pk):
 @require_POST
 def wo_tick(request, pk, item_id):
     return _act(request, pk, lambda wo: services.tick(wo, request.user, item_id, request.POST.get("done") == "1"), None)
+
+
+@login_required
+@require_POST
+def checklist_add(request, pk):
+    return _redirect_checklist(_act(request, pk, lambda wo: services.add_check_item(
+        wo, request.user, request.POST.get("stage"), request.POST.get("text"), request.POST.get("assigned_to")), None))
+
+
+@login_required
+@require_POST
+def checklist_edit(request, pk, item_id):
+    if request.POST.get("delete") == "1":
+        fn = lambda wo: services.delete_check_item(wo, request.user, item_id)
+    else:
+        fn = lambda wo: services.edit_check_item(wo, request.user, item_id, request.POST.get("text"),
+                                                 request.POST.get("assigned_to"))
+    return _redirect_checklist(_act(request, pk, fn, None))
+
+
+def _redirect_checklist(resp):
+    resp["Location"] = resp["Location"] + "#checklist"
+    return resp
 
 
 @login_required
