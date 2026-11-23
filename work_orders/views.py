@@ -85,7 +85,7 @@ def wo_list(request):
     cards = [
         ("", "All", sum(counts.values())),
         ("DRAFT", "Draft", counts.get("DRAFT", 0) + counts.get("SENT_BACK", 0)),
-        ("IN_REVIEW", "Waiting for GM", counts.get("IN_REVIEW", 0)),
+        ("IN_REVIEW", "Waiting for approval", counts.get("IN_REVIEW", 0)),
         ("open", "Issued / in progress", counts.get("ISSUED", 0) + counts.get("IN_PROGRESS", 0)),
         ("overdue", "Overdue", base.filter(status__in=WorkOrder.ACTIVE, required_by__lt=timezone.localdate()).count()),
         ("DONE", "Done", counts.get("DONE", 0)),

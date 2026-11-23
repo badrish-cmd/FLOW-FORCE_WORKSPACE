@@ -129,7 +129,7 @@ class WorkOrder(models.Model):
     STATUS_REVISED = "REVISED"
     STATUS_CHOICES = [
         (STATUS_DRAFT, "Draft"),
-        (STATUS_IN_REVIEW, "Waiting for GM approval"),
+        (STATUS_IN_REVIEW, "Waiting for approval"),
         (STATUS_SENT_BACK, "Sent back"),
         (STATUS_ISSUED, "Approved & issued"),
         (STATUS_IN_PROGRESS, "In progress"),
