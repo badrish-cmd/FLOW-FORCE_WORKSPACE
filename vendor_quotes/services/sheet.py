@@ -180,6 +180,11 @@ STYLES = {
     "totp": {"bl": 1, "bg": {"rgb": "#E2E8F0"}, "n": {"pattern": "0.0%"}},
     "totl": {"bl": 1, "bg": {"rgb": "#E2E8F0"}},
     "note": {"it": 1, "cl": {"rgb": "#64748B"}},
+    "bdh": {"bl": 1, "bg": {"rgb": "#FEF3C7"}, "cl": {"rgb": "#92400E"}},
+    "bdl": {"bg": {"rgb": "#FFFBEB"}, "cl": {"rgb": "#334155"}},
+    "bdv": {"bg": {"rgb": "#FFFBEB"}, "n": {"pattern": "#,##0"}},
+    "bdp": {"bg": {"rgb": "#FFFBEB"}, "n": {"pattern": "0.##%"}},
+    "bdt": {"bl": 1, "bg": {"rgb": "#FDE68A"}, "n": {"pattern": "#,##0"}},
 }
 
 HEADERS = [
@@ -209,7 +214,8 @@ CHARGE_LABELS = [
 ]
 LOT_PACKING_LABEL = "Packing - one lot amount (if vendor gives only a total)"
 DUTY_LABEL = "Import Duty % (type 10 or 10%, empty = no duty)"
-DUTY_NOTE = "Import Duty = Duty % x (Total Cost + Total Packing + Freight)"
+DUTY_NOTE = "Import Duty = Duty % x (Total Cost + Total Packing + Freight) - see the box on the right"
+DUTY_BOX_TITLE = "IMPORT DUTY - HOW IT IS CALCULATED"
 FREIGHT_LABEL = "Freight (Air / Sea)"     # the only charge that counts in the duty base (CIF)
 
 
@@ -377,6 +383,27 @@ def build_standard_snapshot(*, enquiry_no, customer, vendor_name, vendor_quote_n
         put(r, 8, value, f=formula, s=style)
         if note:
             put(r, 9, note, s="note")
+
+    # ---- Import Duty breakdown (K:L labels, M values) so the duty amount can be checked at a glance
+    cost_sum = sum(r["j"] for r in rows)
+    pct_v = duty_fraction(duty_in)
+    pct_f = f'=IF({P_DUTY_PCT}="",0,IF({P_DUTY_PCT}>=1,{P_DUTY_PCT}/100,{P_DUTY_PCT}))'
+    for i, (label, value, formula, lstyle, vstyle) in enumerate([
+        (DUTY_BOX_TITLE, "", None, "bdh", "bdh"),
+        ("Total Cost - goods, all lines (IDR)", cost_sum, f"=SUM(J{F1}:J{FL})", "bdl", "bdv"),
+        ("Plus: Total Packing (IDR)", pk_tot_idr, f"={R_PKTOT}", "bdl", "bdv"),
+        ("Plus: Freight (Air / Sea) only (IDR)", freight_v, f"={R_FREIGHT}", "bdl", "bdv"),
+        ("Duty base: Cost + Packing + Freight (IDR)", cost_sum + pk_tot_idr + freight_v, "=SUM(M3:M5)", "bdl", "bdt"),
+        ("Times: Import Duty %", pct_v, pct_f, "bdl", "bdp"),
+        ("Import Duty: Duty base x Duty % (IDR)", duty_v, "=M6*M7", "bdl", "bdt"),
+        ("Not in duty: clearance & other charges (IDR)",
+         sum(_num(charges.get(l)) for l in CHARGE_LABELS) - freight_v, f"={R_CHARGES}-{R_FREIGHT}", "note", "bdv"),
+    ]):
+        r = 1 + i
+        put(r, 10, label, s=lstyle)
+        put(r, 11, "", s=lstyle)
+        merges.append({"startRow": r, "endRow": r, "startColumn": 10, "endColumn": 11})
+        put(r, 12, value, f=formula, s=vstyle)
 
     # ---- item table
     for c, (label, _w) in enumerate(HEADERS):
@@ -563,6 +590,8 @@ def is_current_layout(sheet):
             return False
     first_pack = get_cell(sheet, hdr + 1, 19).get("f") or ""
     if _norm(cell_text(get_cell(sheet, hdr + 1, 0))) != "total" and "MATCH(" not in first_pack.upper():
+        return False
+    if not any(_norm(cell_text(get_cell(sheet, r, 10))) == _norm(DUTY_BOX_TITLE) for r in range(0, hdr)):
         return False
     for r in range(0, hdr):
         if _norm(cell_text(get_cell(sheet, r, 5))).startswith("import duty (idr)"):
