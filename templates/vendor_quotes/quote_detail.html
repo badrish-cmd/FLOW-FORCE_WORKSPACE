@@ -27,7 +27,7 @@
                 <span class="mx-1">/</span>
                 <a href="{% url 'vendor_quotes:enquiry_detail' quote.enquiry.id %}" class="hover:text-blue-600">{{ quote.enquiry.number }}</a>
             </div>
-            <h1 class="mt-0.5 truncate text-2xl font-bold text-gray-900">{{ quote.enquiry.customer_name }}</h1>
+            <h1 class="mt-0.5 truncate text-2xl font-bold text-gray-900"><span class="mr-1 align-middle rounded px-2 py-0.5 text-xs font-bold text-white {% if quote.enquiry.company == 'FFE' %}bg-violet-700{% else %}bg-blue-700{% endif %}" title="{% if quote.enquiry.company == 'FFE' %}PT. Flow Force Engineering{% else %}PT. Flow Force Indonesia{% endif %}">{{ quote.enquiry.company }}</span>{{ quote.enquiry.customer_name }}</h1>
             <div class="mt-1 flex flex-wrap items-center gap-3 text-sm text-slate-600">
                 <span><i class="fas fa-industry mr-1 text-slate-400"></i>{{ quote.vendor.name }}{% if quote.vendor_quote_no %} · quote {{ quote.vendor_quote_no }}{% endif %}</span>
                 {% include 'vendor_quotes/_status.html' with status=rev.status %}

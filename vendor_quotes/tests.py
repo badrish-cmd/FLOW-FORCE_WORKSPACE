@@ -1932,3 +1932,135 @@ class QuoteEditFromListTests(TestCase):
         self.client.force_login(self.admin)
         self.assertContains(self.client.get(reverse("vendor_quotes:quote_edit", args=[self.quote.id])), "Edit upload details")
         self.assertContains(self.client.get(reverse("vendor_quotes:quote_detail", args=[self.quote.id])), "Edit details")
+
+
+@override_settings(CELERY_TASK_ALWAYS_EAGER=True, EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+                   ZOHO_CLIENT_ID="cid", ZOHO_CLIENT_SECRET="sec")
+class FFECompanyTests(TestCase):
+    def setUp(self):
+        from unittest import mock
+        dept = Department.objects.create(name="FFE", slug="ffe-t")
+        self.gm = EmployeeUser.objects.create_user(email="gm@example.com", password="x", role="SUPER_ADMIN",
+                                                   department=dept, full_name="GM", status="APPROVED")
+        self.vendor = Vendor.objects.create(name="BOS", code="BOS", currency="EUR", default_exchange_rate=22000)
+
+    def _approved(self, company, enq="ENQ/2026/10/487"):
+        q, rev = workflow.create_quote(enquiry_number=enq, customer_name="PT. X", vendor=self.vendor, vendor_quote_no="",
+                                       quote_file=None, user=self.gm, company=company)
+        workflow.save_snapshot(rev, priced_snapshot([{"part": "S1", "description": "Powder Spatula", "qty": 1,
+                                                      "unit_price": 10, "sell": 6446920}]), self.gm)
+        rev.refresh_from_db()
+        return q, rev
+
+    def test_same_enquiry_number_in_both_companies_is_separate(self):
+        q1, _ = self._approved("FFI")
+        q2, _ = self._approved("FFE")
+        self.assertNotEqual(q1.enquiry_id, q2.enquiry_id)
+        self.assertEqual((q1.enquiry.company, q2.enquiry.company), ("FFI", "FFE"))
+
+    def test_create_page_and_post_with_company(self):
+        self.client.force_login(self.gm)
+        self.assertContains(self.client.get(reverse("vendor_quotes:quote_create")), "PT. Flow Force Engineering")
+        self.client.post(reverse("vendor_quotes:quote_create"), {
+            "company": "FFE", "enquiry_number": "enq/2026/10/487", "customer_name": "PT. A", "vendor": self.vendor.id,
+            "vendor_quote_no": "1", "start": "standard"})
+        q = self.vendor.quotes.get()
+        self.assertEqual(q.enquiry.company, "FFE")
+        r = self.client.get(reverse("vendor_quotes:quote_list") + "?company=FFE")
+        self.assertContains(r, "ENQ/2026/10/487")
+        self.assertNotContains(self.client.get(reverse("vendor_quotes:quote_list") + "?company=FFI"), "ENQ/2026/10/487")
+
+    def test_org_ids_and_connections_are_per_company(self):
+        from vendor_quotes.company import using
+        self.assertEqual(zoho.org_id("FFI"), "741367552")
+        self.assertEqual(zoho.org_id("FFE"), "887677172")
+        with using("FFE"):
+            self.assertEqual(zoho.org_id(), "887677172")
+            self.assertEqual(ZohoConnection.get().company, "FFE")
+        self.assertEqual(ZohoConnection.get().company, "FFI")
+        self.assertNotEqual(ZohoConnection.get("FFI").pk, ZohoConnection.get("FFE").pk)
+
+    def test_next_ffe_number(self):
+        from unittest import mock
+        from vendor_quotes.company import using
+        calls = []
+
+        def fake_api(method, path, params=None, payload=None):
+            calls.append((path, dict(params or {}), zoho.org_id()))
+            return {"estimates": [{"estimate_number": "FFE_26000081"}, {"estimate_number": "FFE_26000081R1"},
+                                  {"estimate_number": "FFE_26000079"}, {"estimate_number": "FFE_2600099X"}],
+                    "page_context": {"has_more_page": False}}
+        with using("FFE"), mock.patch.object(zoho, "api", side_effect=fake_api):
+            self.assertEqual(zoho.next_manual_number(year=2026), "FFE_26000082")
+        self.assertEqual(calls[0][1]["estimate_number_startswith"], "FFE_26")
+        self.assertEqual(calls[0][2], "887677172")
+        with using("FFE"), mock.patch.object(zoho, "api", return_value={"estimates": []}):
+            self.assertEqual(zoho.next_manual_number(year=2027), "FFE_27000001")
+        with using("FFI"):
+            self.assertIsNone(zoho.next_manual_number())
+
+    def _run(self, rev):
+        from unittest import mock
+        from vendor_quotes.company import current
+        seen = {}
+
+        def fake_create(**kw):
+            seen.update(kw, company=current(), org=zoho.org_id())
+            return ("est1", kw.get("estimate_number") or "FFI_26000300")
+        with mock.patch.object(zoho, "resolve_customer", return_value="c1"), \
+                mock.patch.object(zoho, "create_draft_estimate", side_effect=fake_create), \
+                mock.patch.object(zoho, "next_manual_number", return_value="FFE_26000082"):
+            workflow.run_zoho_output(rev)
+        rev.refresh_from_db()
+        return seen
+
+    def test_ffe_draft_goes_to_ffe_with_its_number(self):
+        _, rev = self._approved("FFE")
+        seen = self._run(rev)
+        self.assertEqual((seen["company"], seen["org"], seen["estimate_number"]), ("FFE", "887677172", "FFE_26000082"))
+        self.assertEqual(rev.zoho_estimate_number, "FFE_26000082")
+
+    def test_ffi_draft_unchanged(self):
+        _, rev = self._approved("FFI")
+        seen = self._run(rev)
+        self.assertEqual((seen["company"], seen["org"], seen["estimate_number"]), ("FFI", "741367552", None))
+        self.assertEqual(rev.zoho_estimate_number, "FFI_26000300")
+
+    def test_ffe_revision_uses_original_number(self):
+        q, rev = self._approved("FFE")
+        QuoteRevision.objects.filter(pk=rev.pk).update(zoho_estimate_number="FFE_26000081", zoho_estimate_id="e0")
+        r1 = QuoteRevision.objects.create(quote=q, number=1, snapshot=rev.snapshot, created_by=self.gm)
+        seen = self._run(r1)
+        self.assertEqual(seen["estimate_number"], "FFE_26000081R1")
+
+    def test_connect_checks_the_organisation(self):
+        from unittest import mock
+        from vendor_quotes.company import using
+
+        def fake_http(method, url, data=None, headers=None, timeout=30):
+            if "oauth" in url:
+                return {"refresh_token": "r", "access_token": "a", "expires_in": 3600, "api_domain": "https://www.zohoapis.com"}
+            return {"organizations": [{"organization_id": "741367552", "name": "PT. Flow Force Indonesia"}]}
+        with using("FFE"), mock.patch.object(zoho, "_http", side_effect=fake_http):
+            with self.assertRaises(zoho.ZohoError) as e:
+                zoho.exchange_code("code", self.gm)
+        self.assertIn("Sign in with the FFE Zoho account", str(e.exception))
+        self.assertFalse(ZohoConnection.get("FFE").is_connected)
+
+        def fake_http_ok(method, url, data=None, headers=None, timeout=30):
+            if "oauth" in url:
+                return {"refresh_token": "r", "access_token": "a", "expires_in": 3600, "api_domain": "https://www.zohoapis.com"}
+            return {"organizations": [{"organization_id": "887677172", "name": "PT. Flow Force Engineering"}]}
+        with using("FFE"), mock.patch.object(zoho, "_http", side_effect=fake_http_ok):
+            zoho.exchange_code("code", self.gm)
+        self.assertTrue(ZohoConnection.get("FFE").is_connected)
+        self.assertEqual(ZohoConnection.get("FFE").organization_name, "PT. Flow Force Engineering")
+        self.assertFalse(ZohoConnection.get("FFI").is_connected)
+
+    def test_settings_page_and_connect_remembers_company(self):
+        self.client.force_login(self.gm)
+        r = self.client.get(reverse("vendor_quotes:zoho_settings"))
+        self.assertContains(r, "Connect Zoho (FFE)")
+        self.assertContains(r, "Connect Zoho (FFI)")
+        self.client.get(reverse("vendor_quotes:zoho_connect") + "?company=FFE")
+        self.assertEqual(self.client.session["zoho_oauth_company"], "FFE")

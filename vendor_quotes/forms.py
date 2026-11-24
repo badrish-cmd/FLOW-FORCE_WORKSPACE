@@ -1,6 +1,6 @@
 from django import forms
 
-from .models import MasterSheet, Vendor
+from .models import Enquiry, MasterSheet, Vendor
 
 INPUT = "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
 
@@ -9,6 +9,8 @@ class QuoteCreateForm(forms.Form):
     START_STANDARD = "standard"
     START_PREVIOUS = "previous"
 
+    company = forms.ChoiceField(choices=Enquiry.COMPANY_CHOICES, initial="FFI", label="Company", required=False,
+                                widget=forms.Select(attrs={"class": INPUT}))
     enquiry_number = forms.CharField(max_length=100, label="Enquiry no.",
                                      widget=forms.TextInput(attrs={"class": INPUT, "placeholder": "ENQ/2026/11/500", "list": "enquiry-options"}))
     customer_name = forms.CharField(max_length=255, label="Customer",
@@ -79,6 +81,8 @@ class MasterUploadForm(forms.Form):
 
 class QuoteDetailsForm(forms.Form):
     """Correct a wrongly uploaded vendor quote."""
+    company = forms.ChoiceField(choices=Enquiry.COMPANY_CHOICES, label="Company", required=False,
+                                widget=forms.Select(attrs={"class": INPUT}))
     enquiry_number = forms.CharField(max_length=100, label="Enquiry no.",
                                      widget=forms.TextInput(attrs={"class": INPUT, "list": "enquiry-options"}))
     customer_name = forms.CharField(max_length=255, label="Customer", widget=forms.TextInput(attrs={"class": INPUT}))

@@ -6,7 +6,7 @@
     <p>{{ message }}</p>
     {% if quote %}
     <table style="font-size:14px;margin:12px 0;border-collapse:collapse">
-      <tr><td style="color:#64748b;padding:2px 12px 2px 0">Enquiry</td><td>{{ quote.enquiry.number }}</td></tr>
+      <tr><td style="color:#64748b;padding:2px 12px 2px 0">Enquiry</td><td>{{ quote.enquiry.number }} ({{ quote.enquiry.company }})</td></tr>
       <tr><td style="color:#64748b;padding:2px 12px 2px 0">Customer</td><td>{{ quote.enquiry.customer_name }}</td></tr>
       <tr><td style="color:#64748b;padding:2px 12px 2px 0">Vendor</td><td>{{ quote.vendor.name }} {{ quote.vendor_quote_no }}</td></tr>
     </table>

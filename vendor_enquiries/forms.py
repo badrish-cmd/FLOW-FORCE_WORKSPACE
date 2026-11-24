@@ -6,6 +6,8 @@ INPUT = "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:borde
 
 
 class EnquiryForm(forms.Form):
+    company = forms.ChoiceField(choices=[("FFI", "FFI - PT. Flow Force Indonesia"), ("FFE", "FFE - PT. Flow Force Engineering")],
+                                initial="FFI", required=False, widget=forms.Select(attrs={"class": INPUT}))
     enquiry_no = forms.CharField(max_length=100, label="Enquiry No.",
                                  widget=forms.TextInput(attrs={"class": INPUT, "placeholder": "ENQ/2026/11/500"}))
     customer_name = forms.CharField(max_length=255, required=False, label="Customer",

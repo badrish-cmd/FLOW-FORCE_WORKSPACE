@@ -5,7 +5,7 @@
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
             <a href="{% url 'vendor_quotes:quote_list' %}" class="text-sm text-slate-500 hover:text-blue-600"><i class="fas fa-arrow-left mr-1"></i>Vendor quotes</a>
-            <h1 class="mt-1 text-2xl font-bold text-gray-900">{{ enquiry.number }}</h1>
+            <h1 class="mt-1 text-2xl font-bold text-gray-900"><span class="mr-1 align-middle rounded px-2 py-0.5 text-xs font-bold text-white {% if enquiry.company == 'FFE' %}bg-violet-700{% else %}bg-blue-700{% endif %}">{{ enquiry.company }}</span>{{ enquiry.number }}</h1>
             <p class="text-sm text-slate-500">{{ enquiry.customer_name }}</p>
         </div>
         <div>
@@ -70,7 +70,7 @@
 
         <form method="post" class="space-y-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
               x-data="{ q: '', results: [], err: '', id: '{{ enquiry.zoho_customer_id }}', name: '' ,
-                       async search() { if (this.q.length < 2) return; const r = await fetch('{% url 'vendor_quotes:zoho_customer_search' %}?q=' + encodeURIComponent(this.q)); const d = await r.json(); this.results = d.results; this.err = d.error || (d.results.length ? '' : 'No match'); } }">
+                       async search() { if (this.q.length < 2) return; const r = await fetch('{% url 'vendor_quotes:zoho_customer_search' %}?company={{ enquiry.company }}&q=' + encodeURIComponent(this.q)); const d = await r.json(); this.results = d.results; this.err = d.error || (d.results.length ? '' : 'No match'); } }">
             {% csrf_token %}
             <h2 class="font-semibold text-slate-800">Enquiry details</h2>
             <div><label class="mb-1 block text-xs font-semibold text-slate-600">Customer name</label>

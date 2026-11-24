@@ -100,7 +100,9 @@ class MasterSheet(models.Model):
 
 
 class Enquiry(models.Model):
-    number = models.CharField(max_length=100, unique=True, help_text="e.g. ENQ/2026/10/484")
+    COMPANY_CHOICES = [("FFI", "FFI - PT. Flow Force Indonesia"), ("FFE", "FFE - PT. Flow Force Engineering")]
+    company = models.CharField(max_length=5, choices=COMPANY_CHOICES, default="FFI", db_index=True)
+    number = models.CharField(max_length=100, help_text="e.g. ENQ/2026/10/484")
     customer_name = models.CharField(max_length=255)
     zoho_customer_id = models.CharField(max_length=50, blank=True)
     notes = models.TextField(blank=True)
@@ -111,6 +113,7 @@ class Enquiry(models.Model):
     class Meta:
         ordering = ["-created_at"]
         verbose_name_plural = "enquiries"
+        unique_together = [("company", "number")]
 
     def __str__(self):
         return self.number
@@ -286,7 +289,9 @@ class QuoteEvent(models.Model):
 
 
 class ZohoConnection(models.Model):
-    """Single row holding the Zoho Books OAuth connection (set up via 'Connect Zoho')."""
+    """One row per company holding its Zoho Books OAuth connection (set up via 'Connect Zoho')."""
+    company = models.CharField(max_length=5, default="FFI", unique=True)
+    organization_name = models.CharField(max_length=200, blank=True)
     refresh_token = models.TextField(blank=True)
     access_token = models.TextField(blank=True)
     access_token_expires_at = models.DateTimeField(null=True, blank=True)
@@ -295,8 +300,10 @@ class ZohoConnection(models.Model):
     connected_at = models.DateTimeField(null=True, blank=True)
 
     @classmethod
-    def get(cls):
-        obj, _ = cls.objects.get_or_create(pk=1)
+    def get(cls, company=None):
+        """The connection of the given company, or of the company currently being worked on."""
+        from .company import clean, current
+        obj, _ = cls.objects.get_or_create(company=clean(company or current()))
         return obj
 
     @property

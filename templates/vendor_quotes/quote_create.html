@@ -18,11 +18,23 @@
         {% csrf_token %}
         {% if form.non_field_errors %}<div class="rounded-lg bg-red-50 p-3 text-sm text-red-700">{{ form.non_field_errors }}</div>{% endif %}
 
+        <div>
+            <label class="mb-1 block text-sm font-semibold text-slate-700">Company</label>
+            <div class="flex gap-2">
+                {% for val, label in form.company.field.choices %}
+                <label class="flex flex-1 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm has-[:checked]:border-blue-600 has-[:checked]:bg-blue-50">
+                    <input type="radio" name="company" value="{{ val }}" {% if form.company.value == val %}checked{% endif %}> <span class="font-semibold">{{ label }}</span>
+                </label>
+                {% endfor %}
+            </div>
+            <p class="mt-1 text-xs text-slate-500">The Zoho draft quotation goes to this company's Zoho Books.</p>
+        </div>
+
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
                 <label class="mb-1 block text-sm font-semibold text-slate-700">{{ form.enquiry_number.label }}</label>
                 {{ form.enquiry_number }}
-                <datalist id="enquiry-options">{% for e in enquiries %}<option value="{{ e.number }}">{{ e.customer_name }}</option>{% endfor %}</datalist>
+                <datalist id="enquiry-options">{% for e in enquiries %}<option value="{{ e.number }}">{{ e.company }} · {{ e.customer_name }}</option>{% endfor %}</datalist>
                 {% for e in form.enquiry_number.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
             </div>
             <div>

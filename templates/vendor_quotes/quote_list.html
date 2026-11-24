@@ -11,7 +11,7 @@
     {% if not zoho_connected and can_approve %}
     <div class="mb-4 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
         <i class="fas fa-plug mt-0.5"></i>
-        <div>Zoho Books isn't connected yet. Approvals still work and the Excel price tables are created; the Zoho drafts are made automatically once you <a class="font-semibold underline" href="{% url 'vendor_quotes:zoho_settings' %}">connect Zoho</a>.</div>
+        <div>Zoho Books (FFI) isn't connected yet. Approvals still work and the Excel price tables are created; the Zoho drafts are made automatically once you <a class="font-semibold underline" href="{% url 'vendor_quotes:zoho_settings' %}">connect Zoho</a>.</div>
     </div>
     {% endif %}
 
@@ -24,7 +24,7 @@
             {% for row in waiting %}
             <li>
                 <a href="{% url 'vendor_quotes:quote_detail' row.quote.id %}?rev={{ row.rev.number }}" class="flex flex-wrap items-center gap-x-6 gap-y-1 px-5 py-3 hover:bg-slate-50">
-                    <span class="font-semibold text-slate-900">{{ row.quote.enquiry.number }}</span>
+                    <span class="font-semibold text-slate-900"><span class="mr-1 rounded px-1.5 py-0.5 text-[10px] font-bold text-white {% if row.quote.enquiry.company == 'FFE' %}bg-violet-700{% else %}bg-blue-700{% endif %}">{{ row.quote.enquiry.company }}</span>{{ row.quote.enquiry.number }}</span>
                     <span class="text-slate-600">{{ row.quote.enquiry.customer_name }}</span>
                     <span class="text-slate-500">{{ row.quote.vendor.name }} {{ row.quote.vendor_quote_no }}</span>
                     <span class="text-slate-500">{{ row.rev.label }}</span>
@@ -41,6 +41,11 @@
             <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
             <input type="text" name="q" value="{{ q }}" placeholder="Search ENQ no., customer, vendor, quote no., Zoho no." class="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
         </div>
+        <select name="company" class="rounded-lg border border-slate-300 px-3 py-2 text-sm" onchange="this.form.submit()">
+            <option value="">FFI + FFE</option>
+            <option value="FFI" {% if company == 'FFI' %}selected{% endif %}>FFI only</option>
+            <option value="FFE" {% if company == 'FFE' %}selected{% endif %}>FFE only</option>
+        </select>
         <select name="status" class="rounded-lg border border-slate-300 px-3 py-2 text-sm" onchange="this.form.submit()">
             <option value="">All statuses</option>
             {% for key, label in statuses %}<option value="{{ key }}" {% if status == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
@@ -59,7 +64,7 @@
             <tbody class="divide-y divide-slate-100">
                 {% for row in page %}
                 <tr class="cursor-pointer hover:bg-slate-50" onclick="location.href='{% url 'vendor_quotes:quote_detail' row.quote.id %}'">
-                    <td class="px-4 py-3 font-semibold text-slate-900"><a href="{% url 'vendor_quotes:enquiry_detail' row.quote.enquiry.id %}" class="hover:text-blue-600" onclick="event.stopPropagation()">{{ row.quote.enquiry.number }}</a></td>
+                    <td class="px-4 py-3 font-semibold text-slate-900"><a href="{% url 'vendor_quotes:enquiry_detail' row.quote.enquiry.id %}" class="hover:text-blue-600" onclick="event.stopPropagation()"><span class="mr-1 rounded px-1.5 py-0.5 text-[10px] font-bold text-white {% if row.quote.enquiry.company == 'FFE' %}bg-violet-700{% else %}bg-blue-700{% endif %}">{{ row.quote.enquiry.company }}</span>{{ row.quote.enquiry.number }}</a></td>
                     <td class="px-4 py-3 text-slate-700">{{ row.quote.enquiry.customer_name }}</td>
                     <td class="px-4 py-3 text-slate-700">{{ row.quote.vendor.name }}<div class="text-xs text-slate-400">{{ row.quote.vendor_quote_no }}</div></td>
                     <td class="px-4 py-3 text-slate-600">{{ row.rev.label }}</td>

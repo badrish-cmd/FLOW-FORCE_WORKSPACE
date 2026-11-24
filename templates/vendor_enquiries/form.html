@@ -11,8 +11,8 @@
     <form method="post" enctype="multipart/form-data" class="space-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         {% csrf_token %}
         {% if form.non_field_errors %}<div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{% for e in form.non_field_errors %}{{ e }}{% endfor %}</div>{% endif %}
-        <div class="grid gap-4 md:grid-cols-2">
-            {% for f in form %}{% if f.name in "enquiry_no,customer_name" %}
+        <div class="grid gap-4 md:grid-cols-3">
+            {% for f in form %}{% if f.name in "company,enquiry_no,customer_name" %}
             <div><label class="mb-1 block text-sm font-semibold text-slate-700" for="{{ f.id_for_label }}">{{ f.label }}</label>{{ f }}{% for e in f.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}</div>
             {% endif %}{% endfor %}
         </div>

@@ -210,6 +210,7 @@ def save_enquiry(enq, data, user, upload=None):
     validate_upload(upload)
     creating = enq.pk is None
     old_status = None if creating else VendorEnquiry.objects.get(pk=enq.pk).status
+    enq.company = data.get("company") if data.get("company") in ("FFI", "FFE") else (enq.company or "FFI")
     enq.enquiry_no = data["enquiry_no"].strip().upper()
     enq.customer_name = data.get("customer_name", "").strip()
     enq.vendor_name = data["vendor_name"].strip()
@@ -340,7 +341,8 @@ def send_to_pricing(enq, user, create_vendor=False):
     if quote is None:
         quote, rev = workflow.create_quote(
             enquiry_number=enq.enquiry_no, customer_name=enq.customer_name or "-", vendor=vendor,
-            vendor_quote_no=qf.vendor_quote_no or enq.vendor_quote_no, quote_file=content, user=user)
+            vendor_quote_no=qf.vendor_quote_no or enq.vendor_quote_no, quote_file=content, user=user,
+            company=enq.company)
         workflow.event(quote, "from_tracker", f"Sent from the Vendor Enquiry Tracker ({qf.label})", user, rev)
         msg = "Sent to Price Calculation. Click Read with AI to fill the price sheet."
     else:

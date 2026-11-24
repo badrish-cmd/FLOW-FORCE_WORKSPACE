@@ -50,15 +50,37 @@ def _ctx(request, **extra):
 
 # ---------------------------------------------------------------- lists
 
+def _company_of_quote(view):
+    """Run the view in the Zoho company (FFI/FFE) of the quote / revision / enquiry in the URL."""
+    import functools
+    from .company import using
+
+    @functools.wraps(view)
+    def wrapper(request, pk, *args, **kwargs):
+        name = view.__name__
+        if name.startswith("revision_"):
+            co = QuoteRevision.objects.filter(pk=pk).values_list("quote__enquiry__company", flat=True).first()
+        elif name.startswith("enquiry_"):
+            co = Enquiry.objects.filter(pk=pk).values_list("company", flat=True).first()
+        else:
+            co = VendorQuote.objects.filter(pk=pk).values_list("enquiry__company", flat=True).first()
+        with using(co):
+            return view(request, pk, *args, **kwargs)
+    return wrapper
+
+
 @login_required
 def quote_list(request):
     if (resp := _guard(request)):
         return resp
     q = (request.GET.get("q") or "").strip()
     status = request.GET.get("status") or ""
+    company = (request.GET.get("company") or "").upper()
     latest = QuoteRevision.objects.order_by("-number")
     quotes = (VendorQuote.objects.select_related("enquiry", "vendor", "created_by")
               .prefetch_related(Prefetch("revisions", queryset=latest)))
+    if company in ("FFI", "FFE"):
+        quotes = quotes.filter(enquiry__company=company)
     if q:
         quotes = quotes.filter(Q(enquiry__number__icontains=q) | Q(enquiry__customer_name__icontains=q)
                                | Q(vendor__name__icontains=q) | Q(vendor_quote_no__icontains=q)
@@ -76,10 +98,11 @@ def quote_list(request):
     counts = dict(QuoteRevision.objects.values_list("status").annotate(n=Count("id")))
     return render(request, "vendor_quotes/quote_list.html", _ctx(
         request, page=page, waiting=waiting, q=q, status=status, statuses=QuoteRevision.STATUS_CHOICES,
-        counts=counts, zoho_connected=ZohoConnection.get().is_connected))
+        counts=counts, company=company, zoho_connected=ZohoConnection.get("FFI").is_connected))
 
 
 @login_required
+@_company_of_quote
 def enquiry_detail(request, pk):
     if (resp := _guard(request)):
         return resp
@@ -111,17 +134,18 @@ def quote_create(request):
         return resp
     form = QuoteCreateForm(request.POST or None, request.FILES or None,
                            initial={"enquiry_number": request.GET.get("enquiry", ""),
-                                    "customer_name": request.GET.get("customer", "")})
+                                    "customer_name": request.GET.get("customer", ""),
+                                    "company": request.GET.get("company", "FFI")})
     if request.method == "POST" and form.is_valid():
         d = form.cleaned_data
         start_from = d["previous_sheet"].snapshot if d["start"] == form.START_PREVIOUS else None
         quote, _rev = workflow.create_quote(
             enquiry_number=d["enquiry_number"], customer_name=d["customer_name"], vendor=d["vendor"],
             vendor_quote_no=d.get("vendor_quote_no") or "", quote_file=d.get("quote_file"),
-            user=request.user, start_from=start_from)
+            user=request.user, start_from=start_from, company=d.get("company") or "FFI")
         messages.success(request, "Vendor quote added. Fill in the price table, save, then send it for approval.")
         return redirect("vendor_quotes:quote_detail", pk=quote.pk)
-    enquiries = Enquiry.objects.order_by("-created_at").values("number", "customer_name")[:300]
+    enquiries = Enquiry.objects.order_by("-created_at").values("number", "customer_name", "company")[:300]
     sheets = (MasterSheet.objects.select_related("vendor").only("id", "vendor_id", "vendor__name", "vendor__code",
               "sheet_name", "enquiry_no", "customer_name", "position").order_by("vendor__name", "-position"))
     return render(request, "vendor_quotes/quote_create.html", _ctx(
@@ -132,6 +156,7 @@ def quote_create(request):
 # ---------------------------------------------------------------- quote page (sheet editor + review)
 
 @login_required
+@_company_of_quote
 def quote_detail(request, pk):
     if (resp := _guard(request)):
         return resp
@@ -176,7 +201,7 @@ def quote_detail(request, pk):
     if not rev.salesperson_id and not rev.salesperson_name and editable:
         try:
             cust_id = quote.enquiry.zoho_customer_id
-            if not cust_id and ZohoConnection.get().is_connected:
+            if not cust_id and ZohoConnection.get(quote.enquiry.company).is_connected:
                 cust_id = zoho.resolve_customer(quote.enquiry)
             if cust_id:
                 sp_id, sp_name = zoho.get_customer_default_salesperson(cust_id)
@@ -223,7 +248,7 @@ def quote_detail(request, pk):
         is_latest=(rev.number == revisions[-1].number), lines=lines, problems=problems, total=total,
         problems_json=json.dumps(problems), 
         changes=rev.changes.select_related("user")[:200], events=quote.events.select_related("user")[:50],
-        zoho_url=zoho.estimate_url(rev.zoho_estimate_id) if rev.zoho_estimate_id else "",
+        zoho_url=zoho.estimate_url(rev.zoho_estimate_id, quote.enquiry.company) if rev.zoho_estimate_id else "",
         zoho_connected=ZohoConnection.get().is_connected,
         ai_lines_count=ai_lines_count, ai_warnings=ai_warnings, ai_quote_total=ai_quote_total,
         can_delete=can_delete, can_edit_details=workflow.can_edit_quote_details(quote, request.user), has_approved_or_void=has_approved_or_void,
@@ -618,7 +643,7 @@ def quote_edit(request, pk):
     if not workflow.can_edit_quote_details(quote, request.user):
         messages.error(request, workflow._locked_reason(quote) or "You don't have permission to edit this quote.")
         return redirect("vendor_quotes:quote_detail", pk=pk)
-    initial = {"enquiry_number": quote.enquiry.number, "customer_name": quote.enquiry.customer_name,
+    initial = {"company": quote.enquiry.company, "enquiry_number": quote.enquiry.number, "customer_name": quote.enquiry.customer_name,
                "vendor": quote.vendor, "vendor_quote_no": quote.vendor_quote_no}
     form = QuoteDetailsForm(request.POST or None, request.FILES or None, initial=initial)
     if request.method == "POST" and form.is_valid():
@@ -626,7 +651,8 @@ def quote_edit(request, pk):
         try:
             quote, changes = workflow.update_quote_details(
                 quote, request.user, enquiry_number=d["enquiry_number"], customer_name=d["customer_name"],
-                vendor=d["vendor"], vendor_quote_no=d["vendor_quote_no"], new_file=d.get("quote_file"))
+                vendor=d["vendor"], vendor_quote_no=d["vendor_quote_no"], new_file=d.get("quote_file"),
+                company=d.get("company") or None)
         except workflow.WorkflowError as e:
             form.add_error(None, str(e))
         else:
@@ -764,22 +790,29 @@ def master_sheets_bulk_delete(request, pk):
 def zoho_settings(request):
     if (resp := _guard(request, approve=True)):
         return resp
-    conn = ZohoConnection.get()
-    waiting = QuoteRevision.objects.filter(zoho_status=QuoteRevision.OUTPUT_WAITING).count()
+    from .company import CHOICES, NAMES
+    cards = []
+    for code, _label in CHOICES:
+        cards.append({"code": code, "name": NAMES[code], "conn": ZohoConnection.get(code), "org_id": zoho.org_id(code),
+                      "waiting": QuoteRevision.objects.filter(zoho_status=QuoteRevision.OUTPUT_WAITING,
+                                                              quote__enquiry__company=code).count(),
+                      "manual_numbering": bool(zoho.MANUAL_NUMBER_PREFIX.get(code))})
     return render(request, "vendor_quotes/zoho_settings.html", _ctx(
-        request, conn=conn, configured=zoho.is_configured(), redirect_uri=zoho.redirect_uri(),
-        org_id=zoho.org_id(), accounts_url=zoho.accounts_url(), waiting=waiting))
+        request, cards=cards, configured=zoho.is_configured(), redirect_uri=zoho.redirect_uri(),
+        accounts_url=zoho.accounts_url()))
 
 
 @login_required
 def zoho_connect(request):
     if (resp := _guard(request, approve=True)):
         return resp
+    from .company import clean
     if not zoho.is_configured():
         messages.error(request, "Add ZOHO_CLIENT_ID and ZOHO_CLIENT_SECRET to the server .env first.")
         return redirect("vendor_quotes:zoho_settings")
     state = secrets.token_urlsafe(24)
     request.session["zoho_oauth_state"] = state
+    request.session["zoho_oauth_company"] = clean(request.GET.get("company"))
     return redirect(zoho.authorize_url(state))
 
 
@@ -787,6 +820,8 @@ def zoho_connect(request):
 def zoho_callback(request):
     if (resp := _guard(request, approve=True)):
         return resp
+    from .company import NAMES, using
+    company = request.session.pop("zoho_oauth_company", "FFI")
     if request.GET.get("state") != request.session.pop("zoho_oauth_state", None):
         messages.error(request, "Zoho connection expired or was not started here. Please try again.")
         return redirect("vendor_quotes:zoho_settings")
@@ -794,13 +829,16 @@ def zoho_callback(request):
         messages.error(request, f"Zoho said: {request.GET['error']}")
         return redirect("vendor_quotes:zoho_settings")
     try:
-        zoho.exchange_code(request.GET.get("code", ""), request.user)
+        with using(company):
+            zoho.exchange_code(request.GET.get("code", ""), request.user)
     except zoho.ZohoError as e:
-        messages.error(request, f"Couldn't connect Zoho: {e}")
+        messages.error(request, f"Couldn't connect Zoho for {company}: {e}")
         return redirect("vendor_quotes:zoho_settings")
+    from django.core.cache import cache
+    cache.delete(f"zoho_distinct_salespersons_{company}")
     from .tasks import retry_waiting_zoho_drafts
     retry_waiting_zoho_drafts.delay()
-    messages.success(request, "Zoho Books connected. Waiting approvals are being sent to Zoho now.")
+    messages.success(request, f"Zoho Books connected for {company} ({NAMES[company]}). Waiting approvals are being sent to Zoho now.")
     return redirect("vendor_quotes:zoho_settings")
 
 
@@ -809,8 +847,11 @@ def zoho_callback(request):
 def zoho_disconnect(request):
     if (resp := _guard(request, approve=True)):
         return resp
-    zoho.disconnect()
-    messages.success(request, "Zoho Books disconnected.")
+    from .company import clean, using
+    company = clean(request.POST.get("company"))
+    with using(company):
+        zoho.disconnect()
+    messages.success(request, f"Zoho Books disconnected for {company}.")
     return redirect("vendor_quotes:zoho_settings")
 
 
@@ -821,8 +862,10 @@ def zoho_customer_search(request):
     text = (request.GET.get("q") or "").strip()
     if len(text) < 2:
         return JsonResponse({"results": []})
+    from .company import using
     try:
-        return JsonResponse({"results": zoho.search_customers(text)})
+        with using(request.GET.get("company")):
+            return JsonResponse({"results": zoho.search_customers(text)})
     except zoho.ZohoError as e:
         return JsonResponse({"results": [], "error": str(e)}, status=200)
 

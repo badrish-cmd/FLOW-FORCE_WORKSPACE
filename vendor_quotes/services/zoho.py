@@ -57,8 +57,15 @@ def accounts_url():
     return cfg("ZOHO_ACCOUNTS_URL", "https://accounts.zoho.com").rstrip("/")
 
 
-def org_id():
-    return str(cfg("ZOHO_ORG_ID", "741367552"))
+ORG_DEFAULTS = {"FFI": ("ZOHO_ORG_ID", "741367552"), "FFE": ("ZOHO_ORG_ID_FFE", "887677172")}
+# Companies whose Zoho Books has no automatic quotation numbering: the workspace gives the number.
+MANUAL_NUMBER_PREFIX = {"FFE": "FFE"}
+
+
+def org_id(company=None):
+    from ..company import clean, current
+    key, default = ORG_DEFAULTS[clean(company or current())]
+    return str(cfg(key, default))
 
 
 def authorize_url(state):
@@ -104,7 +111,19 @@ def exchange_code(code, user):
     })
     if "refresh_token" not in data:
         raise ZohoError(data.get("error") or "Zoho did not return a refresh token. Try connecting again.")
+    # Make sure this Zoho login really has the company's organisation, so FFI and FFE never get mixed up.
+    from ..company import NAMES, current
+    api_domain = data.get("api_domain") or "https://www.zohoapis.com"
+    orgs = _http("GET", f"{api_domain.rstrip('/')}/books/v3/organizations", None,
+                 {"Authorization": f"Zoho-oauthtoken {data.get('access_token', '')}"}).get("organizations") or []
+    want = org_id()
+    match = next((o for o in orgs if str(o.get("organization_id")) == want), None)
+    if not match:
+        names = ", ".join(f"{o.get('name')} ({o.get('organization_id')})" for o in orgs) or "none"
+        raise ZohoError(f"This Zoho login has no access to {NAMES[current()]} (organisation {want}). "
+                        f"It has: {names}. Sign in with the {current()} Zoho account and try again.")
     conn = ZohoConnection.get()
+    conn.organization_name = match.get("name", "")[:200]
     conn.refresh_token = data["refresh_token"]
     conn.access_token = data.get("access_token", "")
     conn.access_token_expires_at = timezone.now() + timedelta(seconds=int(data.get("expires_in", 3600)) - 120)
@@ -127,7 +146,9 @@ def _token():
         raise ZohoNotConnected("Zoho API keys are not set on the server yet.")
     conn = ZohoConnection.get()
     if not conn.is_connected:
-        raise ZohoNotConnected("Zoho Books is not connected yet. An admin needs to click 'Connect Zoho'.")
+        from ..company import current
+        raise ZohoNotConnected(f"Zoho Books ({current()}) is not connected yet. An admin needs to click "
+                               f"'Connect Zoho' for {current()} on the Zoho Books page.")
     if conn.access_token and conn.access_token_expires_at and conn.access_token_expires_at > timezone.now():
         return conn
     data = _http("POST", f"{accounts_url()}/oauth/v2/token", {
@@ -424,7 +445,8 @@ def get_customer_default_salesperson(customer_id):
 def get_salespersons_list():
     """Distinct salespersons from the last ~200 estimates in Zoho Books, cached for 1 day."""
     from django.core.cache import cache
-    cache_key = "zoho_distinct_salespersons"
+    from ..company import current
+    cache_key = f"zoho_distinct_salespersons_{current()}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
@@ -551,5 +573,30 @@ def create_draft_estimate(
     return EstimateResult(estimate_id, est_number, stick_warnings)
 
 
-def estimate_url(estimate_id):
-    return f"https://books.zoho.com/app/{org_id()}#/quotes/{estimate_id}"
+def estimate_url(estimate_id, company=None):
+    return f"https://books.zoho.com/app/{org_id(company)}#/quotes/{estimate_id}"
+
+
+def next_manual_number(year=None):
+    """Next quotation number for a company without Zoho auto numbering, e.g. FFE_26000082.
+    Highest FFE_<yy>nnnnnn in Zoho (revisions R1.. ignored) + 1; a new year starts at FFE_<yy>000001."""
+    import re
+    from ..company import current
+    prefix = MANUAL_NUMBER_PREFIX.get(current())
+    if not prefix:
+        return None
+    yy = (year or timezone.localdate().year) % 100
+    start = f"{prefix}_{yy:02d}"
+    pat = re.compile(rf"^{re.escape(start)}(\d+)(?:R\d+)?$", re.I)
+    best, width, page = 0, 6, 1
+    while page <= 10:
+        data = api("GET", "estimates", {"estimate_number_startswith": start, "per_page": 200, "page": page})
+        for est in data.get("estimates") or []:
+            m = pat.match((est.get("estimate_number") or "").strip())
+            if m:
+                best = max(best, int(m.group(1)))
+                width = max(width, len(m.group(1)))
+        if not (data.get("page_context") or {}).get("has_more_page"):
+            break
+        page += 1
+    return f"{start}{best + 1:0{width}d}"

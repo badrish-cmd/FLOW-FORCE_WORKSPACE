@@ -73,7 +73,7 @@ def enquiry_list(request):
 def _form_initial(enq=None):
     if enq is None:
         return {"sent_on": timezone.localdate(), "status": VendorEnquiry.STATUS_SENT}
-    return {"enquiry_no": enq.enquiry_no, "customer_name": enq.customer_name, "vendor_name": enq.vendor_name,
+    return {"company": enq.company, "enquiry_no": enq.enquiry_no, "customer_name": enq.customer_name, "vendor_name": enq.vendor_name,
             "initial_enquiry": enq.initial_enquiry, "sent_on": enq.sent_on, "status": enq.status,
             "vendor_quote_no": enq.vendor_quote_no}
 

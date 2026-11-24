@@ -49,6 +49,8 @@ class VendorEnquiry(models.Model):
         (STATUS_QUOTE_GOT, "Quote Got"),
     ]
 
+    company = models.CharField(max_length=5, choices=[("FFI", "FFI - PT. Flow Force Indonesia"),
+                                                      ("FFE", "FFE - PT. Flow Force Engineering")], default="FFI")
     enquiry_no = models.CharField(max_length=100, db_index=True)
     customer_name = models.CharField(max_length=255, blank=True)
     vendor_name = models.CharField(max_length=200)

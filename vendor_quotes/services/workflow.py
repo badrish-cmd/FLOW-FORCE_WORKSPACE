@@ -239,11 +239,13 @@ def import_vendor_master(vendor, uploaded_file, user, note="Imported master"):
 # ---------------------------------------------------------------- quotes
 
 @transaction.atomic
-def create_quote(*, enquiry_number, customer_name, vendor, vendor_quote_no, quote_file, user,
+def create_quote(*, enquiry_number, customer_name, vendor, vendor_quote_no, quote_file, user, company="FFI",
                  start_from=None, currency=None):
     enquiry_number = enquiry_number.strip().upper()
+    from ..company import clean
     enquiry, created = Enquiry.objects.get_or_create(
-        number=enquiry_number, defaults={"customer_name": customer_name.strip(), "created_by": user})
+        company=clean(company), number=enquiry_number,
+        defaults={"customer_name": customer_name.strip(), "created_by": user})
     if not created and customer_name and not enquiry.customer_name:
         enquiry.customer_name = customer_name.strip()
         enquiry.save(update_fields=["customer_name"])
@@ -456,6 +458,13 @@ def run_excel_output(rev):
 
 
 def run_zoho_output(rev):
+    """Create the Zoho draft in the Zoho Books of the quote's company (FFI or FFE)."""
+    from .. import company as company_ctx
+    with company_ctx.using(rev.quote.enquiry.company):
+        return _run_zoho_output(rev)
+
+
+def _run_zoho_output(rev):
     q = rev.quote
     if rev.zoho_estimate_id:
         rev.zoho_status = QuoteRevision.OUTPUT_DONE
@@ -483,21 +492,33 @@ def run_zoho_output(rev):
                 rev.quote_subject = first_desc[:255]
                 rev.save(update_fields=["quote_subject"])
 
-        res = zoho.create_draft_estimate(
-            customer_id=customer_id,
-            reference=q.enquiry.number,
-            lines=lines,
-            estimate_number=estimate_number,
-            quote_subject=rev.quote_subject,
-            validity_days=rev.validity_days,
-            salesperson_name=rev.salesperson_name,
-            salesperson_id=rev.salesperson_id,
-            delivery_time=rev.delivery_time,
-            payment_terms=rev.payment_terms,
-            customer_notes=rev.customer_notes,
-            extra_terms=rev.extra_terms,
-            line_details=rev.line_details,
-        )
+        manual = rev.number == 0 and bool(zoho.MANUAL_NUMBER_PREFIX.get(q.enquiry.company))
+        if manual:
+            estimate_number = zoho.next_manual_number()     # FFE has no Zoho auto numbering
+        for attempt in range(3):
+            try:
+                res = zoho.create_draft_estimate(
+                    customer_id=customer_id,
+                    reference=q.enquiry.number,
+                    lines=lines,
+                    estimate_number=estimate_number,
+                    quote_subject=rev.quote_subject,
+                    validity_days=rev.validity_days,
+                    salesperson_name=rev.salesperson_name,
+                    salesperson_id=rev.salesperson_id,
+                    delivery_time=rev.delivery_time,
+                    payment_terms=rev.payment_terms,
+                    customer_notes=rev.customer_notes,
+                    extra_terms=rev.extra_terms,
+                    line_details=rev.line_details,
+                )
+                break
+            except zoho.ZohoError as e:
+                # someone used this number at the same moment -> take the next one
+                if manual and attempt < 2 and any(w in str(e).lower() for w in ("already", "exists", "duplicate")):
+                    estimate_number = zoho.next_manual_number()
+                    continue
+                raise
         est_id = res[0]
         est_no = res[1]
         stick_warnings = getattr(res, "stick_warnings", [])
@@ -525,6 +546,12 @@ def run_zoho_output(rev):
 
 def sync_zoho_draft(rev, user):
     """Rewrite the lines of the existing Zoho draft quotation from this revision's price sheet."""
+    from .. import company as company_ctx
+    with company_ctx.using(rev.quote.enquiry.company):
+        return _sync_zoho_draft(rev, user)
+
+
+def _sync_zoho_draft(rev, user):
     if not rev.zoho_estimate_id:
         raise WorkflowError("This version has no Zoho draft yet.")
     if formula_error_message(rev.snapshot):
@@ -790,7 +817,8 @@ def _set_sheet_details(snapshot, details):
 
 
 @transaction.atomic
-def update_quote_details(quote, user, *, enquiry_number, customer_name, vendor, vendor_quote_no, new_file=None):
+def update_quote_details(quote, user, *, enquiry_number, customer_name, vendor, vendor_quote_no, new_file=None,
+                         company=None):
     """Correct a wrongly uploaded quote: enquiry no., customer, vendor, vendor quote no., the PDF."""
     if not can_edit_quote_details(quote, user):
         raise WorkflowError(_locked_reason(quote) or "You don't have permission to edit this quote.")
@@ -801,10 +829,15 @@ def update_quote_details(quote, user, *, enquiry_number, customer_name, vendor, 
         raise WorkflowError("Enquiry no. is required.")
     changes = []
     old_enquiry = quote.enquiry
-    if enquiry_number != old_enquiry.number:
+    from ..company import clean
+    company = clean(company or old_enquiry.company)
+    if enquiry_number != old_enquiry.number or company != old_enquiry.company:
         enquiry, _ = Enquiry.objects.get_or_create(
-            number=enquiry_number, defaults={"customer_name": customer_name, "created_by": user})
-        changes.append(f"Enquiry {old_enquiry.number} -> {enquiry.number}")
+            company=company, number=enquiry_number, defaults={"customer_name": customer_name, "created_by": user})
+        if enquiry_number != old_enquiry.number:
+            changes.append(f"Enquiry {old_enquiry.number} -> {enquiry.number}")
+        if company != old_enquiry.company:
+            changes.append(f"Company {old_enquiry.company} -> {company}")
         quote.enquiry = enquiry
     else:
         enquiry = old_enquiry
