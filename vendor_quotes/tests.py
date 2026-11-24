@@ -2040,7 +2040,7 @@ class FFECompanyTests(TestCase):
         def fake_http(method, url, data=None, headers=None, timeout=30):
             if "oauth" in url:
                 return {"refresh_token": "r", "access_token": "a", "expires_in": 3600, "api_domain": "https://www.zohoapis.com"}
-            return {"organizations": [{"organization_id": "741367552", "name": "PT. Flow Force Indonesia"}]}
+            raise zoho.ZohoError("You are not authorized to perform this operation")
         with using("FFE"), mock.patch.object(zoho, "_http", side_effect=fake_http):
             with self.assertRaises(zoho.ZohoError) as e:
                 zoho.exchange_code("code", self.gm)
@@ -2050,7 +2050,8 @@ class FFECompanyTests(TestCase):
         def fake_http_ok(method, url, data=None, headers=None, timeout=30):
             if "oauth" in url:
                 return {"refresh_token": "r", "access_token": "a", "expires_in": 3600, "api_domain": "https://www.zohoapis.com"}
-            return {"organizations": [{"organization_id": "887677172", "name": "PT. Flow Force Engineering"}]}
+            assert "organization_id=887677172" in url and "/contacts" in url
+            return {"code": 0, "contacts": []}
         with using("FFE"), mock.patch.object(zoho, "_http", side_effect=fake_http_ok):
             zoho.exchange_code("code", self.gm)
         self.assertTrue(ZohoConnection.get("FFE").is_connected)

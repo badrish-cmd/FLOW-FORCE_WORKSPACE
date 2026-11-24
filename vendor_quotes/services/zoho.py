@@ -112,16 +112,18 @@ def exchange_code(code, user):
     if "refresh_token" not in data:
         raise ZohoError(data.get("error") or "Zoho did not return a refresh token. Try connecting again.")
     # Make sure this Zoho login really has the company's organisation, so FFI and FFE never get mixed up.
+    # (Reading one customer of that organisation only needs the contacts permission we already ask for.)
     from ..company import NAMES, current
     api_domain = data.get("api_domain") or "https://www.zohoapis.com"
-    orgs = _http("GET", f"{api_domain.rstrip('/')}/books/v3/organizations", None,
-                 {"Authorization": f"Zoho-oauthtoken {data.get('access_token', '')}"}).get("organizations") or []
     want = org_id()
-    match = next((o for o in orgs if str(o.get("organization_id")) == want), None)
-    if not match:
-        names = ", ".join(f"{o.get('name')} ({o.get('organization_id')})" for o in orgs) or "none"
-        raise ZohoError(f"This Zoho login has no access to {NAMES[current()]} (organisation {want}). "
-                        f"It has: {names}. Sign in with the {current()} Zoho account and try again.")
+    try:
+        _http("GET", f"{api_domain.rstrip('/')}/books/v3/contacts?"
+                     f"{urllib.parse.urlencode({'organization_id': want, 'per_page': 1})}", None,
+              {"Authorization": f"Zoho-oauthtoken {data.get('access_token', '')}"})
+    except ZohoError as e:
+        raise ZohoError(f"This Zoho login can't open {NAMES[current()]} (organisation {want}): {e}. "
+                        f"Sign in with the {current()} Zoho account and try again.")
+    match = {"name": NAMES[current()]}
     conn = ZohoConnection.get()
     conn.organization_name = match.get("name", "")[:200]
     conn.refresh_token = data["refresh_token"]
