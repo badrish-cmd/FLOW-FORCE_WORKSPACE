@@ -132,6 +132,15 @@
 
                         <div class="col-md-6">
                             <label class="form-label font-semibold text-xs text-slate-600 uppercase">
+                                Year <span class="text-danger">*</span>
+                            </label>
+                            {{ form.year }}
+                            <div class="text-xs text-slate-500 mt-1" id="yearHint">One PID = one year. Changing it changes the year for all drawings of this PID.</div>
+                            {% if form.year.errors %}<div class="text-danger text-xs mt-1">{{ form.year.errors }}</div>{% endif %}
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label font-semibold text-xs text-slate-600 uppercase">
                                 Drafter Name <span class="text-danger">*</span>
                             </label>
                             {{ form.drafter_name }}
@@ -270,6 +279,22 @@
     </div>
 </div>
 
+{{ pid_years|json_script:"pidYears" }}
+<script>
+(function () {
+    var years = JSON.parse(document.getElementById('pidYears').textContent || '{}');
+    var pid = document.getElementById('id_pid_reference'), yr = document.getElementById('id_year'), hint = document.getElementById('yearHint');
+    if (!pid || !yr) return;
+    yr.required = true;
+    function sync() {
+        var y = years[(pid.value || '').trim().toUpperCase()];
+        if (y) { yr.value = String(y); hint.textContent = 'This PID already has year ' + y + '. Changing it changes all drawings of this PID.'; }
+        else { hint.textContent = 'One PID = one year. Changing it changes the year for all drawings of this PID.'; }
+    }
+    pid.addEventListener('change', sync);
+    if (!yr.value) sync();
+})();
+</script>
 <script>
     document.addEventListener("DOMContentLoaded", function() {
         var form = document.querySelector("form");

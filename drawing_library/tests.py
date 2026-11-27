@@ -865,3 +865,77 @@ class DrawingLibraryTests(TestCase):
 
 
 
+
+
+class PidYearTests(TestCase):
+    """One PID = one year; missing years shown in red for the engineer to fill one by one."""
+
+    def setUp(self):
+        from drawing_library.models import PidYear
+        self.PidYear = PidYear
+        mk = lambda e, role: EmployeeUser.objects.create_user(email=e, full_name=e.split("@")[0], password="x",
+                                                             role=role, status="APPROVED")
+        self.admin = mk("admin@ff.com", "ADMIN")
+        self.engineer = mk("eng@ff.com", "EMPLOYEE")
+        self.viewer = mk("view@ff.com", "EMPLOYEE")
+        DrawingAccess.objects.create(user=self.engineer, access_level="EDIT", granted_by=self.admin)
+        DrawingAccess.objects.create(user=self.viewer, access_level="VIEW", granted_by=self.admin)
+
+        def dwg(pid, num, parent=None):
+            return EngineeringDrawing.objects.create(project_name="P", customer_name="C", pid_reference=pid,
+                                                     drawing_name=num, base_drawing_number=num, drafter_name="D",
+                                                     parent=parent, created_by=self.admin)
+        self.a1 = dwg("1927", "A-1")
+        self.a2 = dwg("1927", "A-2", parent=self.a1)
+        self.b1 = dwg("1800", "B-1")
+
+    def test_list_shows_missing_years_in_red_and_engineer_sets_one_pid(self):
+        self.client.force_login(self.engineer)
+        r = self.client.get(reverse("drawings:drawing_list"))
+        self.assertContains(r, "2 PID projects have no year")
+        self.assertContains(r, "Select the year for this PID", count=2)
+        r = self.client.post(reverse("drawings:pid_year_set"), {"pid": "1927", "year": "2025"})
+        self.assertEqual(self.PidYear.year_for("1927"), 2025)
+        r = self.client.get(reverse("drawings:drawing_list"))
+        self.assertContains(r, "1 PID project has no year")
+        sections = r.context["year_sections"]
+        self.assertEqual([s["year"] for s in sections], [None, 2025])          # missing first, then by year
+        self.assertEqual([g["pid_reference"] for g in sections[1]["groups"]], ["1927"])
+        # filters
+        r = self.client.get(reverse("drawings:drawing_list") + "?year=2025")
+        self.assertEqual([g["pid_reference"] for g in r.context["pid_groups"]], ["1927"])
+        r = self.client.get(reverse("drawings:drawing_list") + "?year=missing")
+        self.assertEqual([g["pid_reference"] for g in r.context["pid_groups"]], ["1800"])
+        # change later (edit access) - one row per PID
+        self.client.post(reverse("drawings:pid_year_set"), {"pid": "1927", "year": "2024"})
+        self.assertEqual(self.PidYear.objects.filter(pid="1927").count(), 1)
+        self.assertEqual(self.PidYear.year_for("1927"), 2024)
+
+    def test_viewer_cannot_set_year_and_bad_year_rejected(self):
+        self.client.force_login(self.viewer)
+        r = self.client.get(reverse("drawings:drawing_list"))
+        self.assertContains(r, "Year not entered yet")
+        self.assertNotContains(r, "Select the year for this PID")
+        self.client.post(reverse("drawings:pid_year_set"), {"pid": "1927", "year": "2025"})
+        self.assertIsNone(self.PidYear.year_for("1927"))
+        self.client.force_login(self.engineer)
+        self.client.post(reverse("drawings:pid_year_set"), {"pid": "1927", "year": "1890"})
+        self.assertIsNone(self.PidYear.year_for("1927"))
+
+    def test_form_prefills_year_and_saving_sets_pid_year(self):
+        self.PidYear.objects.create(pid="1927", year=2023)
+        self.client.force_login(self.engineer)
+        r = self.client.get(reverse("drawings:drawing_create") + "?pid=1927")
+        self.assertEqual(r.context["form"].initial.get("year"), 2023)
+        self.assertEqual(r.context["pid_years"], {"1927": 2023})
+        r = self.client.get(reverse("drawings:drawing_edit", args=[self.b1.pk]))
+        self.assertIsNone(r.context["form"].initial.get("year"))
+        data = {"customer_name": "C", "project_name": "P", "pid_reference": "1800", "drafter_name": "D",
+                "base_drawing_number": "B-1", "drawing_name": "B-1", "format": "ZWCAD", "year": "2022"}
+        self.client.post(reverse("drawings:drawing_edit", args=[self.b1.pk]), data)
+        self.assertEqual(self.PidYear.year_for("1800"), 2022)
+        # editing the year on a drawing of PID 1927 changes it for the whole PID
+        data.update({"pid_reference": "1927", "base_drawing_number": "A-2", "drawing_name": "A-2", "year": "2026",
+                     "parent": self.a1.pk})
+        self.client.post(reverse("drawings:drawing_edit", args=[self.a2.pk]), data)
+        self.assertEqual(self.PidYear.year_for("1927"), 2026)

@@ -1,12 +1,17 @@
 import os
 from django import forms
 from django.utils import timezone
-from .models import EngineeringDrawing, DrawingRevision, DrawingAccess
+from .models import EngineeringDrawing, DrawingRevision, DrawingAccess, PidYear, year_choices
 from auth_app.models import EmployeeUser
 from employee_management.models import Department
 
 
 class EngineeringDrawingForm(forms.ModelForm):
+    # One PID = one year (stored in PidYear, shared by all drawings of the PID)
+    year = forms.TypedChoiceField(
+        choices=[], coerce=int, required=False, empty_value=None, label="Year",
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
     # Initial revision files and notes
     initial_revision_number = forms.CharField(
         max_length=50,
@@ -68,6 +73,11 @@ class EngineeringDrawingForm(forms.ModelForm):
         self.fields["parent"].empty_label = "-- None (Level 1 Parent / Master Drawing) --"
         self.fields["parent"].queryset = EngineeringDrawing.objects.all().order_by("base_drawing_number")
         self.fields["drawing_type"].required = False
+        self.fields["year"].choices = [("", "-- Select year --")] + year_choices()
+        if not self.initial.get("year"):
+            pid = self.initial.get("pid_reference") or (self.instance.pid_reference if self.instance and self.instance.pk else "")
+            if pid:
+                self.initial["year"] = PidYear.year_for(pid)
         if not self.initial.get("drawing_type"):
             self.initial["drawing_type"] = "MASTER"
 

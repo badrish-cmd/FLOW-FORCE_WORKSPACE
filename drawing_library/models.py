@@ -192,6 +192,62 @@ class EngineeringDrawing(models.Model):
             self.save(update_fields=["active_revision_number", "updated_at"])
 
 
+def pid_key(pid):
+    return (pid or "").strip().upper()
+
+
+def year_choices():
+    this = timezone.localdate().year
+    return [(y, str(y)) for y in range(this + 1, 2004, -1)]
+
+
+class PidYear(models.Model):
+    """One PID = one year. Every drawing of the PID shows this year."""
+    pid = models.CharField(max_length=150, unique=True, help_text="PID reference (upper case, trimmed)")
+    year = models.PositiveSmallIntegerField()
+    set_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+                               related_name="+")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "PID year"
+        verbose_name_plural = "PID years"
+
+    def __str__(self):
+        return f"{self.pid}: {self.year}"
+
+    @classmethod
+    def year_for(cls, pid):
+        row = cls.objects.filter(pid=pid_key(pid)).first()
+        return row.year if row else None
+
+    @classmethod
+    def as_map(cls):
+        return dict(cls.objects.values_list("pid", "year"))
+
+
+def set_pid_year(pid, year, user, request=None, drawing=None):
+    """Set the year of a PID (applies to all its drawings). Returns True if it changed."""
+    key = pid_key(pid)
+    try:
+        year = int(year)
+    except (TypeError, ValueError):
+        raise ValueError("Pick a valid year.")
+    valid = {y for y, _ in year_choices()}
+    if not key or year not in valid:
+        raise ValueError("Pick a valid year.")
+    row = PidYear.objects.filter(pid=key).first()
+    old = row.year if row else None
+    if old == year:
+        return False
+    PidYear.objects.update_or_create(pid=key, defaults={"year": year, "set_by": user})
+    if drawing is None:
+        drawing = EngineeringDrawing.objects.filter(pid_reference__iexact=pid.strip()).order_by("parent_id", "id").first()
+    log_drawing_activity(user=user, action="UPDATE_DRAWING", drawing=drawing, request=request,
+                         description=f"Year for PID {key} set to {year}" + (f" (was {old})" if old else ""))
+    return True
+
+
 class DrawingRevision(models.Model):
     drawing = models.ForeignKey(
         EngineeringDrawing,

@@ -14,7 +14,11 @@ from .models import (
     DrawingRevision,
     DrawingAccess,
     DrawingActivityLog,
+    PidYear,
     log_drawing_activity,
+    pid_key,
+    set_pid_year,
+    year_choices,
 )
 from .forms import EngineeringDrawingForm, DrawingRevisionForm, DrawingAccessGrantForm
 from .permissions import (
@@ -96,6 +100,27 @@ def drawing_list(request):
     # Sort pid_groups by latest_update descending
     sorted_pids = sorted(pid_groups.values(), key=lambda x: x["latest_update"] or timezone.now(), reverse=True)
 
+    # One PID = one year: attach the year, filter by year, group the list by year (missing year first, in red)
+    years_map = PidYear.as_map()
+    lib_editor = is_admin_or_superadmin(user) or has_library_edit_access(user)
+    for g in sorted_pids:
+        g["year"] = years_map.get(pid_key(g["pid_reference"]))
+        g["can_set_year"] = g["pid_reference"] != "UNASSIGNED" and (
+            lib_editor or has_drawing_access(user, g["root_drawing"], required_level="EDIT"))
+    missing_year_count = sum(1 for g in sorted_pids if not g["year"])
+    years_present = sorted({g["year"] for g in sorted_pids if g["year"]}, reverse=True)
+    year_filter = request.GET.get("year", "").strip()
+    if year_filter == "missing":
+        sorted_pids = [g for g in sorted_pids if not g["year"]]
+    elif year_filter.isdigit():
+        sorted_pids = [g for g in sorted_pids if g["year"] == int(year_filter)]
+    year_sections = []
+    missing = [g for g in sorted_pids if not g["year"]]
+    if missing:
+        year_sections.append({"year": None, "groups": missing})
+    for y in sorted({g["year"] for g in sorted_pids if g["year"]}, reverse=True):
+        year_sections.append({"year": y, "groups": [g for g in sorted_pids if g["year"] == y]})
+
     # Metrics
     total_projects = len(pid_groups)
     total_drawings = accessible_drawings.count()
@@ -106,6 +131,11 @@ def drawing_list(request):
 
     context = {
         "pid_groups": sorted_pids,
+        "year_sections": year_sections,
+        "years_present": years_present,
+        "year_filter": year_filter,
+        "year_options": year_choices(),
+        "missing_year_count": missing_year_count,
         "total_projects": total_projects,
         "total_drawings": total_drawings,
         "total_revisions": total_revisions,
@@ -239,6 +269,8 @@ def drawing_create(request):
             if not drawing.watermark_company and ref_drawing:
                 drawing.watermark_company = ref_drawing.watermark_company
             drawing.save()
+            if form.cleaned_data.get("year"):
+                set_pid_year(drawing.pid_reference, form.cleaned_data["year"], request.user, request, drawing)
 
             log_drawing_activity(
                 user=request.user,
@@ -325,6 +357,7 @@ def drawing_create(request):
     return render(request, "drawing_library/drawing_form.html", {
         "form": form,
         "existing_pids": existing_pids,
+        "pid_years": PidYear.as_map(),
         "parent_drawing": parent_drawing,
         "title": form_title,
         "is_create": True,
@@ -348,6 +381,8 @@ def drawing_edit(request, pk):
         form = EngineeringDrawingForm(request.POST, request.FILES, instance=drawing)
         if form.is_valid():
             form.save()
+            if form.cleaned_data.get("year"):
+                set_pid_year(drawing.pid_reference, form.cleaned_data["year"], request.user, request, drawing)
 
             # Handle optional revision files attached during drawing edit
             init_rev = form.cleaned_data.get("initial_revision_number") or drawing.active_revision_number
@@ -409,6 +444,7 @@ def drawing_edit(request, pk):
         "form": form,
         "drawing": drawing,
         "existing_pids": existing_pids,
+        "pid_years": PidYear.as_map(),
         "title": f"Edit Drawing - {drawing.base_drawing_number}",
         "is_create": False,
     })
@@ -764,3 +800,30 @@ def global_access_management(request):
         "global_grants": global_grants,
         "drawing_grants": drawing_grants,
     })
+
+
+@drawing_library_access_required
+def pid_year_set(request):
+    """Set the year of a PID from the list (one PID = one year; applies to all its drawings)."""
+    from django.urls import reverse
+    if request.method != "POST":
+        return redirect("drawings:drawing_list")
+    pid = request.POST.get("pid", "").strip()
+    drawings = list(EngineeringDrawing.objects.filter(pid_reference__iexact=pid))
+    user = request.user
+    allowed = is_admin_or_superadmin(user) or has_library_edit_access(user) or any(
+        has_drawing_access(user, d, required_level="EDIT") for d in drawings)
+    back = request.POST.get("next") or reverse("drawings:drawing_list")
+    if not back.startswith("/"):
+        back = reverse("drawings:drawing_list")
+    if not drawings or not allowed:
+        messages.error(request, "You don't have permission to set the year for this PID.")
+        return redirect(back)
+    try:
+        changed = set_pid_year(pid, request.POST.get("year", ""), user, request)
+    except ValueError as e:
+        messages.error(request, str(e))
+        return redirect(back)
+    if changed:
+        messages.success(request, f"Year {request.POST.get('year')} saved for PID {pid} ({len(drawings)} drawing(s)).")
+    return redirect(back)

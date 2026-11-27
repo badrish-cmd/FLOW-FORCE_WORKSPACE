@@ -6,6 +6,7 @@ app_name = "drawings"
 urlpatterns = [
     path("", views.drawing_list, name="drawing_list"),
     path("create/", views.drawing_create, name="drawing_create"),
+    path("pid-year/", views.pid_year_set, name="pid_year_set"),
     path("<int:pk>/", views.drawing_detail, name="drawing_detail"),
     path("<int:pk>/edit/", views.drawing_edit, name="drawing_edit"),
     path("<int:pk>/delete/", views.drawing_delete, name="drawing_delete"),
