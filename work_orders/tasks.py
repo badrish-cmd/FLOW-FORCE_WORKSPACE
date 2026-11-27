@@ -36,7 +36,9 @@ def issue_work_order(wo_id):
             logger.warning("attachment %s: %s", a.file.name, e)
     title = f"Work Order {wo.number}"
     message = (f"{wo.approved_by.full_name if wo.approved_by else 'GM'} approved this work order for you "
-               f"({wo.pid_label}, {wo.team.name}). The work order PDF and the files are attached.")
+               f"({wo.pid_label}, {wo.type_label + ' - all departments' if wo.is_project else wo.team.name}). "
+               f"The work order PDF and the files are attached."
+               + (" Tick your tasks in the workspace as you finish them." if wo.is_project else ""))
     assignees = list(wo.assignees.filter(is_active=True))
     services.notify(assignees, f"New work order: {wo.number}", message, wo)
     for u in assignees:
@@ -62,3 +64,9 @@ def issue_work_order(wo_id):
             log.status, log.error_message = "FAILED", str(e)[:1000]
         log.save()
     services.event(wo, "issued", f"PDF made and emailed to {', '.join(u.full_name or u.email for u in assignees) or 'nobody'}", None)
+
+
+@shared_task
+def send_overdue_alerts():
+    from .project_services import overdue_alerts
+    return overdue_alerts()

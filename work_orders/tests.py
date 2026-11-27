@@ -89,7 +89,7 @@ class WorkOrderTests(TestCase):
                 "stages": ["2"], "sections": ["customer_po", "sales_order", "items", "stages", "images", "signatures", "team"],
                 "assignees": [self.eng1.id, self.eng2.id], "instructions": "Check seal sizes", "action": "save"}
         data.update(extra)
-        return self.client.post(reverse("work_orders:create"), data)
+        return self.client.post(reverse("work_orders:create_team"), data)
 
     # ---------------------------------------------------------------- PID
     def test_load_pid_takes_following_lines_without_pid(self):
@@ -107,18 +107,18 @@ class WorkOrderTests(TestCase):
 
     def test_new_form_prefills_from_pid(self):
         self.login(self.creator)
-        r = self.client.get(reverse("work_orders:create") + "?pid=1932&team=WH")
+        r = self.client.get(reverse("work_orders:create_team") + "?pid=1932&team=WH")
         self.assertContains(r, "2224585 - O-RING 60,5X2,4")
         self.assertContains(r, "Jombang plant")
         self.assertEqual(r.context["p"]["sections"], self.wh.default_sections)
-        r = self.client.get(reverse("work_orders:create") + "?pid=9999")
+        r = self.client.get(reverse("work_orders:create_team") + "?pid=9999")
         self.assertContains(r, "not found")
 
     # ---------------------------------------------------------------- access
     def test_access(self):
         self.login(self.other)
         self.assertEqual(self.client.get(reverse("work_orders:list")).status_code, 403)
-        self.assertEqual(self.client.get(reverse("work_orders:create")).status_code, 403)
+        self.assertEqual(self.client.get(reverse("work_orders:create_team")).status_code, 403)
         self.post_new()
         wo = WorkOrder.objects.get()
         self.login(self.other)
@@ -294,18 +294,18 @@ class WorkOrderTests(TestCase):
 
     def test_internal_work_order_without_pid(self):
         self.login(self.creator)
-        r = self.client.get(reverse("work_orders:create") + "?pid=Factory cikarang")
+        r = self.client.get(reverse("work_orders:create_team") + "?pid=Factory cikarang")
         self.assertContains(r, "not found")
         self.assertContains(r, "internal work order")
-        r = self.client.get(reverse("work_orders:create") + "?internal=1&ref=Factory Cikarang&team=WH")
+        r = self.client.get(reverse("work_orders:create_team") + "?internal=1&ref=Factory Cikarang&team=WH")
         self.assertContains(r, "INTERNAL")
         self.assertContains(r, "Factory Cikarang")
-        r = self.client.post(reverse("work_orders:create"), {
+        r = self.client.post(reverse("work_orders:create_team"), {
             "internal": "1", "pid": "INT", "reference": "", "team_id": self.wh.id, "line_desc": ["Shelf"],
             "line_qty": ["2"], "line_unit": ["pcs"], "line_rate": [""], "line_disc": [""], "line_row": [""],
             "assignees": [self.eng1.id], "action": "save"})
         self.assertFalse(WorkOrder.objects.exists())        # reference is required
-        self.client.post(reverse("work_orders:create"), {
+        self.client.post(reverse("work_orders:create_team"), {
             "internal": "1", "pid": "INT", "reference": "Factory Cikarang - racks", "team_id": self.wh.id,
             "customer_name": "PT. Flow Force Indonesia", "line_desc": ["Shelf"], "line_qty": ["2"], "line_unit": ["pcs"],
             "line_rate": [""], "line_disc": [""], "line_row": [""], "sections": ["items", "team", "signatures"],

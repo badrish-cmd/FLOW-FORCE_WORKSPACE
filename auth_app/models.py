@@ -49,6 +49,12 @@ class EmployeeUser(
         unique=True
     )
 
+    designation = models.CharField(
+        max_length=120,
+        blank=True,
+        help_text="Job title shown on documents, e.g. Engineering Manager"
+    )
+
     department = models.ForeignKey(
         'employee_management.Department',
         on_delete=models.SET_NULL,

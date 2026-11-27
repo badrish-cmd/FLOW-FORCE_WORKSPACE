@@ -58,6 +58,17 @@ def can_create(user):
     return level(user) in (LEVEL_ADMIN, WorkOrderAccess.LEVEL_CREATOR)
 
 
+def is_spec_editor(user):
+    """Fills and confirms page 2 (customer requirement vs final specification)."""
+    return level(user) in (LEVEL_ADMIN, WorkOrderAccess.LEVEL_SPEC, WorkOrderAccess.LEVEL_CREATOR)
+
+
+def is_coordinator(user):
+    """Ticks items and stages of any department."""
+    return level(user) in (LEVEL_ADMIN, WorkOrderAccess.LEVEL_WORKER, WorkOrderAccess.LEVEL_SPEC,
+                           WorkOrderAccess.LEVEL_CREATOR)
+
+
 def sees_all(user):
     return level(user) is not None or can_approve(user)
 
@@ -92,6 +103,8 @@ def can_work(user, wo):
 
 
 def can_close(user, wo):
+    if wo.is_project:   # single work order: the GM closes it once everything is completed
+        return wo.status == WorkOrder.STATUS_DONE and can_approve(user)
     return wo.status in (WorkOrder.STATUS_DONE,) + WorkOrder.ACTIVE and (
         can_approve(user) or is_admin(user) or wo.created_by_id == user.id)
 
@@ -106,7 +119,7 @@ def visible_qs(user):
 @transaction.atomic
 def set_access(target, new_level, by):
     new_level = new_level or ""
-    if new_level not in ("", WorkOrderAccess.LEVEL_VIEWER, WorkOrderAccess.LEVEL_CREATOR):
+    if new_level not in ("",) + tuple(k for k, _ in WorkOrderAccess.LEVEL_CHOICES):
         raise WorkOrderError("Unknown access level.")
     if is_admin(target):
         raise WorkOrderError(f"{target.full_name or target.email} is an Admin and always has full access.")
@@ -176,10 +189,22 @@ def approvers():
 # ---------------------------------------------------------------- numbering
 
 def next_number(wo, year=None):
-    """WO-26-1932-ENG-01: year of approval, PID, team code, count per year/PID/team."""
+    """Old per-team: WO-26-1932-ENG-01. Single work order: WO-26-1932 (WO-26-INT-01 for internal)."""
     year = year or timezone.localdate().year
     yy = year % 100
     pid = "".join(ch for ch in wo.pid if ch.isalnum()) or "0"
+    if wo.is_project:
+        counter, _ = NumberCounter.objects.select_for_update().get_or_create(year=year, pid=pid, team_code="")
+        while True:
+            counter.last += 1
+            if wo.is_internal:
+                base = f"WO-{yy:02d}-{pid}-{counter.last:02d}"
+            else:   # a second work order for the same PID (e.g. the first was cancelled) gets -2, -3 ...
+                base = f"WO-{yy:02d}-{pid}" + (f"-{counter.last}" if counter.last > 1 else "")
+            if not WorkOrder.objects.filter(base_number=base).exists():
+                break
+        counter.save(update_fields=["last"])
+        return base
     counter, _ = NumberCounter.objects.select_for_update().get_or_create(year=year, pid=pid, team_code=wo.team.code)
     while True:
         counter.last += 1
@@ -266,7 +291,7 @@ def delete_draft(wo, user):
     label = wo.display_number
     files = [a.file for a in wo.attachments.all()]
     Event.objects.create(work_order=None, label=label, user=user, action="deleted",
-                         message=f"Draft {label} for PID {wo.pid} ({wo.team.code}) deleted")
+                         message=f"Draft {label} for {wo.pid_label}{f' ({wo.team.code})' if wo.team_id else ''} deleted")
     wo.delete()
 
     def _rm():
@@ -281,6 +306,9 @@ def delete_draft(wo, user):
 # ---------------------------------------------------------------- workflow
 
 def _check_ready(wo):
+    if wo.is_project:
+        from .project_services import check_ready
+        return check_ready(wo)
     problems = []
     if not wo.assignees.exists():
         problems.append("Pick at least one employee to send the work order to.")
@@ -301,9 +329,10 @@ def submit(wo, user):
     wo.submitted_at = timezone.now()
     wo.save(update_fields=["status", "submitted_at", "updated_at"])
     event(wo, "submitted", "Sent to GM for approval", user)
-    msg = f"{user.full_name or user.email} sent a work order for {wo.pid_label} ({wo.team.name}) for your approval."
+    what = (wo.type_label or "Single") if wo.is_project else wo.team.name
+    msg = f"{user.full_name or user.email} sent a work order for {wo.pid_label} ({what}) for your approval."
     notify(approvers(), "Work order waiting for approval", msg, wo)
-    _simple_mail(approvers(), f"Work order for approval: {wo.pid_label} - {wo.team.name}", "Work order waiting for approval", msg, wo)
+    _simple_mail(approvers(), f"Work order for approval: {wo.pid_label} - {what}", "Work order waiting for approval", msg, wo)
     return wo
 
 
@@ -343,6 +372,9 @@ def approve(wo, user, comment=""):
     wo.gm_comment = (comment or "").strip()
     wo.save()
     if wo.parent_id:
+        if wo.is_project:
+            from .project_services import carry_over_ticks
+            carry_over_ticks(wo.parent, wo)
         WorkOrder.objects.filter(pk=wo.parent_id).update(status=WorkOrder.STATUS_REVISED, updated_at=timezone.now())
         event(wo.parent, "revised", f"Replaced by {wo.number}", user)
     event(wo, "approved", f"Approved and issued as {wo.number}" + (f" - {wo.gm_comment}" if wo.gm_comment else ""), user)
@@ -359,10 +391,17 @@ def _after_approval(wo_id):
         issue_work_order(wo_id)
 
 
+def render_any_pdf(wo):
+    if wo.is_project:
+        from .pdf_project import render_project_pdf
+        return render_project_pdf(wo)
+    from .pdf import render_pdf
+    return render_pdf(wo)
+
+
 def generate_pdf(wo):
     from django.core.files.base import ContentFile
-    from .pdf import render_pdf
-    data = render_pdf(wo)
+    data = render_any_pdf(wo)
     if wo.pdf:
         wo.pdf.delete(save=False)
     wo.pdf.save(f"{wo.number or 'DRAFT-' + str(wo.pk)}.pdf", ContentFile(data), save=False)
@@ -377,6 +416,9 @@ def revise(wo, user):
         raise WorkOrderError("Only an issued work order can be revised.")
     if wo.revisions.filter(status__in=WorkOrder.EDITABLE + (WorkOrder.STATUS_IN_REVIEW,)).exists():
         raise WorkOrderError("A revision of this work order is already being prepared.")
+    if wo.is_project:
+        from .project_services import revise_project
+        return revise_project(wo, user)
     new = WorkOrder.objects.get(pk=wo.pk)
     new.pk = None
     new.number = None
@@ -418,6 +460,8 @@ def set_status(wo, user, status):
             raise WorkOrderError("Can't start this work order.")
         msg = "Work started"
     elif status == WorkOrder.STATUS_DONE:
+        if wo.is_project:
+            raise WorkOrderError("This work order completes by itself when every stage and item is ticked.")
         if not can_work(user, wo):
             raise WorkOrderError("Can't mark this work order done.")
         open_items = wo.checklist.filter(done=False).count()
@@ -427,7 +471,8 @@ def set_status(wo, user, status):
         msg = "Marked done"
     elif status == WorkOrder.STATUS_CLOSED:
         if not can_close(user, wo):
-            raise WorkOrderError("Can't close this work order.")
+            raise WorkOrderError("Only the GM can close a completed work order." if wo.is_project
+                                 else "Can't close this work order.")
         wo.closed_at = timezone.now()
         msg = "Closed"
     elif status == WorkOrder.STATUS_CANCELLED:

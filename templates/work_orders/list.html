@@ -4,7 +4,7 @@
 <div class="mx-auto max-w-7xl">
     <div class="mb-4">
         <h1 class="text-2xl font-bold text-gray-900">Work Orders</h1>
-        <p class="text-sm text-slate-500">Work orders issued to our teams for each PID (LIST PID - PT Flow Force Indonesia). Draft → GM approval → issued → done.</p>
+        <p class="text-sm text-slate-500">One work order per PID for all departments (LIST PID - PT Flow Force Indonesia). Draft → GM approval → issued → each team ticks its items → completed → GM closes.</p>
     </div>
     {% if mine and wo_sees_all %}{% with nav='mine' %}{% include 'work_orders/_nav.html' %}{% endwith %}{% else %}{% with nav='list' %}{% include 'work_orders/_nav.html' %}{% endwith %}{% endif %}
 
@@ -40,7 +40,7 @@
                 <tr class="cursor-pointer hover:bg-slate-50" onclick="location.href='{% url 'work_orders:detail' w.id %}'">
                     <td class="px-4 py-3"><div class="font-semibold text-slate-900">{% if w.number %}{{ w.number }}{% else %}<span class="text-slate-400">Draft</span>{% endif %}</div><div class="max-w-[260px] truncate text-xs text-slate-500">{{ w.title }}</div></td>
                     <td class="px-4 py-3">{% if w.is_internal %}<div class="font-semibold text-slate-800"><span class="rounded bg-slate-800 px-1.5 text-[10px] text-white">INTERNAL</span> {{ w.reference }}</div>{% else %}<div class="font-semibold text-slate-800">PID {{ w.pid }}</div><div class="text-xs text-slate-500">{{ w.customer_name }}</div>{% endif %}</td>
-                    <td class="px-4 py-3"><span class="rounded bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">{{ w.team.code }}</span> <span class="text-xs text-slate-500">{{ w.team.name }}</span></td>
+                    <td class="px-4 py-3">{% if w.is_project %}<span class="rounded bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-800">{{ w.type_label|default:"Single" }}</span> <span class="text-xs text-slate-500">all departments</span>{% else %}<span class="rounded bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">{{ w.team.code }}</span> <span class="text-xs text-slate-500">{{ w.team.name }}</span>{% endif %}</td>
                     <td class="px-4 py-3 text-xs text-slate-600">{% for u in w.assignees.all %}{{ u.full_name|default:u.email }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</td>
                     <td class="px-4 py-3">{% include 'work_orders/_status.html' with status=w.status %}</td>
                     <td class="px-4 py-3 text-xs">{% if w.is_overdue %}<span class="rounded-full bg-red-100 px-2 py-0.5 font-semibold text-red-700">Overdue · {{ w.required_by|date:"M j" }}</span>{% else %}<span class="text-slate-600">{{ w.required_by|date:"M j, Y"|default:"—" }}</span>{% endif %}</td>

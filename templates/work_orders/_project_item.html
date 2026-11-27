@@ -1,0 +1,51 @@
+<div class="border-b border-slate-50 py-1.5 text-sm last:border-0" x-data="{ open: false, na: false, edit: false }">
+    <div class="flex flex-wrap items-center gap-2">
+        {% if it.state == 'DONE' %}<span class="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-emerald-600 bg-emerald-600 text-white"><i class="fas fa-check text-[10px]"></i></span>
+        {% elif it.state == 'NA' %}<span class="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-slate-300 bg-slate-100 text-[9px] font-bold text-slate-500">N/A</span>
+        {% else %}<span class="h-5 w-5 shrink-0 rounded border {% if it.is_overdue %}border-red-400{% else %}border-slate-400{% endif %}"></span>{% endif %}
+        <span class="flex-1 {% if it.state != 'OPEN' %}text-slate-500{% endif %}">{{ it.text }}
+            {% if it.file_required %}<i class="fas fa-paperclip ml-1 text-[10px] text-slate-400" title="File required"></i>{% endif %}
+            {% if it.added_after_issue %}<span class="ml-1 rounded bg-indigo-50 px-1 text-[10px] text-indigo-700">added later</span>{% endif %}
+        </span>
+        {% if it.assigned_to %}<span class="rounded-full bg-blue-50 px-2 text-[11px] font-semibold text-blue-800"><i class="fas fa-user mr-1 text-[9px]"></i>{{ it.assigned_to.full_name|default:it.assigned_to.email }}</span>{% endif %}
+        {% if it.target_date %}<span class="text-[11px] {% if it.is_overdue %}font-semibold text-red-600{% else %}text-slate-500{% endif %}">{{ it.target_date|date:"d/m" }}</span>{% elif it.is_overdue %}<span class="text-[11px] font-semibold text-red-600">overdue</span>{% endif %}
+        {% if it.can_tick %}
+            {% if it.kind == 'TASK' and not it.file_required %}
+            <form method="post" action="{% url 'work_orders:item_tick' wo.id it.id %}">{% csrf_token %}<input type="hidden" name="dept" value="{{ dp.id }}"><button class="btn-s bg-emerald-600 text-white" title="Mark done"><i class="fas fa-check"></i> Done</button></form>
+            {% else %}
+            <button type="button" @click="open = !open; na = false" class="btn-s bg-emerald-600 text-white"><i class="fas fa-check"></i> Tick</button>
+            {% endif %}
+            <button type="button" @click="na = !na; open = false" class="btn-s border border-slate-300 text-slate-600">N/A</button>
+        {% endif %}
+        {% if it.state != 'OPEN' and is_admin and wo.status in 'ISSUED IN_PROGRESS DONE' %}
+            <form method="post" action="{% url 'work_orders:item_tick' wo.id it.id %}" onsubmit="return confirm('Untick this item?')">{% csrf_token %}<input type="hidden" name="dept" value="{{ dp.id }}"><input type="hidden" name="action" value="reopen"><button class="btn-s border border-slate-300 text-slate-500">Untick</button></form>
+        {% endif %}
+        {% if editing or is_admin and wo.status in 'ISSUED IN_PROGRESS' %}<button type="button" @click="edit = !edit" class="text-xs text-slate-400 hover:text-blue-600" title="Edit"><i class="fas fa-pen"></i></button>{% endif %}
+    </div>
+    {% if it.state == 'DONE' %}<div class="ml-7 text-[11px] text-emerald-700">{% if it.doc_ref %}Doc: <b>{{ it.doc_ref }}</b> · {% endif %}{% if it.attachment %}<a class="underline" href="{% url 'work_orders:file' wo.id it.attachment.id %}?download=1">{{ it.attachment.filename }}</a> · {% endif %}{{ it.done_by.full_name|default:"—" }} · {{ it.done_at|date:"M j, Y H:i" }}</div>
+    {% elif it.state == 'NA' %}<div class="ml-7 text-[11px] text-slate-500">N/A - {{ it.na_reason }} · {{ it.done_by.full_name|default:"—" }} · {{ it.done_at|date:"M j" }}</div>{% endif %}
+    {% if it.can_tick %}
+    <form x-show="open" x-cloak method="post" action="{% url 'work_orders:item_tick' wo.id it.id %}" enctype="multipart/form-data" class="ml-7 mt-1 flex flex-wrap items-center gap-2">{% csrf_token %}
+        <input type="hidden" name="dept" value="{{ dp.id }}">
+        <input name="doc_ref" {% if it.kind == 'CHECK' %}required placeholder="Document number *"{% else %}placeholder="Reference (optional)"{% endif %} class="inp">
+        <input type="file" name="file" {% if it.file_required %}required{% endif %} class="text-xs">
+        <button class="btn-s bg-emerald-600 text-white">Save tick</button>
+    </form>
+    <form x-show="na" x-cloak method="post" action="{% url 'work_orders:item_tick' wo.id it.id %}" class="ml-7 mt-1 flex flex-wrap items-center gap-2">{% csrf_token %}
+        <input type="hidden" name="dept" value="{{ dp.id }}"><input type="hidden" name="action" value="na">
+        <input name="reason" required placeholder="Why not applicable? *" class="inp min-w-[220px] flex-1">
+        <button class="btn-s bg-slate-700 text-white">Mark N/A</button>
+    </form>
+    {% endif %}
+    {% if editing or is_admin and wo.status in 'ISSUED IN_PROGRESS' %}
+    <form x-show="edit" x-cloak method="post" action="{% url 'work_orders:item_update' wo.id it.id %}" class="ml-7 mt-1 flex flex-wrap items-center gap-2">{% csrf_token %}
+        <input type="hidden" name="dept" value="{{ dp.id }}">
+        <input name="text" value="{{ it.text }}" class="inp min-w-[200px] flex-1">
+        <select name="assigned_to" class="inp"><option value="">Whole team</option>{% for e in employees %}<option value="{{ e.id }}" {% if e.id == it.assigned_to_id %}selected{% endif %}>{{ e.full_name|default:e.email }}</option>{% endfor %}</select>
+        <input type="date" name="target_date" value="{{ it.target_date|date:'Y-m-d' }}" class="inp">
+        {% if it.kind == 'CHECK' %}<label class="flex items-center gap-1 text-xs"><input type="checkbox" name="file_required" value="1" {% if it.file_required %}checked{% endif %}>File required</label>{% endif %}
+        <button class="btn-s bg-slate-800 text-white">Save</button>
+        <button name="delete" value="1" class="btn-s border border-red-200 text-red-600" onclick="return confirm('Remove this item?')">Remove</button>
+    </form>
+    {% endif %}
+</div>

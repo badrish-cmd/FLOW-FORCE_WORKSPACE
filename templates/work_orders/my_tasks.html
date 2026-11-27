@@ -1,0 +1,59 @@
+{% extends 'base.html' %}
+{% block title %}My tasks - Work Orders{% endblock %}
+{% block content %}
+<style>[x-cloak]{display:none!important}
+.inp{border:1px solid #cbd5e1;border-radius:.4rem;padding:.3rem .5rem;font-size:.8rem}
+.btn-s{border-radius:.4rem;padding:.25rem .6rem;font-size:.75rem;font-weight:600}</style>
+<div class="mx-auto max-w-5xl">
+    <div class="mb-3"><h1 class="text-2xl font-bold text-gray-900">My tasks</h1>
+        <p class="text-sm text-slate-500">Open items on issued work orders that you can tick - assigned to you, your department's items, or as PIC. {{ total }} open.</p></div>
+    {% include 'work_orders/_nav.html' %}
+    {% for g in groups %}
+    <div class="mb-4 rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div class="flex flex-wrap items-center justify-between gap-2 rounded-t-xl bg-slate-50 px-4 py-2">
+            <a href="{% url 'work_orders:detail' g.wo.id %}" class="font-semibold text-blue-700">{{ g.wo.display_number }}</a>
+            <span class="text-sm text-slate-600">{{ g.wo.pid_label }} · {{ g.wo.customer_name }}</span>
+        </div>
+        <div class="divide-y divide-slate-100 px-4">
+            {% for st in g.stages %}
+            <div class="flex flex-wrap items-center gap-2 py-2 text-sm">
+                <span class="rounded bg-slate-800 px-1.5 text-[10px] font-semibold text-white">STAGE {{ st.number }}</span>
+                <span class="flex-1">{{ st.name }}</span>
+                <span class="text-xs {% if st.is_overdue %}font-semibold text-red-600{% else %}text-slate-500{% endif %}">{{ st.target_date|date:"d/m/Y"|default:"" }}</span>
+                {% if st.can_mark %}<form method="post" action="{% url 'work_orders:stage_done' g.wo.id st.id %}" onsubmit="return confirm('Mark stage {{ st.number }} as completed?')">{% csrf_token %}<button class="btn-s bg-emerald-600 text-white">Mark stage done</button></form>{% endif %}
+            </div>
+            {% endfor %}
+            {% for it in g.items %}
+            <div class="py-2 text-sm" x-data="{ open: false, na: false }">
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="rounded bg-slate-100 px-1.5 text-[10px] font-semibold text-slate-600">{{ it.dept_label|upper }}</span>
+                    {% if it.kind == 'CHECK' %}<span class="rounded bg-amber-50 px-1.5 text-[10px] font-semibold text-amber-700">CHECKLIST</span>{% endif %}
+                    <span class="flex-1">{{ it.text }}{% if it.file_required %} <i class="fas fa-paperclip text-[10px] text-slate-400" title="File required"></i>{% endif %}</span>
+                    {% if it.due_date %}<span class="text-xs {% if it.is_overdue %}font-semibold text-red-600{% else %}text-slate-500{% endif %}">{{ it.due_date|date:"d/m/Y" }}</span>{% endif %}
+                    {% if it.can_tick %}
+                        {% if it.kind == 'TASK' and not it.file_required %}
+                        <form method="post" action="{% url 'work_orders:item_tick' g.wo.id it.id %}">{% csrf_token %}<input type="hidden" name="next" value="my"><button class="btn-s bg-emerald-600 text-white"><i class="fas fa-check"></i> Done</button></form>
+                        {% else %}<button type="button" @click="open = !open; na = false" class="btn-s bg-emerald-600 text-white"><i class="fas fa-check"></i> Tick</button>{% endif %}
+                        <button type="button" @click="na = !na; open = false" class="btn-s border border-slate-300 text-slate-600">N/A</button>
+                    {% endif %}
+                </div>
+                <form x-show="open" x-cloak method="post" action="{% url 'work_orders:item_tick' g.wo.id it.id %}" enctype="multipart/form-data" class="mt-1 flex flex-wrap items-center gap-2">{% csrf_token %}
+                    <input type="hidden" name="next" value="my">
+                    <input name="doc_ref" {% if it.kind == 'CHECK' %}required placeholder="Document number *"{% else %}placeholder="Reference (optional)"{% endif %} class="inp">
+                    <input type="file" name="file" {% if it.file_required %}required{% endif %} class="text-xs">
+                    <button class="btn-s bg-emerald-600 text-white">Save tick</button>
+                </form>
+                <form x-show="na" x-cloak method="post" action="{% url 'work_orders:item_tick' g.wo.id it.id %}" class="mt-1 flex flex-wrap items-center gap-2">{% csrf_token %}
+                    <input type="hidden" name="next" value="my"><input type="hidden" name="action" value="na">
+                    <input name="reason" required placeholder="Why not applicable? *" class="inp min-w-[220px] flex-1">
+                    <button class="btn-s bg-slate-700 text-white">Mark N/A</button>
+                </form>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% empty %}
+    <div class="rounded-xl border border-slate-200 bg-white p-12 text-center text-slate-500"><i class="fas fa-check-double mb-2 block text-3xl text-emerald-300"></i>Nothing open for you right now.</div>
+    {% endfor %}
+</div>
+{% endblock %}
