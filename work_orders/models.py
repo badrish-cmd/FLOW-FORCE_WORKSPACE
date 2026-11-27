@@ -85,10 +85,14 @@ class Team(models.Model):
 class WorkOrderAccess(models.Model):
     """Admins and Super Admins always have full access. Assigned employees always see their own WOs."""
     LEVEL_VIEWER = "VIEWER"
+    LEVEL_WORKER = "WORKER"
+    LEVEL_SPEC = "SPEC_EDITOR"
     LEVEL_CREATOR = "CREATOR"
     LEVEL_CHOICES = [
         (LEVEL_VIEWER, "Viewer - sees all work orders"),
-        (LEVEL_CREATOR, "Creator - creates work orders and submits them to GM"),
+        (LEVEL_WORKER, "Worker - sees all and can tick items of any department (coordinator)"),
+        (LEVEL_SPEC, "Spec editor - Worker + fills and confirms the specification (page 2)"),
+        (LEVEL_CREATOR, "Creator - Spec editor + creates work orders and submits them to GM"),
     ]
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="work_order_access")
     level = models.CharField(max_length=20, choices=LEVEL_CHOICES)
@@ -134,13 +138,34 @@ class WorkOrder(models.Model):
         (STATUS_SENT_BACK, "Sent back"),
         (STATUS_ISSUED, "Approved & issued"),
         (STATUS_IN_PROGRESS, "In progress"),
-        (STATUS_DONE, "Done"),
+        (STATUS_DONE, "Completed - waiting for GM to close"),
         (STATUS_CLOSED, "Closed"),
         (STATUS_CANCELLED, "Cancelled"),
         (STATUS_REVISED, "Replaced by a revision"),
     ]
     EDITABLE = (STATUS_DRAFT, STATUS_SENT_BACK)
     ACTIVE = (STATUS_ISSUED, STATUS_IN_PROGRESS)
+
+    LAYOUT_TEAM = "TEAM"        # old: one work order per team (portrait PDF)
+    LAYOUT_PROJECT = "PROJECT"  # new: one work order per PID for all departments (landscape PDF, page 2 spec)
+    LAYOUT_CHOICES = [(LAYOUT_TEAM, "Per team (old)"), (LAYOUT_PROJECT, "Single work order")]
+    SPEC_PENDING = "PENDING"
+    SPEC_CONFIRMED = "CONFIRMED"
+    SPEC_CHOICES = [(SPEC_PENDING, "Pending confirmation"), (SPEC_CONFIRMED, "Confirmed")]
+
+    layout = models.CharField(max_length=10, choices=LAYOUT_CHOICES, default=LAYOUT_PROJECT, db_index=True)
+    wo_type = models.CharField(max_length=10, blank=True, help_text="Project / Supply / Service")
+    customer_contact = models.CharField(max_length=255, blank=True, help_text="Name - designation")
+    project_manager = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                        related_name="+")
+    spec_status = models.CharField(max_length=10, choices=SPEC_CHOICES, default=SPEC_PENDING)
+    spec_customer_by = models.CharField(max_length=255, blank=True, help_text="Customer person - designation")
+    spec_customer_date = models.DateField(null=True, blank=True)
+    spec_customer_method = models.CharField(max_length=120, blank=True, help_text="e.g. by email, MOM, signed drawing")
+    spec_confirmed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                          related_name="+")
+    spec_confirmed_at = models.DateTimeField(null=True, blank=True)
+    overdue_alerted_on = models.DateField(null=True, blank=True)
 
     number = models.CharField(max_length=60, unique=True, null=True, blank=True)
     base_number = models.CharField(max_length=60, blank=True, db_index=True)
@@ -165,7 +190,7 @@ class WorkOrder(models.Model):
     job_no = models.CharField(max_length=60, blank=True)
     delivery_method = models.CharField(max_length=120, blank=True)
 
-    team = models.ForeignKey(Team, on_delete=models.PROTECT, related_name="work_orders")
+    team = models.ForeignKey(Team, null=True, blank=True, on_delete=models.PROTECT, related_name="work_orders")
     assignees = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="assigned_work_orders", blank=True)
     title = models.CharField(max_length=255, blank=True, help_text="Short summary of the job")
     instructions = models.TextField(blank=True)
@@ -195,7 +220,20 @@ class WorkOrder(models.Model):
 
     @property
     def display_number(self):
-        return self.number or f"DRAFT-{self.pk or 'new'} ({self.pid_label} {self.team.code if self.team_id else ''})".strip()
+        if self.number:
+            return self.number
+        if self.is_project:
+            return f"DRAFT-{self.pk or 'new'} ({self.pid_label})"
+        return f"DRAFT-{self.pk or 'new'} ({self.pid_label} {self.team.code if self.team_id else ''})".strip()
+
+    @property
+    def is_project(self):
+        return self.layout == self.LAYOUT_PROJECT
+
+    @property
+    def type_label(self):
+        from .project_defaults import TYPE_NAMES
+        return TYPE_NAMES.get(self.wo_type, "")
 
     @property
     def pid_label(self):
@@ -300,3 +338,134 @@ class Event(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+# ------------------------------------------------------------------ single (landscape) work order
+
+class WOStage(models.Model):
+    """Project workflow stage on a single work order. The team marks it done by hand."""
+    work_order = models.ForeignKey(WorkOrder, on_delete=models.CASCADE, related_name="wo_stages")
+    position = models.PositiveIntegerField(default=0)
+    number = models.PositiveIntegerField(default=0)
+    name = models.CharField(max_length=255)
+    description = models.CharField(max_length=255, blank=True)
+    teams = models.JSONField(default=list, blank=True, help_text="Team codes responsible, e.g. ['ENG', 'WS']")
+    target_date = models.DateField(null=True, blank=True)
+    done = models.BooleanField(default=False)
+    done_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    done_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["position", "number", "id"]
+
+    @property
+    def teams_label(self):
+        return " / ".join(self.teams or [])
+
+    @property
+    def is_overdue(self):
+        return bool(self.target_date and not self.done and self.target_date < timezone.localdate())
+
+
+class WODepartment(models.Model):
+    """A department's block on the work order: person in charge (PIC), members, target, tasks and checklist."""
+    work_order = models.ForeignKey(WorkOrder, on_delete=models.CASCADE, related_name="departments")
+    team = models.ForeignKey(Team, on_delete=models.PROTECT, related_name="+")
+    position = models.PositiveIntegerField(default=0)
+    pic = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    members = models.ManyToManyField(settings.AUTH_USER_MODEL, blank=True, related_name="+")
+    target_date = models.DateField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["position", "id"]
+
+    def tasks(self):
+        return [i for i in self.items.all() if i.kind == WOItem.KIND_TASK]
+
+    def checks(self):
+        return [i for i in self.items.all() if i.kind == WOItem.KIND_CHECK]
+
+    @property
+    def is_complete(self):
+        return all(i.is_closed for i in self.items.all())
+
+
+class WOItem(models.Model):
+    KIND_TASK = "TASK"
+    KIND_CHECK = "CHECK"
+    KIND_CHOICES = [(KIND_TASK, "Task"), (KIND_CHECK, "Quality / document checklist")]
+    STATE_OPEN = "OPEN"
+    STATE_DONE = "DONE"
+    STATE_NA = "NA"
+    STATE_CHOICES = [(STATE_OPEN, "Open"), (STATE_DONE, "Done"), (STATE_NA, "N/A")]
+
+    department = models.ForeignKey(WODepartment, on_delete=models.CASCADE, related_name="items")
+    kind = models.CharField(max_length=10, choices=KIND_CHOICES, default=KIND_TASK)
+    position = models.PositiveIntegerField(default=0)
+    text = models.CharField(max_length=255)
+    assigned_to = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    target_date = models.DateField(null=True, blank=True)
+    file_required = models.BooleanField(default=False)
+    state = models.CharField(max_length=10, choices=STATE_CHOICES, default=STATE_OPEN, db_index=True)
+    doc_ref = models.CharField(max_length=255, blank=True)
+    attachment = models.ForeignKey("Attachment", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    na_reason = models.CharField(max_length=255, blank=True)
+    done_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    done_at = models.DateTimeField(null=True, blank=True)
+    added_after_issue = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["kind", "position", "id"]
+
+    @property
+    def work_order(self):
+        return self.department.work_order
+
+    @property
+    def is_check(self):
+        return self.kind == self.KIND_CHECK
+
+    @property
+    def doc_required(self):
+        return self.is_check
+
+    @property
+    def is_closed(self):
+        return self.state in (self.STATE_DONE, self.STATE_NA)
+
+    @property
+    def due_date(self):
+        return self.target_date or self.department.target_date
+
+    @property
+    def is_overdue(self):
+        d = self.due_date
+        return bool(d and self.state == self.STATE_OPEN and d < timezone.localdate())
+
+
+class SpecRow(models.Model):
+    """Page 2 - A: customer requirement vs final confirmed specification."""
+    work_order = models.ForeignKey(WorkOrder, on_delete=models.CASCADE, related_name="spec_rows")
+    position = models.PositiveIntegerField(default=0)
+    parameter = models.CharField(max_length=120)
+    requirement = models.TextField(blank=True)
+    final = models.TextField(blank=True)
+    changed = models.BooleanField(default=False)
+    reason = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ["position", "id"]
+
+
+class RefDoc(models.Model):
+    """Page 2 - B: reference documents."""
+    work_order = models.ForeignKey(WorkOrder, on_delete=models.CASCADE, related_name="ref_docs")
+    position = models.PositiveIntegerField(default=0)
+    document = models.CharField(max_length=255)
+    reference = models.CharField(max_length=255, blank=True)
+    revision = models.CharField(max_length=40, blank=True)
+    doc_date = models.DateField(null=True, blank=True)
+    source = models.CharField(max_length=120, blank=True)
+
+    class Meta:
+        ordering = ["position", "id"]

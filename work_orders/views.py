@@ -28,7 +28,8 @@ def _forbid(msg=NO_ACCESS):
 
 
 def _get(request, pk):
-    wo = get_object_or_404(WorkOrder.objects.select_related("team", "created_by", "approved_by", "parent"), pk=pk)
+    wo = get_object_or_404(WorkOrder.objects.select_related("team", "created_by", "approved_by", "parent",
+                                                            "project_manager", "spec_confirmed_by"), pk=pk)
     if not services.can_see(request.user, wo):
         raise Http404
     return wo
@@ -71,7 +72,7 @@ def wo_list(request):
         base = base.filter(Q(number__icontains=q) | Q(pid__icontains=q) | Q(customer_name__icontains=q) | Q(reference__icontains=q)
                            | Q(customer_po__icontains=q) | Q(job_no__icontains=q) | Q(title__icontains=q))
     if team:
-        base = base.filter(team__code=team)
+        base = base.filter(Q(team__code=team) | Q(departments__team__code=team))
     if mine:
         base = base.filter(assignees=request.user)
     counts = {r["status"]: r["n"] for r in base.values("status").annotate(n=Count("id", distinct=True))}
@@ -88,7 +89,7 @@ def wo_list(request):
         ("IN_REVIEW", "Waiting for approval", counts.get("IN_REVIEW", 0)),
         ("open", "Issued / in progress", counts.get("ISSUED", 0) + counts.get("IN_PROGRESS", 0)),
         ("overdue", "Overdue", base.filter(status__in=WorkOrder.ACTIVE, required_by__lt=timezone.localdate()).count()),
-        ("DONE", "Done", counts.get("DONE", 0)),
+        ("DONE", "Completed - waiting for GM", counts.get("DONE", 0)),
         ("CLOSED", "Closed", counts.get("CLOSED", 0)),
     ]
     page = Paginator(qs.distinct().order_by("-updated_at"), 50).get_page(request.GET.get("page"))
@@ -142,6 +143,7 @@ def _save(request, wo, template_prefill):
         return None
     wo.team = team
     if not wo.pk:
+        wo.layout = WorkOrder.LAYOUT_TEAM
         if request.POST.get("internal") == "1":
             wo.is_internal = True
             wo.pid = "INT"
@@ -181,6 +183,14 @@ def _save(request, wo, template_prefill):
 
 @login_required
 def wo_create(request):
+    """New work orders are single work orders (one per PID, all departments)."""
+    from . import project_views
+    return project_views.create(request)
+
+
+@login_required
+def legacy_create(request):
+    """Old per-team work order form (kept for reference; the menu creates single work orders)."""
     if not services.can_create(request.user):
         return _forbid("You don't have permission to create work orders.")
     if request.method == "POST":
@@ -222,6 +232,9 @@ def wo_create(request):
 @login_required
 def wo_edit(request, pk):
     wo = _get(request, pk)
+    if wo.is_project:
+        from . import project_views
+        return project_views.edit(request, pk)
     if not services.can_edit(request.user, wo):
         messages.error(request, "This work order can't be edited now.")
         return redirect("work_orders:detail", wo.pk)
@@ -234,6 +247,9 @@ def wo_edit(request, pk):
 @login_required
 def wo_detail(request, pk):
     wo = _get(request, pk)
+    if wo.is_project:
+        from . import project_views
+        return project_views.detail(request, wo)
     u = request.user
     return render(request, "work_orders/detail.html", _ctx(
         request, wo=wo, lines=wo.lines.all(), checklist=wo.checklist.select_related("done_by", "assigned_to"),
@@ -379,15 +395,14 @@ def attachment_file(request, pk, att_id):
 @login_required
 def wo_pdf(request, pk):
     wo = _get(request, pk)
-    if wo.number and wo.pdf and request.GET.get("fresh") != "1":
+    if wo.number and wo.pdf and request.GET.get("fresh") != "1" and not wo.is_project:  # single WO: always live ticks
         try:
             return FileResponse(wo.pdf.open("rb"), filename=f"{wo.number}.pdf", content_type="application/pdf")
         except FileNotFoundError:
             pass
-    from .pdf import render_pdf
-    data = render_pdf(wo)
+    data = services.render_any_pdf(wo)
     resp = HttpResponse(data, content_type="application/pdf")
-    name = wo.number or f"DRAFT-WO-{wo.pid}-{wo.team.code}"
+    name = wo.number or (f"DRAFT-WO-{wo.pid}" if wo.is_project else f"DRAFT-WO-{wo.pid}-{wo.team.code}")
     resp["Content-Disposition"] = f'inline; filename="{name}.pdf"'
     return resp
 
@@ -398,6 +413,11 @@ def team_access(request):
         return _forbid("Only Admins and Super Admins can manage access.")
     if request.method == "POST":
         target = get_object_or_404(User, pk=request.POST.get("user_id"))
+        if request.POST.get("set_designation") == "1":
+            target.designation = request.POST.get("designation", "").strip()[:120]
+            target.save(update_fields=["designation"])
+            messages.success(request, f"Designation saved for {target.full_name or target.email}.")
+            return redirect(reverse("work_orders:access") + (f"?q={request.POST.get('q')}" if request.POST.get("q") else ""))
         try:
             if services.set_access(target, request.POST.get("level", ""), request.user):
                 messages.success(request, f"Access updated for {target.full_name or target.email}.")

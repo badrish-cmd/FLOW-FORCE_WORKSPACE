@@ -1,0 +1,289 @@
+{% extends 'base.html' %}
+{% block title %}{{ wo.display_number }} - Work Orders{% endblock %}
+{% block content %}
+<style>[x-cloak]{display:none!important}
+.inp{border:1px solid #cbd5e1;border-radius:.4rem;padding:.3rem .5rem;font-size:.8rem}
+.btn-s{border-radius:.4rem;padding:.25rem .6rem;font-size:.75rem;font-weight:600}</style>
+<div class="mx-auto max-w-7xl">
+    <a href="{% url 'work_orders:list' %}" class="text-sm text-slate-500 hover:text-blue-600"><i class="fas fa-arrow-left mr-1"></i>Work Orders</a>
+    <div class="mb-4 mt-1 flex flex-wrap items-start justify-between gap-3">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">{% if wo.number %}{{ wo.number }}{% else %}Draft work order{% if wo.revision %} · Revision {{ wo.revision }} of {{ wo.parent.number }}{% endif %}{% endif %}</h1>
+            <div class="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-600">
+                {% include 'work_orders/_status.html' with status=wo.status %}
+                <span class="rounded bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-800">{{ wo.type_label|default:"Work order" }}</span>
+                {% if wo.is_internal %}<span><span class="rounded bg-slate-800 px-1.5 text-[10px] font-semibold text-white">INTERNAL</span> <b>{{ wo.reference }}</b></span>{% else %}<span>PID / JOB No. <b>{{ wo.pid }}</b> · {{ wo.customer_name }}</span>{% endif %}
+                {% if wo.spec_status == 'CONFIRMED' %}<span class="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">Spec confirmed</span>{% else %}<span class="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">Spec pending confirmation</span>{% endif %}
+                {% if wo.is_overdue %}<span class="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">Overdue</span>{% endif %}
+            </div>
+            {% if wo.title %}<div class="mt-1 text-sm text-slate-700">{{ wo.title }}</div>{% endif %}
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+            <a href="{% url 'work_orders:pdf' wo.id %}" target="_blank" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"><i class="fas fa-file-pdf mr-1 text-red-500"></i>{% if wo.number %}PDF (live ticks){% else %}Preview PDF{% endif %}</a>
+            {% if editing %}<a href="{% url 'work_orders:edit' wo.id %}" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"><i class="fas fa-pen mr-1"></i>Edit details & scope</a>{% endif %}
+            {% if can_submit %}<form method="post" action="{% url 'work_orders:submit' wo.id %}">{% csrf_token %}<button class="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"><i class="fas fa-paper-plane mr-1"></i>Send to GM</button></form>{% endif %}
+            {% if can_delete %}<form method="post" action="{% url 'work_orders:delete' wo.id %}" onsubmit="return confirm('Delete this draft work order and its files?')">{% csrf_token %}<button class="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50"><i class="fas fa-trash mr-1"></i>Delete draft</button></form>{% endif %}
+            {% if can_close %}<form method="post" action="{% url 'work_orders:status' wo.id %}" onsubmit="return confirm('Close this work order? Everything is ticked.')">{% csrf_token %}<input type="hidden" name="status" value="CLOSED"><button class="rounded-lg bg-slate-800 px-3 py-2 text-sm font-semibold text-white"><i class="fas fa-lock mr-1"></i>Close work order</button></form>{% endif %}
+            {% if can_revise %}<form method="post" action="{% url 'work_orders:revise' wo.id %}" onsubmit="return confirm('Edit = new revision R{{ wo.revision|add:1 }}. Ticks are kept and it goes to the GM again. Continue?')">{% csrf_token %}<button class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"><i class="fas fa-code-branch mr-1"></i>Edit (revision)</button></form>{% endif %}
+            {% if can_cancel %}<form method="post" action="{% url 'work_orders:status' wo.id %}" onsubmit="return confirm('Cancel this work order?')">{% csrf_token %}<input type="hidden" name="status" value="CANCELLED"><button class="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-600">Cancel</button></form>{% endif %}
+        </div>
+    </div>
+
+    {% if wo.status == 'SENT_BACK' and wo.gm_comment %}<div class="mb-4 rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm text-orange-900"><b>Sent back by GM:</b> {{ wo.gm_comment }}</div>{% endif %}
+    {% if wo.status == 'DONE' %}<div class="mb-4 rounded-xl border border-emerald-300 bg-emerald-50 p-4 text-sm text-emerald-900"><i class="fas fa-flag-checkered mr-1"></i><b>Completed.</b> Every stage and item is ticked - waiting for the GM to close the work order.</div>{% endif %}
+    {% if editing %}<div class="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900"><i class="fas fa-info-circle mr-1"></i>Draft: add or remove stages, departments, tasks and checklist points below. Pick a PIC for every department, then <b>Send to GM</b>.</div>{% endif %}
+
+    {% if can_decide %}
+    <div class="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4">
+        <div class="mb-2 font-semibold text-amber-900"><i class="fas fa-gavel mr-1"></i>Waiting for your approval</div>
+        <form method="post" class="flex flex-wrap items-start gap-2">{% csrf_token %}
+            <textarea name="comment" rows="2" placeholder="Comment (needed to send back)" class="min-w-[260px] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"></textarea>
+            <button formaction="{% url 'work_orders:approve' wo.id %}" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white"><i class="fas fa-check mr-1"></i>Approve & issue</button>
+            <button formaction="{% url 'work_orders:send_back' wo.id %}" class="rounded-lg border border-orange-400 bg-white px-4 py-2 text-sm font-semibold text-orange-700">Send back</button>
+        </form>
+    </div>
+    {% endif %}
+
+    {% if wo.status in 'ISSUED IN_PROGRESS DONE CLOSED' %}
+    <div class="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div class="mb-1 flex justify-between text-sm"><span class="font-semibold text-slate-800">Progress</span><span class="text-slate-600">{{ prog.closed }} of {{ prog.total }} ticked · {{ prog.pct }}%</span></div>
+        <div class="h-2.5 w-full rounded-full bg-slate-100"><div class="h-2.5 rounded-full {% if prog.pct == 100 %}bg-emerald-500{% else %}bg-blue-500{% endif %}" style="width: {{ prog.pct }}%"></div></div>
+        <div class="mt-1 text-xs text-slate-500">{{ prog.stages_open }} stage(s) and {{ prog.items_open }} item(s) open</div>
+    </div>
+    {% endif %}
+
+    <div class="grid gap-4 lg:grid-cols-4">
+    <div class="space-y-4 lg:col-span-3">
+
+    <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <dl class="grid grid-cols-2 gap-x-6 gap-y-3 text-sm md:grid-cols-4">
+            <div><dt class="text-xs text-slate-500">Customer PO No.</dt><dd>{{ wo.customer_po|default:"—" }}</dd></div>
+            <div><dt class="text-xs text-slate-500">Quotation / Enquiry</dt><dd>{{ wo.quotation_no|default:"—" }}</dd></div>
+            <div><dt class="text-xs text-slate-500">Sales Order</dt><dd>{{ wo.sales_order_no|default:"—" }}</dd></div>
+            <div><dt class="text-xs text-slate-500">Customer contact</dt><dd>{{ wo.customer_contact|default:"—" }}</dd></div>
+            <div><dt class="text-xs text-slate-500">PO date</dt><dd>{{ wo.order_date|date:"M j, Y"|default:"—" }}</dd></div>
+            <div><dt class="text-xs text-slate-500">Required by</dt><dd class="{% if wo.is_overdue %}font-semibold text-red-600{% endif %}">{{ wo.required_by|date:"M j, Y"|default:"—" }}</dd></div>
+            <div><dt class="text-xs text-slate-500">Delivery method</dt><dd>{{ wo.delivery_method|default:"—" }}</dd></div>
+            <div><dt class="text-xs text-slate-500">Project manager</dt><dd>{{ wo.project_manager.full_name|default:"—" }}</dd></div>
+            <div class="col-span-2"><dt class="text-xs text-slate-500">Invoice address</dt><dd class="whitespace-pre-wrap text-xs">{{ wo.invoice_address|default:"—" }}</dd></div>
+            <div class="col-span-2"><dt class="text-xs text-slate-500">Delivery address</dt><dd class="whitespace-pre-wrap text-xs">{{ wo.delivery_address|default:"—" }}</dd></div>
+        </dl>
+    </div>
+
+    <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 class="mb-2 font-semibold text-slate-900">1. Scope of work / items</h2>
+        <table class="min-w-full text-sm"><thead class="bg-slate-700 text-left text-xs text-white"><tr><th class="px-2 py-1.5">#</th><th class="px-2 py-1.5">Item & Description</th><th class="px-2 py-1.5 text-right">Qty</th><th class="px-2 py-1.5">Unit</th></tr></thead>
+        <tbody class="divide-y divide-slate-100">{% for l in lines %}<tr><td class="px-2 py-1.5 text-slate-400">{{ forloop.counter }}</td><td class="whitespace-pre-wrap px-2 py-1.5">{{ l.description }}</td><td class="px-2 py-1.5 text-right">{{ l.qty|default_if_none:""|floatformat:"-3" }}</td><td class="px-2 py-1.5">{{ l.unit }}</td></tr>{% empty %}<tr><td colspan="4" class="px-2 py-3 text-slate-500">No items yet{% if editing %} - add them with "Edit details & scope"{% endif %}.</td></tr>{% endfor %}</tbody></table>
+    </div>
+
+    <!-- 2. WORKFLOW -->
+    <div id="workflow" class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div class="mb-2 flex items-center justify-between"><h2 class="font-semibold text-slate-900">2. Project workflow</h2><span class="text-xs text-slate-500">The responsible team marks its stage done.</span></div>
+        <div class="divide-y divide-slate-100">
+        {% for st in stages %}
+        <div class="flex flex-wrap items-center gap-3 py-2" x-data="{ edit: false }">
+            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded border {% if st.done %}border-emerald-600 bg-emerald-600 text-white{% else %}border-slate-300{% endif %}">{% if st.done %}<i class="fas fa-check text-xs"></i>{% else %}<span class="text-xs text-slate-500">{{ st.number }}</span>{% endif %}</span>
+            <div class="min-w-[220px] flex-1" x-show="!edit">
+                <div class="text-sm font-semibold {% if st.done %}text-slate-500{% else %}text-slate-900{% endif %}">{{ st.number }}. {{ st.name }}</div>
+                <div class="text-xs text-slate-500">{{ st.description }}</div>
+                {% if st.done %}<div class="text-[11px] text-emerald-700">Done by {{ st.done_by.full_name|default:"—" }} · {{ st.done_at|date:"M j, Y H:i" }}</div>{% endif %}
+            </div>
+            <span x-show="!edit" class="w-28 text-xs font-semibold text-slate-600">{{ st.teams_label|default:"—" }}</span>
+            <span x-show="!edit" class="w-24 text-xs {% if st.is_overdue %}font-semibold text-red-600{% else %}text-slate-600{% endif %}">{{ st.target_date|date:"d/m/Y"|default:"no target" }}</span>
+            <div x-show="!edit" class="flex w-40 justify-end gap-1">
+                {% if st.can_mark %}<form method="post" action="{% url 'work_orders:stage_done' wo.id st.id %}" onsubmit="return confirm('Mark stage {{ st.number }} as completed?')">{% csrf_token %}<button class="btn-s bg-emerald-600 text-white"><i class="fas fa-check mr-1"></i>Mark done</button></form>{% endif %}
+                {% if st.done and is_admin and wo.status in 'ISSUED IN_PROGRESS DONE' %}<form method="post" action="{% url 'work_orders:stage_done' wo.id st.id %}" onsubmit="return confirm('Untick this stage?')">{% csrf_token %}<input type="hidden" name="reopen" value="1"><button class="btn-s border border-slate-300 text-slate-600">Untick</button></form>{% endif %}
+                {% if editing %}<button type="button" @click="edit = true" class="btn-s border border-slate-300 text-slate-600"><i class="fas fa-pen"></i></button>{% endif %}
+            </div>
+            {% if editing %}
+            <form x-show="edit" x-cloak method="post" action="{% url 'work_orders:stage_update' wo.id st.id %}" class="flex flex-1 flex-wrap items-center gap-2">{% csrf_token %}
+                <input name="name" value="{{ st.name }}" class="inp min-w-[200px] flex-1">
+                <input name="description" value="{{ st.description }}" class="inp min-w-[220px] flex-1">
+                <span class="flex flex-wrap gap-1 text-xs">{% for t in all_teams %}<label class="flex items-center gap-0.5"><input type="checkbox" name="teams" value="{{ t.code }}" {% if t.code in st.teams %}checked{% endif %}>{{ t.code }}</label>{% endfor %}</span>
+                <input type="date" name="target_date" value="{{ st.target_date|date:'Y-m-d' }}" class="inp">
+                <button class="btn-s bg-slate-800 text-white">Save</button>
+                <button name="delete" value="1" class="btn-s border border-red-200 text-red-600" onclick="return confirm('Remove this stage?')">Remove</button>
+                <button type="button" @click="edit = false" class="text-xs text-slate-500">Cancel</button>
+            </form>
+            {% endif %}
+        </div>
+        {% empty %}<p class="py-2 text-sm text-slate-500">No stages.</p>{% endfor %}
+        </div>
+        {% if editing %}
+        <form method="post" action="{% url 'work_orders:stage_add' wo.id %}" class="mt-2 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">{% csrf_token %}
+            <input name="name" required placeholder="New stage name" class="inp min-w-[200px] flex-1">
+            <input name="description" placeholder="Description" class="inp min-w-[200px] flex-1">
+            <span class="flex flex-wrap gap-1 text-xs">{% for t in all_teams %}<label class="flex items-center gap-0.5"><input type="checkbox" name="teams" value="{{ t.code }}">{{ t.code }}</label>{% endfor %}</span>
+            <input type="date" name="target_date" class="inp">
+            <button class="btn-s bg-blue-600 text-white"><i class="fas fa-plus mr-1"></i>Add stage</button>
+        </form>
+        {% endif %}
+    </div>
+
+    <!-- 3. DEPARTMENTS -->
+    <div id="departments" class="space-y-3">
+        <div class="flex items-center justify-between"><h2 class="font-semibold text-slate-900">3. Departments - tasks & quality / documents checklist</h2>
+            <span class="text-xs text-slate-500">Checklist points need the document number when ticked{% if editing %}; <i class="fas fa-paperclip"></i> = file required{% endif %}.</span></div>
+        {% for dp in depts %}
+        <div id="dept-{{ dp.id }}" class="rounded-xl border border-slate-200 bg-white shadow-sm" x-data="{ edit: false }">
+            <div class="flex flex-wrap items-center justify-between gap-2 rounded-t-xl bg-slate-50 px-4 py-2">
+                <div class="text-sm"><span class="font-bold uppercase text-slate-800">{{ dp.label }}</span>
+                    <span class="ml-2 text-slate-600">PIC: {% if dp.pic %}<b>{{ dp.pic.full_name|default:dp.pic.email }}</b>{% if dp.pic.designation %} - {{ dp.pic.designation }}{% endif %}{% else %}<span class="font-semibold text-red-600">not set</span>{% endif %}</span>
+                    {% for m in dp.members.all %}{% if m.id != dp.pic_id %}<span class="ml-1 rounded-full bg-blue-50 px-2 text-xs text-blue-800">{{ m.full_name|default:m.email }}</span>{% endif %}{% endfor %}
+                    <span class="ml-2 text-xs text-slate-500">Target: {{ dp.target_date|date:"d/m/Y"|default:"—" }}</span>
+                    {% if dp.all_items and dp.is_complete %}<span class="ml-2 rounded-full bg-emerald-100 px-2 text-xs font-semibold text-emerald-700">Done</span>{% endif %}
+                </div>
+                {% if editing %}<button type="button" @click="edit = !edit" class="btn-s border border-slate-300 bg-white text-slate-600"><i class="fas fa-user-edit mr-1"></i>PIC / team / target</button>{% endif %}
+            </div>
+            {% if editing %}
+            <form x-show="edit" x-cloak method="post" action="{% url 'work_orders:dept_update' wo.id dp.id %}" class="space-y-2 border-b border-slate-100 px-4 py-3">{% csrf_token %}
+                <div class="flex flex-wrap items-center gap-2 text-sm">
+                    <label>PIC <select name="pic" class="inp"><option value="">—</option>{% for e in employees %}<option value="{{ e.id }}" {% if e.id == dp.pic_id %}selected{% endif %}>{{ e.full_name|default:e.email }}{% if e.designation %} - {{ e.designation }}{% endif %}</option>{% endfor %}</select></label>
+                    <label>Target <input type="date" name="target_date" value="{{ dp.target_date|date:'Y-m-d' }}" class="inp"></label>
+                </div>
+                <div class="text-xs text-slate-500">Team members (they can tick this department's items that are not assigned to someone):</div>
+                <div class="grid max-h-40 gap-1 overflow-y-auto rounded border border-slate-200 p-2 sm:grid-cols-3">{% for e in employees %}<label class="flex items-center gap-1 text-xs"><input type="checkbox" name="members" value="{{ e.id }}" {% if e in dp.members.all %}checked{% endif %}>{{ e.full_name|default:e.email }}</label>{% endfor %}</div>
+                <div class="flex gap-2"><button class="btn-s bg-slate-800 text-white">Save</button>
+                    <button name="delete" value="1" class="btn-s border border-red-200 text-red-600" onclick="return confirm('Remove {{ dp.label }} and all its items from this work order?')">Remove department</button></div>
+            </form>
+            {% endif %}
+            <div class="grid gap-0 md:grid-cols-2 md:divide-x divide-slate-100">
+                <div class="p-3">
+                    <div class="mb-1 text-xs font-semibold uppercase text-slate-500">Tasks</div>
+                    {% for it in dp.all_items %}{% if it.kind == 'TASK' %}{% include 'work_orders/_project_item.html' %}{% endif %}{% endfor %}
+                </div>
+                <div class="p-3">
+                    <div class="mb-1 text-xs font-semibold uppercase text-slate-500">Quality & documents checklist</div>
+                    {% for it in dp.all_items %}{% if it.kind == 'CHECK' %}{% include 'work_orders/_project_item.html' %}{% endif %}{% endfor %}
+                </div>
+            </div>
+            {% if dp.can_add %}
+            <form method="post" action="{% url 'work_orders:item_add' wo.id dp.id %}" class="flex flex-wrap items-center gap-2 border-t border-slate-100 px-4 py-2">{% csrf_token %}
+                <select name="kind" class="inp"><option value="TASK">Task</option><option value="CHECK">Checklist point</option></select>
+                <input name="text" required placeholder="{% if editing %}Add a task or checklist point{% else %}More work came up? Add it here{% endif %}" class="inp min-w-[220px] flex-1">
+                <select name="assigned_to" class="inp"><option value="">Assigned to: whole team</option>{% for e in employees %}<option value="{{ e.id }}">{{ e.full_name|default:e.email }}</option>{% endfor %}</select>
+                <input type="date" name="target_date" class="inp" title="Target (optional)">
+                <label class="flex items-center gap-1 text-xs"><input type="checkbox" name="file_required" value="1">File required</label>
+                <button class="btn-s bg-blue-600 text-white"><i class="fas fa-plus mr-1"></i>Add</button>
+            </form>
+            {% endif %}
+        </div>
+        {% empty %}<p class="text-sm text-slate-500">No departments.</p>{% endfor %}
+        {% if editing and free_teams %}
+        <form method="post" action="{% url 'work_orders:dept_add' wo.id %}" class="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-white p-3">{% csrf_token %}
+            <span class="text-sm text-slate-600">Add department</span>
+            <select name="team_id" class="inp">{% for t in free_teams %}<option value="{{ t.id }}">{% for k, v in dept_labels.items %}{% if k == t.code %}{{ v }}{% endif %}{% endfor %} ({{ t.code }})</option>{% endfor %}</select>
+            <button class="btn-s bg-blue-600 text-white"><i class="fas fa-plus mr-1"></i>Add</button>
+        </form>
+        {% endif %}
+    </div>
+
+    <!-- PAGE 2: SPECIFICATION -->
+    <div id="spec" class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div class="mb-2 flex flex-wrap items-center justify-between gap-2"><h2 class="font-semibold text-slate-900">Page 2 - Customer requirement vs final confirmed specification</h2>
+            {% if wo.spec_status == 'CONFIRMED' %}<span class="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">Confirmed · changes only by revision</span>{% else %}<span class="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">Pending confirmation</span>{% endif %}</div>
+        {% if can_spec %}
+        <form method="post" action="{% url 'work_orders:spec_save' wo.id %}" id="spec-form">{% csrf_token %}
+            <table class="min-w-full text-xs" id="spec-rows"><thead class="bg-slate-600 text-left text-white"><tr><th class="px-1 py-1">Item / parameter</th><th class="px-1 py-1">Customer requirement (enquiry / PO)</th><th class="px-1 py-1">Final specification confirmed</th><th class="px-1 py-1">Changed</th><th class="px-1 py-1">Reason / remarks</th><th></th></tr></thead>
+            <tbody>{% for r in spec_rows %}<tr class="align-top"><td class="p-1"><input name="spec_parameter" value="{{ r.parameter }}" class="inp w-full"></td><td class="p-1"><textarea name="spec_requirement" rows="1" class="inp w-full">{{ r.requirement }}</textarea></td><td class="p-1"><textarea name="spec_final" rows="1" class="inp w-full bg-emerald-50">{{ r.final }}</textarea></td><td class="p-1 text-center"><input type="checkbox" class="chg" {% if r.changed %}checked{% endif %}></td><td class="p-1"><input name="spec_reason" value="{{ r.reason }}" class="inp w-full"></td><td class="p-1"><button type="button" class="del-row text-slate-400 hover:text-red-600"><i class="fas fa-times"></i></button></td></tr>{% endfor %}</tbody></table>
+            <template id="spec-tpl"><tr class="align-top"><td class="p-1"><input name="spec_parameter" class="inp w-full"></td><td class="p-1"><textarea name="spec_requirement" rows="1" class="inp w-full"></textarea></td><td class="p-1"><textarea name="spec_final" rows="1" class="inp w-full bg-emerald-50"></textarea></td><td class="p-1 text-center"><input type="checkbox" class="chg"></td><td class="p-1"><input name="spec_reason" class="inp w-full"></td><td class="p-1"><button type="button" class="del-row text-slate-400 hover:text-red-600"><i class="fas fa-times"></i></button></td></tr></template>
+            <button type="button" data-add="spec" class="mt-1 btn-s border border-slate-300 text-slate-600"><i class="fas fa-plus mr-1"></i>Row</button>
+            <h3 class="mb-1 mt-4 text-sm font-semibold text-slate-800">Reference documents</h3>
+            <table class="min-w-full text-xs" id="doc-rows"><thead class="bg-slate-600 text-left text-white"><tr><th class="px-1 py-1">Document</th><th class="px-1 py-1">Number / reference</th><th class="px-1 py-1">Revision</th><th class="px-1 py-1">Date</th><th class="px-1 py-1">From</th><th></th></tr></thead>
+            <tbody>{% for r in ref_docs %}<tr><td class="p-1"><input name="doc_document" value="{{ r.document }}" class="inp w-full"></td><td class="p-1"><input name="doc_reference" value="{{ r.reference }}" class="inp w-full"></td><td class="p-1"><input name="doc_revision" value="{{ r.revision }}" class="inp w-20"></td><td class="p-1"><input type="date" name="doc_date" value="{{ r.doc_date|date:'Y-m-d' }}" class="inp"></td><td class="p-1"><input name="doc_source" value="{{ r.source }}" class="inp w-full"></td><td class="p-1"><button type="button" class="del-row text-slate-400 hover:text-red-600"><i class="fas fa-times"></i></button></td></tr>{% endfor %}</tbody></table>
+            <template id="doc-tpl"><tr><td class="p-1"><input name="doc_document" class="inp w-full"></td><td class="p-1"><input name="doc_reference" class="inp w-full"></td><td class="p-1"><input name="doc_revision" class="inp w-20"></td><td class="p-1"><input type="date" name="doc_date" class="inp"></td><td class="p-1"><input name="doc_source" class="inp w-full"></td><td class="p-1"><button type="button" class="del-row text-slate-400 hover:text-red-600"><i class="fas fa-times"></i></button></td></tr></template>
+            <button type="button" data-add="doc" class="mt-1 btn-s border border-slate-300 text-slate-600"><i class="fas fa-plus mr-1"></i>Document</button>
+            <div class="mt-3 text-right"><button class="rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white">Save specification</button></div>
+        </form>
+        {% else %}
+        <table class="min-w-full text-xs"><thead class="bg-slate-600 text-left text-white"><tr><th class="px-2 py-1">#</th><th class="px-2 py-1">Item / parameter</th><th class="px-2 py-1">Customer requirement</th><th class="px-2 py-1">Final specification confirmed</th><th class="px-2 py-1">Changed</th><th class="px-2 py-1">Reason / remarks</th></tr></thead>
+        <tbody class="divide-y divide-slate-100">{% for r in spec_rows %}<tr><td class="px-2 py-1 text-slate-400">{{ forloop.counter }}</td><td class="px-2 py-1 font-semibold">{{ r.parameter }}</td><td class="whitespace-pre-wrap px-2 py-1">{{ r.requirement|default:"—" }}</td><td class="whitespace-pre-wrap bg-emerald-50 px-2 py-1 font-semibold">{{ r.final|default:"Pending" }}</td><td class="px-2 py-1">{% if r.changed %}<i class="fas fa-check text-emerald-600"></i>{% endif %}</td><td class="px-2 py-1 text-slate-500">{{ r.reason }}</td></tr>{% empty %}<tr><td colspan="6" class="px-2 py-2 text-slate-500">No specification rows.</td></tr>{% endfor %}</tbody></table>
+        {% if ref_docs %}<h3 class="mb-1 mt-3 text-sm font-semibold text-slate-800">Reference documents</h3>
+        <ul class="text-xs text-slate-700">{% for r in ref_docs %}<li>{{ r.document }} · <b>{{ r.reference }}</b> {{ r.revision }} · {{ r.doc_date|date:"d/m/Y" }} · {{ r.source }}</li>{% endfor %}</ul>{% endif %}
+        {% endif %}
+        {% if wo.spec_status == 'CONFIRMED' %}
+        <div class="mt-3 rounded-lg bg-emerald-50 p-3 text-xs text-emerald-900">Confirmed by customer: <b>{{ wo.spec_customer_by }}</b> · {{ wo.spec_customer_date|date:"d/m/Y" }}{% if wo.spec_customer_method %} · {{ wo.spec_customer_method }}{% endif %} &nbsp;|&nbsp; Confirmed by Flow Force: <b>{{ wo.spec_confirmed_by.full_name }}</b> · {{ wo.spec_confirmed_at|date:"d/m/Y" }}</div>
+        {% elif can_confirm %}
+        <form method="post" action="{% url 'work_orders:spec_confirm' wo.id %}" class="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm" onsubmit="return confirm('Confirm the final specification? After this, changes are made only by revision.')">{% csrf_token %}
+            <span class="font-semibold text-amber-900">Confirm specification:</span>
+            <input name="customer_by" required placeholder="Confirmed by customer (name - designation)" class="inp min-w-[240px] flex-1">
+            <input type="date" name="customer_date" required class="inp">
+            <input name="method" placeholder="by email / MOM / signed drawing" class="inp">
+            <button class="btn-s bg-emerald-600 text-white"><i class="fas fa-check mr-1"></i>Confirm</button>
+        </form>
+        {% endif %}
+    </div>
+
+    {% if wo.instructions or wo.notes %}
+    <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        {% if wo.instructions %}<h2 class="mb-1 font-semibold text-slate-900">Scope & instructions</h2><div class="mb-3 whitespace-pre-wrap text-sm">{{ wo.instructions }}</div>{% endif %}
+        {% if wo.notes %}<h2 class="mb-1 font-semibold text-slate-900">Notes</h2><div class="whitespace-pre-wrap text-sm">{{ wo.notes }}</div>{% endif %}
+    </div>
+    {% endif %}
+
+    <div id="files" class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 class="mb-2 font-semibold text-slate-900">Files</h2>
+        <div class="grid gap-2 sm:grid-cols-3">
+        {% for a in attachments %}
+            <div class="rounded-lg border border-slate-200 p-2 text-xs">
+                <a href="{% url 'work_orders:file' wo.id a.id %}?download=1" class="block truncate font-semibold text-blue-700" title="{{ a.filename }}">{{ a.filename }}</a>
+                <div class="text-slate-500">{{ a.caption }}{% if a.by_assignee %} · from team{% endif %}</div>
+                {% if editing and not a.by_assignee %}<form method="post" action="{% url 'work_orders:file_update' wo.id a.id %}">{% csrf_token %}<input type="hidden" name="caption" value="{{ a.caption }}"><button name="delete" value="1" class="text-red-600" onclick="return confirm('Remove this file?')">Remove</button></form>{% endif %}
+            </div>
+        {% empty %}<p class="text-sm text-slate-500">No files.</p>{% endfor %}
+        </div>
+    </div>
+
+    {% if wo.status in 'ISSUED IN_PROGRESS DONE CLOSED' %}
+    <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 class="mb-2 font-semibold text-slate-900">Progress notes & photos</h2>
+        {% for n in notes_list %}<div class="mb-2 rounded-lg bg-slate-50 p-2 text-sm"><div class="text-xs text-slate-500"><b class="text-slate-700">{{ n.author.full_name|default:"—" }}</b> · {{ n.created_at|date:"M j, Y H:i" }}</div><div class="whitespace-pre-wrap">{{ n.text }}</div></div>{% empty %}<p class="mb-2 text-sm text-slate-500">No progress notes yet.</p>{% endfor %}
+        {% if can_work %}
+        <form method="post" action="{% url 'work_orders:progress' wo.id %}" enctype="multipart/form-data" class="mt-2 space-y-2">{% csrf_token %}
+            <textarea name="text" rows="2" placeholder="Progress note" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"></textarea>
+            <div class="flex items-center justify-between gap-2"><input type="file" name="files" multiple class="text-sm"><button class="rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white">Add</button></div>
+        </form>
+        {% endif %}
+    </div>
+    {% endif %}
+    </div>
+
+    <div class="space-y-4">
+        <div class="rounded-xl border border-slate-200 bg-white p-5 text-sm shadow-sm">
+            <h2 class="mb-2 font-semibold text-slate-900">Work order</h2>
+            <dl class="space-y-2">
+                <div><dt class="text-xs text-slate-500">Number</dt><dd class="font-semibold">{{ wo.number|default:"Given when GM approves" }}</dd></div>
+                <div><dt class="text-xs text-slate-500">Prepared by</dt><dd>{{ wo.created_by.full_name|default:"—" }} · {{ wo.created_at|date:"M j, Y" }}</dd></div>
+                {% if wo.approved_by %}<div><dt class="text-xs text-slate-500">Approved by</dt><dd>{{ wo.approved_by.full_name }} · {{ wo.approved_at|date:"M j, Y H:i" }}</dd></div>{% endif %}
+                {% if wo.closed_at %}<div><dt class="text-xs text-slate-500">Closed</dt><dd>{{ wo.closed_at|date:"M j, Y H:i" }}</dd></div>{% endif %}
+                {% if wo.parent %}<div><dt class="text-xs text-slate-500">Revision of</dt><dd><a class="text-blue-700" href="{% url 'work_orders:detail' wo.parent.id %}">{{ wo.parent.number }}</a></dd></div>{% endif %}
+                {% for r in revisions %}<div><dt class="text-xs text-slate-500">Revision</dt><dd><a class="text-blue-700" href="{% url 'work_orders:detail' r.id %}">{{ r.display_number }}</a> {% include 'work_orders/_status.html' with status=r.status %}</dd></div>{% endfor %}
+            </dl>
+        </div>
+        <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="mb-2 font-semibold text-slate-900">History</h2>
+            <ul class="max-h-[600px] space-y-2 overflow-y-auto text-xs">{% for e in events %}<li><b class="text-slate-700">{% if e.user %}{{ e.user.full_name|default:e.user.email }}{% else %}System{% endif %}</b> <span class="text-slate-600">{{ e.message }}</span><div class="text-slate-400">{{ e.created_at|date:"M j, Y H:i" }}</div></li>{% empty %}<li class="text-slate-500">—</li>{% endfor %}</ul>
+        </div>
+    </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+(function () {
+    var f = document.getElementById('spec-form'); if (!f) return;
+    f.addEventListener('click', function (e) {
+        var b = e.target.closest('.del-row'); if (b) { b.closest('tr').remove(); return; }
+        var a = e.target.closest('[data-add]'); if (!a) return;
+        var k = a.getAttribute('data-add');
+        document.querySelector('#' + k + '-rows tbody').appendChild(document.getElementById(k + '-tpl').content.cloneNode(true));
+    });
+    f.addEventListener('submit', function () {   // "Changed" boxes -> row index
+        f.querySelectorAll('input[name=spec_changed]').forEach(function (x) { x.remove(); });
+        f.querySelectorAll('#spec-rows tbody tr').forEach(function (tr, i) {
+            if (tr.querySelector('.chg').checked) { var h = document.createElement('input'); h.type = 'hidden'; h.name = 'spec_changed'; h.value = i; f.appendChild(h); }
+        });
+    });
+})();
+</script>
+{% endblock %}

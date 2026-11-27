@@ -4,7 +4,7 @@
 <div class="mx-auto max-w-6xl">
     <div class="mb-4">
         <h1 class="text-2xl font-bold text-gray-900">Team Access · Work Orders</h1>
-        <p class="text-sm text-slate-500"><b>Viewer</b>: sees all work orders. <b>Creator</b>: creates work orders and sends them to GM for approval. Employees picked on a work order always see their own work orders. GM (Super Admin) approves. Admins and Super Admins always have full access.</p>
+        <p class="text-sm text-slate-500"><b>Viewer</b>: sees all work orders (read only). <b>Worker</b>: sees all and can tick items / stages of any department (coordinator). <b>Spec editor</b>: Worker + fills and confirms the specification (page 2). <b>Creator</b>: Spec editor + creates work orders and sends them to GM for approval. Employees named on a work order (PIC, team, assigned) always see it and tick their own items without any access level. Employees picked on a work order always see their own work orders. GM (Super Admin) approves. Admins and Super Admins always have full access.</p>
     </div>
     {% with nav='access' %}{% include 'work_orders/_nav.html' %}{% endwith %}
 
@@ -19,12 +19,13 @@
     <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
         <table class="min-w-full divide-y divide-slate-200 text-sm">
             <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                <tr><th class="px-4 py-3">Employee</th><th class="px-4 py-3">Role</th><th class="px-4 py-3">Access</th><th class="px-4 py-3">Last changed</th></tr>
+                <tr><th class="px-4 py-3">Employee</th><th class="px-4 py-3">Designation (printed on work orders)</th><th class="px-4 py-3">Role</th><th class="px-4 py-3">Access</th><th class="px-4 py-3">Last changed</th></tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
                 {% for r in rows %}
                 <tr>
                     <td class="px-4 py-3"><div class="font-semibold text-slate-900">{{ r.user.full_name|default:r.user.email }}</div><div class="text-xs text-slate-500">{{ r.user.email }}</div></td>
+                    <td class="px-4 py-3"><form method="post" class="flex items-center gap-1">{% csrf_token %}<input type="hidden" name="user_id" value="{{ r.user.id }}"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="set_designation" value="1"><input name="designation" value="{{ r.user.designation }}" placeholder="e.g. Engineering Manager" class="w-48 rounded-lg border border-slate-300 px-2 py-1 text-xs"><button class="rounded bg-slate-100 px-2 py-1 text-xs text-slate-700" title="Save designation"><i class="fas fa-save"></i></button></form></td>
                     <td class="px-4 py-3 text-xs text-slate-600">{{ r.user.get_role_display|default:r.user.role }}</td>
                     <td class="px-4 py-3">
                         {% if r.admin %}
@@ -33,9 +34,11 @@
                         <form method="post" class="flex items-center gap-2">
                             {% csrf_token %}
                             <input type="hidden" name="user_id" value="{{ r.user.id }}"><input type="hidden" name="q" value="{{ q }}">
-                            <select name="level" class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm {% if r.level == 'CREATOR' %}bg-indigo-50{% elif r.level == 'VIEWER' %}bg-emerald-50{% endif %}">
+                            <select name="level" class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm {% if r.level == 'CREATOR' %}bg-indigo-50{% elif r.level %}bg-emerald-50{% endif %}">
                                 <option value="" {% if not r.level %}selected{% endif %}>No access</option>
                                 <option value="VIEWER" {% if r.level == 'VIEWER' %}selected{% endif %}>Viewer</option>
+                                <option value="WORKER" {% if r.level == 'WORKER' %}selected{% endif %}>Worker</option>
+                                <option value="SPEC_EDITOR" {% if r.level == 'SPEC_EDITOR' %}selected{% endif %}>Spec editor</option>
                                 <option value="CREATOR" {% if r.level == 'CREATOR' %}selected{% endif %}>Creator</option>
                             </select>
                             <button class="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700">Save</button>

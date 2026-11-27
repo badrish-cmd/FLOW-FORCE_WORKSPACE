@@ -304,6 +304,7 @@ SITE_URL = os.getenv('SITE_URL', 'https://flowforceworkspace.cloud')
 
 # Vendor Enquiry Tracker emails (comma separated)
 VENDOR_ENQUIRY_UPLOAD_EMAILS = [e.strip() for e in os.getenv('VENDOR_ENQUIRY_UPLOAD_EMAILS', 'umapathi@flow-force.com').split(',') if e.strip()]
+WORK_ORDER_TICK_EMAILS = [e.strip() for e in os.getenv('WORK_ORDER_TICK_EMAILS', 'automation@flow-force.com,operations@flow-force.com').split(',') if e.strip()]
 VENDOR_ENQUIRY_REMARK_EMAILS = [e.strip() for e in os.getenv('VENDOR_ENQUIRY_REMARK_EMAILS', 'automation@flow-force.com').split(',') if e.strip()]
 VENDOR_QUOTE_APPROVED_EXTRA_EMAILS = [e.strip() for e in os.getenv('VENDOR_QUOTE_APPROVED_EXTRA_EMAILS', 'sourcing@flow-force.com,automation@flow-force.com').split(',') if e.strip()]
 
@@ -415,6 +416,10 @@ CELERY_BEAT_SCHEDULE = {
     'scan-synology-ticket-folders': {
         'task': 'tickets.tasks.scan_synology_ticket_folders',
         'schedule': crontab(minute=f'*/{TICKETS_NAS_SCAN_MINUTES}'),  # Every N minutes
+    },
+    'work-orders-overdue-alerts': {
+        'task': 'work_orders.tasks.send_overdue_alerts',
+        'schedule': crontab(hour=9, minute=5),  # 09:05 AM daily
     },
     'check-expiring-warranties-daily': {
         'task': 'tickets.tasks.check_expiring_warranties_daily',
